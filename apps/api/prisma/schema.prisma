@@ -52,6 +52,7 @@ model User {
   sessions              Session[]
   crewMemberships       CrewMember[]
   crewMessages          CrewMessage[]
+  messageReactions      MessageReaction[]
   calendarConnections   CalendarConnection[]
   availabilityWindows   AvailabilityWindow[]
   planMemberships       PlanMember[]
@@ -329,7 +330,26 @@ model CrewMessage {
   body      String
   createdAt DateTime @default(now())
 
+  reactions MessageReaction[]
+
   @@index([crewId, createdAt])
+}
+
+/// One reaction per user per message — tapping a different emoji replaces it, tapping the
+/// same one again removes it (a toggle, not an accumulating list like Slack). Deliberately the
+/// simplest version of "a lightweight interest signal on a message" — see
+/// docs/DECISIONS.md#message-reactions for why this over a full poll/vote object.
+model MessageReaction {
+  id        String      @id @default(uuid())
+  messageId String
+  message   CrewMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji     String
+  createdAt DateTime    @default(now())
+
+  @@unique([messageId, userId])
+  @@index([messageId])
 }
 
 // ---------------------------------------------------------------------------

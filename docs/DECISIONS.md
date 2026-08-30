@@ -171,3 +171,25 @@ real key and a real request against the deployed service.
 data, once synced, never refreshes on its own — no cron, no staleness check. Fine for a first
 pilot city seeded once; a real ongoing product needs a scheduled `POST /admin/sync` (e.g. a
 Render Cron Job hitting it daily) rather than relying on this on-demand fallback indefinitely.
+
+## #home-surface
+
+The Crews list was a flat list of names — no different from a table of rows. `listCrewsForUser`
+and `getCrewDetail` (`services/crew.ts`) now compose in `latestMessage`, `activePlan` (the
+newest Plan still in an open-decision status), `upcomingPlan` (the newest BOOKED Plan), and a
+3-message chat preview. Deliberately three independent, cheap queries per Crew rather than one
+hand-tuned join: at pilot scale (a handful of Crews per user) this is far easier to reason
+about, and each piece degrades independently — a Crew with no messages yet just gets
+`latestMessage: null`, never a broken row. If Crew counts per user grow enough for N+1-style
+queries to matter, the fix is a materialized per-Crew summary row updated on write, not a
+bigger join.
+
+## #message-reactions
+
+One reaction per user per message (tapping the same emoji again removes it; tapping a
+different one replaces it) from a fixed 4-emoji set (👍❤️😂🎉), not a full Slack-style
+accumulating-reactions-per-user system or a general emoji picker. This is a lightweight
+interest signal on a message, not a general-purpose feature — the fixed palette keeps the UI
+(and the moderation surface) small. `crewId` is checked against the reacted-to message's own
+crew server-side, not inferred from the URL alone, so a member of one Crew can't react to a
+message id belonging to a Crew they're not in just by guessing/enumerating ids.

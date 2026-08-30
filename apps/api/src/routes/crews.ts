@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../middleware/auth';
 import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail } from '../services/crew';
-import { sendCrewMessage, listCrewMessages, ChatError } from '../services/chat';
+import { sendCrewMessage, listCrewMessages, toggleReaction, ChatError } from '../services/chat';
 import { track } from '../services/analytics';
 
 const CreateCrewSchema = z.object({ name: z.string().min(1).max(60), defaultCity: z.string().optional() });
@@ -84,6 +84,25 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     } catch (err) {
       if (err instanceof ChatError) {
         const status = err.code === 'not_a_member' ? 403 : 400;
+        return reply.code(status).send({ error: err.code, message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post('/crews/:id/messages/:messageId/react', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id, messageId } = request.params as { id: string; messageId: string };
+    const BodySchema = z.object({ emoji: z.string().min(1).max(8) });
+    const parsed = BodySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
+
+    try {
+      const reactions = await toggleReaction(id, messageId, request.user.id, parsed.data.emoji);
+      return reply.send({ reactions });
+    } catch (err) {
+      if (err instanceof ChatError) {
+        const status = err.code === 'not_a_member' ? 403 : err.code === 'not_found' ? 404 : 400;
         return reply.code(status).send({ error: err.code, message: err.message });
       }
       throw err;

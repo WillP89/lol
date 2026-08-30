@@ -6,12 +6,21 @@ import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import { categoryStyle } from '@/lib/categoryStyle';
 
+interface Reaction {
+  emoji: string;
+  count: number;
+  reactedByMe: boolean;
+}
+
 interface ChatMessage {
   id: string;
   body: string;
   createdAt: string;
   author: { id: string; displayName: string | null; email: string };
+  reactions: Reaction[];
 }
+
+const REACTION_CHOICES = ['👍', '❤️', '😂', '🎉'];
 
 interface PlanCardData {
   plan: {
@@ -84,6 +93,67 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Existing reaction pills (tap to toggle yours) plus a "+" that reveals the quick-pick row —
+ * the picker only appears on demand so a chat with no reactions yet stays visually quiet. */
+function ReactionRow({
+  reactions,
+  pickerOpen,
+  onTogglePicker,
+  onPick,
+  align,
+}: {
+  reactions: Reaction[];
+  pickerOpen: boolean;
+  onTogglePicker: () => void;
+  onPick: (emoji: string) => void;
+  align: 'flex-end' | 'flex-start';
+}) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4, justifyContent: align === 'flex-end' ? 'flex-end' : 'flex-start' }}>
+      {reactions.map((r) => (
+        <button
+          key={r.emoji}
+          onClick={() => onPick(r.emoji)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 3,
+            fontSize: 11.5,
+            padding: '2px 7px',
+            borderRadius: 100,
+            border: `1px solid ${r.reactedByMe ? 'var(--ink-gold)' : 'var(--ink-border)'}`,
+            background: r.reactedByMe ? 'rgba(242,169,59,.14)' : 'var(--ink-surface-2)',
+            color: r.reactedByMe ? 'var(--ink-gold)' : 'var(--ink-text-muted)',
+            cursor: 'pointer',
+          }}
+        >
+          <span>{r.emoji}</span>
+          <span>{r.count}</span>
+        </button>
+      ))}
+      {pickerOpen ? (
+        REACTION_CHOICES.map((emoji) => (
+          <button
+            key={emoji}
+            onClick={() => onPick(emoji)}
+            style={{ fontSize: 15, padding: '2px 6px', borderRadius: 100, border: '1px solid var(--ink-border)', background: 'var(--ink-surface-2)', cursor: 'pointer' }}
+          >
+            {emoji}
+          </button>
+        ))
+      ) : (
+        <button
+          onClick={onTogglePicker}
+          aria-label="Add reaction"
+          style={{ fontSize: 11, padding: '2px 7px', borderRadius: 100, border: '1px solid var(--ink-border)', background: 'transparent', color: 'var(--ink-text-dim)', cursor: 'pointer' }}
+        >
+          +
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function CrewChatPage() {
   const { id: crewId } = useParams<{ id: string }>();
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
@@ -92,6 +162,7 @@ export default function CrewChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [planCards, setPlanCards] = useState<Record<string, PlanCardData | 'loading' | 'error'>>({});
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const lastIdRef = useRef<string | undefined>(undefined);
 
@@ -145,6 +216,19 @@ export default function CrewChatPage() {
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages]);
+
+  async function react(messageId: string, emoji: string) {
+    setPickerFor(null);
+    // Optimistic-ish: the server response is the source of truth for the aggregate, but we
+    // don't block the tap on the round-trip — the picker closing IS the feedback.
+    try {
+      const res = await api.post<{ reactions: Reaction[] }>(`/crews/${crewId}/messages/${messageId}/react`, { emoji });
+      setMessages((prev) => prev?.map((m) => (m.id === messageId ? { ...m, reactions: res.reactions } : m)) ?? prev);
+    } catch {
+      // A failed reaction toggle isn't worth an error banner over — the pill just won't
+      // change, which is feedback enough; the next poll tick will also reconcile it.
+    }
+  }
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -239,6 +323,15 @@ export default function CrewChatPage() {
                   >
                     {m.body}
                   </div>
+                )}
+                {!planMatch && (
+                  <ReactionRow
+                    reactions={m.reactions}
+                    pickerOpen={pickerFor === m.id}
+                    onTogglePicker={() => setPickerFor(m.id)}
+                    onPick={(emoji) => react(m.id, emoji)}
+                    align={mine ? 'flex-end' : 'flex-start'}
+                  />
                 )}
                 <div className="muted" style={{ fontSize: 9.5, marginTop: 3, marginInline: 4 }}>
                   {formatTime(m.createdAt)}
