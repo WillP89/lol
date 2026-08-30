@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../middleware/auth';
 import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail } from '../services/crew';
+import { sendCrewMessage, listCrewMessages, ChatError } from '../services/chat';
 import { track } from '../services/analytics';
 
 const CreateCrewSchema = z.object({ name: z.string().min(1).max(60), defaultCity: z.string().optional() });
@@ -54,5 +55,38 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     await track('CrewInviteSent', { crewId: id, channel: parsed.data.channel }, { userId: request.user.id, crewId: id });
 
     return reply.send({ inviteUrl: `${process.env.WEB_APP_URL ?? ''}/crews/join/${crew.inviteCode}` });
+  });
+
+  app.get('/crews/:id/messages', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    const { after } = request.query as { after?: string };
+
+    try {
+      const messages = await listCrewMessages(id, request.user.id, after);
+      return reply.send({ messages });
+    } catch (err) {
+      if (err instanceof ChatError) return reply.code(403).send({ error: err.code, message: err.message });
+      throw err;
+    }
+  });
+
+  app.post('/crews/:id/messages', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    const BodySchema = z.object({ body: z.string().min(1).max(2000) });
+    const parsed = BodySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+
+    try {
+      const message = await sendCrewMessage(id, request.user.id, parsed.data.body);
+      return reply.code(201).send({ message });
+    } catch (err) {
+      if (err instanceof ChatError) {
+        const status = err.code === 'not_a_member' ? 403 : 400;
+        return reply.code(status).send({ error: err.code, message: err.message });
+      }
+      throw err;
+    }
   });
 }

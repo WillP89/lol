@@ -46,9 +46,14 @@ export default function CrewsPage() {
         <div className="wordmark">
           Plot<span>·</span>
         </div>
-        <Link href="/onboarding" className="muted" style={{ fontSize: 12 }}>
-          Profile
-        </Link>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <Link href="/explore" className="muted" style={{ fontSize: 12 }}>
+            Explore
+          </Link>
+          <Link href="/onboarding" className="muted" style={{ fontSize: 12 }}>
+            Profile
+          </Link>
+        </div>
       </nav>
       <div className="page">
         <h1 style={{ fontSize: 24, marginBottom: 16 }}>Your Crews</h1>

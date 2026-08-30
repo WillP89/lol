@@ -110,9 +110,14 @@ export default function CrewDetailPage() {
           </div>
         )}
 
-        <button className="btn btn-primary" onClick={findUsSomething} disabled={finding} style={{ margin: '16px 0' }}>
-          {finding ? 'Thinking…' : '✨ Find us something'}
-        </button>
+        <div style={{ display: 'flex', gap: 8, margin: '16px 0' }}>
+          <button className="btn btn-primary" onClick={findUsSomething} disabled={finding} style={{ flex: 1 }}>
+            {finding ? 'Thinking…' : '✨ Find us something'}
+          </button>
+          <Link href={`/crews/${id}/chat`} className="btn" style={{ flex: '0 0 auto', textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
+            💬 Chat
+          </Link>
+        </div>
 
         {crew.plans.length > 0 && (
           <>

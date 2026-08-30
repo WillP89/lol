@@ -27,6 +27,15 @@ const LocationSchema = z.object({
 });
 
 export async function userRoutes(app: FastifyInstance): Promise<void> {
+  app.get('/users/me', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const user = await prisma.user.findUnique({
+      where: { id: request.user.id },
+      select: { id: true, email: true, displayName: true },
+    });
+    return reply.send({ user });
+  });
+
   app.post('/users/me/taste', async (request, reply) => {
     if (!requireUser(request, reply)) return;
     const parsed = SwipeSchema.safeParse(request.body);

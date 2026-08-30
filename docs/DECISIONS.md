@@ -103,3 +103,43 @@ Prisma client. `test/setup.ts` redirects `DATABASE_URL` before any app code is i
 chose this deliberately over mocking the ORM: the thing most likely to break this product is a
 wrong assumption at a component boundary (a Prisma relation, a transaction, a real constraint
 violation), and mocking that boundary out is exactly how you stop catching it.
+
+## #crew-chat
+
+A simple per-Crew group chat (`CrewMessage`), added after a founding-team demo (a static,
+disconnected HTML prototype — see the demo's own header, "Prototype · Founding team review")
+was mistaken for the real, functional app. That demo depicted no chat feature at all — Plot's
+whole thesis is replacing the group chat, not adding one — so this is new scope, not something
+that regressed.
+
+Deliberately minimal for the pilot: text only, no read receipts, no typing indicators, no
+edit/delete, no threading. The web client polls `GET /crews/:id/messages` (optionally with
+`?after=<lastMessageId>`) every few seconds rather than a websocket/SSE transport — the
+simplest thing that works for a pilot-sized Crew (a handful of people talking occasionally),
+not a chat app's worth of real-time infrastructure. Membership (`isCrewMember`), not
+authorship, gates both read and write, reusing the same crew-membership check the rest of the
+Crew surface already uses.
+
+Upgrade path once polling stops being good enough (larger Crews, users expecting sub-second
+delivery): swap the transport for SSE or a websocket without touching the data model —
+`CrewMessage` doesn't encode anything about how it's delivered.
+
+## #explore-map
+
+The founding-team demo's "map" screen is CSS gradients and absolutely-positioned divs — no
+map provider, no real coordinates. A real one turned out to be cheap to build because the data
+already supported it: the mock provider adapters (`providers/mock/*.ts`) carry real London
+venue lat/lng, and `Venue.latitude`/`longitude` were already real columns. `GET
+/explore/experiences?city=` reuses Match's Layer-1 hard constraints (quality score, not sold
+out, within the candidate window) without the crew-specific scoring — it's a browse view, not
+a recommendation — and the web app renders it with Leaflet + OpenStreetMap tiles (free, no API
+key) rather than a paid provider like Mapbox/Google Maps, which is the right tradeoff until
+there's a reason (offline tiles, custom styling) to pay for one.
+
+One related gap this surfaced: nothing in the codebase ever called `syncAllProviders` outside
+the manual `POST /admin/sync` endpoint, so a freshly migrated database has zero `Experience`
+rows and both Match and Explore would silently return empty. `ensureInventory(city)`
+(`services/inventorySync.ts`) self-heals this — it syncs once if a city looks unseeded — which
+is safe only because the registered providers are in-memory mocks with no real API cost or
+rate limit. A real provider adapter should keep going through the scheduled `/admin/sync` path
+instead of leaning on this fallback.

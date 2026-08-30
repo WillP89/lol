@@ -10,3 +10,4 @@ build/
 coverage/
 .turbo/
 prisma/dev.db
+*.tsbuildinfo

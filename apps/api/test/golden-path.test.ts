@@ -105,6 +105,54 @@ describe('golden path: signup through Rewind', () => {
     expect(crews[0].members).toHaveLength(6);
   });
 
+  test('Crew chat: members can post and read messages, polling picks up only what is new', async () => {
+    const post = await app.inject({
+      method: 'POST',
+      url: `/crews/${crewId}/messages`,
+      headers: { cookie: sessions.alex.cookie },
+      payload: { body: 'anyone free Saturday?' },
+    });
+    expect(post.statusCode).toBe(201);
+    const { message: first } = post.json() as { message: { id: string; body: string; author: { id: string } } };
+    expect(first.body).toBe('anyone free Saturday?');
+    expect(first.author.id).toBe(sessions.alex.userId);
+
+    const reply = await app.inject({
+      method: 'POST',
+      url: `/crews/${crewId}/messages`,
+      headers: { cookie: sessions.sam.cookie },
+      payload: { body: 'I am!' },
+    });
+    expect(reply.statusCode).toBe(201);
+
+    const listRes = await app.inject({
+      method: 'GET',
+      url: `/crews/${crewId}/messages`,
+      headers: { cookie: sessions.ben.cookie },
+    });
+    expect(listRes.statusCode).toBe(200);
+    const { messages } = listRes.json() as { messages: { id: string; body: string }[] };
+    expect(messages.map((m) => m.body)).toEqual(['anyone free Saturday?', 'I am!']);
+
+    // Polling with `after` the first message's id returns only what came after it.
+    const polled = await app.inject({
+      method: 'GET',
+      url: `/crews/${crewId}/messages?after=${first.id}`,
+      headers: { cookie: sessions.ben.cookie },
+    });
+    const { messages: newOnly } = polled.json() as { messages: { body: string }[] };
+    expect(newOnly.map((m) => m.body)).toEqual(['I am!']);
+
+    const outsider = await loginByEmail('not-in-the-crew@plot-test.invalid');
+    const forbidden = await app.inject({
+      method: 'POST',
+      url: `/crews/${crewId}/messages`,
+      headers: { cookie: outsider.cookie },
+      payload: { body: 'let me in' },
+    });
+    expect(forbidden.statusCode).toBe(403);
+  });
+
   test('Ben marks himself busy for the event window; everyone else is implicitly free', async () => {
     const start = new Date();
     start.setDate(start.getDate() + 5);
@@ -256,11 +304,29 @@ describe('golden path: signup through Rewind', () => {
     expect(crew.dna.confidence).toBe('LOW');
   });
 
+  test('Explore returns real, geolocated experiences for the map', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/explore/experiences?city=London',
+      headers: { cookie: sessions.alex.cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const { experiences } = res.json() as {
+      experiences: { name: string; venue: { latitude: number; longitude: number; city: string } }[];
+    };
+    expect(experiences.length).toBeGreaterThan(0);
+    for (const experience of experiences) {
+      expect(experience.venue.city).toBe('London');
+      expect(typeof experience.venue.latitude).toBe('number');
+      expect(typeof experience.venue.longitude).toBe('number');
+    }
+  });
+
   test('the operating dashboard reflects the whole run', async () => {
     const res = await app.inject({ method: 'GET', url: '/admin/dashboard', headers: { 'x-admin-key': config.ADMIN_API_KEY } });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { users: number; crews: number; bookingsConfirmed: number; plansByStatus: Record<string, number> };
-    expect(body.users).toBe(7); // 6 members + the unauthenticated email voter
+    expect(body.users).toBe(8); // 6 members + the unauthenticated email voter + the chat-test outsider
     expect(body.crews).toBe(1);
     expect(body.bookingsConfirmed).toBe(1);
     expect(body.plansByStatus.COMPLETED).toBe(1);
