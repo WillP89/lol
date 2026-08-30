@@ -452,3 +452,55 @@ describe('magic-link "next" redirect (invite-join flow)', () => {
     expect(devMagicLinkUrl).not.toContain('next=');
   });
 });
+
+describe('account lifecycle: sign out, deactivate, delete', () => {
+  test('/users/me returns identity with createdAt for the Profile page', async () => {
+    const session = await loginByEmail('profile-me@plot-test.invalid');
+    const res = await app.inject({ method: 'GET', url: '/users/me', headers: { cookie: session.cookie } });
+    expect(res.statusCode).toBe(200);
+    const { user } = res.json() as { user: { email: string; createdAt: string } };
+    expect(user.email).toBe('profile-me@plot-test.invalid');
+    expect(new Date(user.createdAt).toString()).not.toBe('Invalid Date');
+  });
+
+  test('logout revokes the session and clears the cookie', async () => {
+    const session = await loginByEmail('profile-logout@plot-test.invalid');
+
+    const logoutRes = await app.inject({ method: 'POST', url: '/auth/logout', headers: { cookie: session.cookie } });
+    expect(logoutRes.statusCode).toBe(200);
+    const cleared = logoutRes.cookies.find((c) => c.name === 'plot_session');
+    expect(cleared?.value).toBe('');
+
+    const meRes = await app.inject({ method: 'GET', url: '/users/me', headers: { cookie: session.cookie } });
+    expect(meRes.statusCode).toBe(401);
+  });
+
+  test('deactivate revokes the session and clears the cookie', async () => {
+    const session = await loginByEmail('profile-deactivate@plot-test.invalid');
+
+    const deactivateRes = await app.inject({ method: 'POST', url: '/users/me/deactivate', headers: { cookie: session.cookie } });
+    expect(deactivateRes.statusCode).toBe(200);
+    const cleared = deactivateRes.cookies.find((c) => c.name === 'plot_session');
+    expect(cleared?.value).toBe('');
+
+    const meRes = await app.inject({ method: 'GET', url: '/users/me', headers: { cookie: session.cookie } });
+    expect(meRes.statusCode).toBe(401);
+  });
+
+  test('delete scrubs identifying details and revokes the session', async () => {
+    const email = 'profile-delete@plot-test.invalid';
+    const session = await loginByEmail(email);
+
+    const deleteRes = await app.inject({ method: 'POST', url: '/users/me/delete', headers: { cookie: session.cookie } });
+    expect(deleteRes.statusCode).toBe(200);
+    const cleared = deleteRes.cookies.find((c) => c.name === 'plot_session');
+    expect(cleared?.value).toBe('');
+
+    // Logging in again with the same email creates a fresh account — the old one is gone,
+    // not just hidden — because delete rewrites the email so it can never resolve again.
+    const meRes = await app.inject({ method: 'GET', url: '/users/me', headers: { cookie: session.cookie } });
+    expect(meRes.statusCode).toBe(401);
+    const relogin = await loginByEmail(email);
+    expect(relogin.userId).not.toBe(session.userId);
+  });
+});

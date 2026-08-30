@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireUser } from '../middleware/auth';
+import { requireUser, SESSION_COOKIE } from '../middleware/auth';
 import { submitTasteSwipes, setLocationPreferences } from '../services/taste';
 import { track } from '../services/analytics';
 import { prisma } from '../lib/prisma';
@@ -35,6 +35,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
         id: true,
         email: true,
         displayName: true,
+        createdAt: true,
         tasteProfile: true,
         locationPrefs: { orderBy: { createdAt: 'asc' } },
       },
@@ -112,6 +113,10 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     if (!requireUser(request, reply)) return;
     await prisma.user.update({ where: { id: request.user.id }, data: { status: 'DEACTIVATED' } });
     await revokeAllSessionsForUser(request.user.id);
+    // Sessions are revoked server-side either way, but also clearing the cookie here (rather
+    // than leaving the browser holding a now-dead session id) means the client doesn't need a
+    // separate logout call chained after this one to end up in a clean signed-out state.
+    reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return reply.send({ ok: true });
   });
 
@@ -137,6 +142,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
         displayName: null,
       },
     });
+    reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return reply.send({ ok: true });
   });
 }

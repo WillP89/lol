@@ -2,9 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
-import { TabBar } from '@/components/TabBar';
 
 const CATEGORIES = ['live_music', 'clubbing', 'restaurant', 'comedy', 'art_culture', 'sport', 'day_activity'];
 const AREAS = ['Shoreditch', 'Soho', 'Clapham', 'Brixton', 'Camden', 'Hackney'];
@@ -24,10 +22,9 @@ function OnboardingWizard() {
   // finishing lands you back on the invite instead of the generic Crews list.
   const next = useSearchParams().get('next');
 
-  // Whether an existing profile has loaded yet, and — once it has — whether the wizard should
-  // be shown at all. First-time visitors go straight into the wizard; returning users land on
-  // a summary instead and only see the wizard again if they tap Edit, pre-filled with what
-  // they already told Plot rather than a blank restart.
+  // Whether an existing profile has loaded yet, and whether this is a first-time run (fresh
+  // wizard) or a returning user editing in place (pre-filled, `editing: true`, "Save" instead
+  // of "This is scarily accurate", returns to /profile instead of /crews when done).
   const [loaded, setLoaded] = useState(false);
   const [existing, setExisting] = useState<ExistingProfile | null>(null);
   const [editing, setEditing] = useState(false);
@@ -59,6 +56,10 @@ function OnboardingWizard() {
           setTaste(tasteFromAffinity);
           setBudgetMax(res.user.tasteProfile.budgetMaxMinor);
           setEnergy(res.user.tasteProfile.energyPreference);
+          // Returning user — /profile is the real "here's what Plot knows about you" surface
+          // now, so this page's only job is the editable wizard, pre-filled, not a second
+          // read-only summary duplicating it.
+          setEditing(true);
         }
       })
       .catch(() => {})
@@ -87,10 +88,9 @@ function OnboardingWizard() {
         energyPreference: energy,
       });
       if (existing?.tasteProfile) {
-        // Editing an existing profile — drop back to the summary instead of leaving the page.
-        setExisting((prev) => (prev ? { ...prev, tasteProfile: { categoryAffinity: {}, budgetMaxMinor: budgetMax, energyPreference: energy } } : prev));
-        setEditing(false);
-        setSubmitting(false);
+        // Editing an existing profile — /profile is where "here's what Plot knows about you"
+        // actually lives now, so saving returns there instead of leaving you stranded mid-wizard.
+        router.replace(next || '/profile');
       } else {
         router.replace(next || '/crews');
       }
@@ -109,68 +109,10 @@ function OnboardingWizard() {
     );
   }
 
-  // Returning user, not editing: show what Plot already knows instead of the wizard.
-  if (existing?.tasteProfile && !editing) {
-    const home = existing.locationPrefs.find((p) => p.kind === 'HOME');
-    const favs = existing.locationPrefs.filter((p) => p.kind === 'FAVOURITE');
-    const liked = Object.entries(existing.tasteProfile.categoryAffinity)
-      .filter(([, v]) => v > 0.3)
-      .map(([k]) => k);
-
-    return (
-      <>
-        <nav className="nav">
-          <Link href="/crews" className="muted" style={{ fontSize: 13 }}>
-            ← Crews
-          </Link>
-          <div className="wordmark">Plot</div>
-        </nav>
-        <div className="page">
-          <h1 style={{ fontSize: 24, marginBottom: 16 }}>Your profile</h1>
-
-          <div className="banner-card">
-            <div className="eyebrow">Areas</div>
-            <p style={{ margin: '6px 0 0' }}>
-              {home?.label ?? 'Not set'}
-              {favs.length > 0 && ` · also likes ${favs.map((f) => f.label).join(', ')}`}
-            </p>
-
-            <div style={{ height: 1, background: 'var(--ink-border)', margin: '14px 0' }} />
-
-            <div className="eyebrow">Into</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-              {liked.length ? (
-                liked.map((c) => (
-                  <span key={c} className="chip gold static">
-                    {c.replace('_', ' ')}
-                  </span>
-                ))
-              ) : (
-                <span className="muted">Nothing marked yet.</span>
-              )}
-            </div>
-
-            <div style={{ height: 1, background: 'var(--ink-border)', margin: '14px 0' }} />
-
-            <div className="eyebrow">Budget &amp; energy</div>
-            <p style={{ margin: '6px 0 0' }}>
-              Up to £{(existing.tasteProfile.budgetMaxMinor / 100).toFixed(0)} · {existing.tasteProfile.energyPreference.toLowerCase()} energy
-            </p>
-          </div>
-
-          <button className="btn btn-primary" onClick={() => setEditing(true)} style={{ marginTop: 8 }}>
-            Edit profile
-          </button>
-        </div>
-        <TabBar />
-      </>
-    );
-  }
-
   return (
     <div className="page" style={{ paddingTop: 40 }}>
       {editing ? (
-        <button className="btn btn-ghost" onClick={() => setEditing(false)} style={{ marginBottom: 14, width: 'auto', padding: '8px 0' }}>
+        <button className="btn btn-ghost" onClick={() => router.push('/profile')} style={{ marginBottom: 14, width: 'auto', padding: '8px 0' }}>
           ← Back to profile
         </button>
       ) : (

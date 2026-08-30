@@ -32,7 +32,7 @@ const TABS = [
     ),
   },
   {
-    href: '/onboarding',
+    href: '/profile',
     label: 'Profile',
     icon: (active: boolean) => (
       <svg className="icon" viewBox="0 0 24 24" width="21" height="21" style={{ color: active ? 'var(--ink-gold)' : 'var(--ink-text-muted)' }}>
