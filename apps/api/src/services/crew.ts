@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { computeCrewDna } from './crewDna';
 import { track } from './analytics';
+import { displayNameOf } from '../lib/displayName';
 
 // A Plan in one of these statuses is an open, unresolved decision the Crew is still working
 // out — the thing Home/Crew surfaces should foreground so a member never has to reconstruct
@@ -70,7 +71,7 @@ async function crewSummaryExtras(crewId: string, requestingUserId: string) {
 
   return {
     latestMessage: latestMessage
-      ? { body: latestMessage.body, authorName: latestMessage.author.displayName ?? latestMessage.author.email, createdAt: latestMessage.createdAt }
+      ? { body: latestMessage.body, authorName: displayNameOf(latestMessage.author.displayName, latestMessage.author.email), createdAt: latestMessage.createdAt }
       : null,
     activePlan: activePlan
       ? {

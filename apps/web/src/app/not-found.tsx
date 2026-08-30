@@ -16,8 +16,8 @@ export default function NotFound() {
       <p className="muted" style={{ marginBottom: 22, maxWidth: 260 }}>
         This link might be old, or the Plan/Crew it pointed to isn&rsquo;t around anymore.
       </p>
-      <Link href="/crews" className="btn btn-primary" style={{ width: 'auto', padding: '12px 24px' }}>
-        Back to your Crews
+      <Link href="/home" className="btn btn-primary" style={{ width: 'auto', padding: '12px 24px' }}>
+        Back to Home
       </Link>
     </div>
   );

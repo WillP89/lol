@@ -19,12 +19,12 @@ function CallbackInner() {
     api
       .post('/auth/callback', { token })
       .then(async () => {
-        const destination = next || '/crews';
+        const destination = next || '/home';
         // A brand-new user (no profile yet) always completes onboarding first — including
         // when they arrived via an invite link. Onboarding itself carries `next` through
         // (?next=/crews/join/abc123) so finishing it lands them exactly back on the invite,
-        // not on the generic /crews list. A returning user with a profile already skips
-        // straight to `destination` — the invite, or /crews by default.
+        // not on the generic Home feed. A returning user with a profile already skips
+        // straight to `destination` — the invite, or Home by default.
         try {
           const { user } = await api.get<{ user: { tasteProfile: unknown } }>('/users/me');
           router.replace(user.tasteProfile ? destination : `/onboarding?next=${encodeURIComponent(destination)}`);

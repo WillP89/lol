@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 import { TabBar } from '@/components/TabBar';
 import { BottomSheet } from '@/components/BottomSheet';
@@ -10,7 +11,6 @@ interface CrewSummary {
   id: string;
   name: string;
   members: { user: { displayName: string | null; email: string } }[];
-  dna: { confidence: string } | null;
   latestMessage: { body: string; authorName: string; createdAt: string } | null;
   activePlan: { id: string; title: string; publicSlug: string; inCount: number; totalMembers: number } | null;
   upcomingPlan: { id: string; title: string; publicSlug: string; startsAt: string | null; venueName: string | null } | null;
@@ -29,8 +29,6 @@ function avatarColor(seed: string) {
   return AVATAR_COLORS[hash];
 }
 
-// A short, human "X ago"/"day" label — good enough for a chat-preview timestamp without
-// pulling in a date library for one string.
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diffMs / 60000);
@@ -81,39 +79,89 @@ function CrewActivityLine({ crew }: { crew: CrewSummary }) {
       </div>
     );
   }
-  return <div className="muted" style={{ fontSize: 12.5 }}>No activity yet — say hi.</div>;
+  return <div className="muted" style={{ fontSize: 12.5 }}>Someone has to start it — say hi.</div>;
 }
 
+type CreateStep = 'name' | 'invite';
+
 export default function CrewsPage() {
+  const router = useRouter();
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
-  const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+
+  // Creation is a short, social two-step flow — never a bare "name field + submit" on the main
+  // screen (brief: "creation should feel social, not administrative"). Step 1 names the Crew;
+  // step 2 hands you the invite link immediately, because a Crew with nobody in it isn't done.
   const [showCreate, setShowCreate] = useState(false);
+  const [step, setStep] = useState<CreateStep>('name');
+  const [name, setName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [newCrewId, setNewCrewId] = useState<string | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('new') === '1') setShowCreate(true);
+  }, []);
 
   function load() {
     api
       .get<{ crews: CrewSummary[] }>('/crews')
       .then((res) => setCrews(res.crews))
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'Could not load Crews.'));
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'Could not load your Crews.'));
   }
 
   useEffect(load, []);
+
+  function openCreate() {
+    setStep('name');
+    setName('');
+    setNewCrewId(null);
+    setInviteUrl(null);
+    setShowCreate(true);
+  }
 
   async function createCrew(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
     setCreating(true);
+    setError(null);
     try {
-      await api.post('/crews', { name: name.trim(), defaultCity: 'London' });
-      setName('');
-      setShowCreate(false);
+      const res = await api.post<{ crew: { id: string } }>('/crews', { name: name.trim(), defaultCity: 'London' });
+      setNewCrewId(res.crew.id);
+      const invite = await api.post<{ inviteUrl: string }>(`/crews/${res.crew.id}/invites`, { channel: 'link' });
+      setInviteUrl(invite.inviteUrl);
+      setStep('invite');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not create Crew.');
     } finally {
       setCreating(false);
     }
+  }
+
+  async function shareInvite() {
+    if (!inviteUrl) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `Join ${name} on Plot`, url: inviteUrl });
+        return;
+      }
+    } catch {
+      // user cancelled the share sheet — fall through to clipboard
+    }
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // clipboard blocked — the link is still visible to copy by hand
+    }
+  }
+
+  function finishCreate() {
+    setShowCreate(false);
+    if (newCrewId) router.push(`/crews/${newCrewId}`);
   }
 
   return (
@@ -123,7 +171,7 @@ export default function CrewsPage() {
           Plot<span>·</span>
         </div>
         <button
-          onClick={() => setShowCreate(true)}
+          onClick={openCreate}
           aria-label="New Crew"
           style={{ background: 'var(--ink-surface-2)', border: '1px solid var(--ink-border)', color: 'var(--ink-text)', width: 32, height: 32, borderRadius: '50%', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
@@ -132,8 +180,8 @@ export default function CrewsPage() {
       </nav>
       <div className="page">
         <div className="masthead">
-          <h1 style={{ fontSize: 22 }}>Home</h1>
-          <p className="muted" style={{ marginBottom: 0 }}>What your Crews are up to.</p>
+          <h1 style={{ fontSize: 22 }}>Crews</h1>
+          <p className="muted" style={{ marginBottom: 0 }}>Where your groups live.</p>
         </div>
 
         {crews === null && !error && (
@@ -164,12 +212,12 @@ export default function CrewsPage() {
         ))}
 
         {crews?.length === 0 && (
-          <div className="card" style={{ textAlign: 'center', padding: '28px 16px' }}>
+          <div className="banner-card" style={{ textAlign: 'center', padding: '32px 20px' }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>👋</div>
-            <p style={{ marginBottom: 4 }}>No Crews yet.</p>
-            <p className="muted" style={{ marginBottom: 14 }}>Create one, or ask a friend for their invite link.</p>
-            <button className="btn btn-primary" onClick={() => setShowCreate(true)} style={{ width: 'auto', padding: '10px 20px' }}>
-              Create a Crew
+            <p style={{ marginBottom: 4, fontWeight: 700 }}>No Crews yet.</p>
+            <p className="muted" style={{ marginBottom: 14 }}>Start one, or ask a friend for their invite link.</p>
+            <button className="btn btn-primary" onClick={openCreate} style={{ width: 'auto', padding: '10px 20px' }}>
+              Start a Crew
             </button>
           </div>
         )}
@@ -178,15 +226,33 @@ export default function CrewsPage() {
       </div>
 
       <BottomSheet open={showCreate} onClose={() => !creating && setShowCreate(false)}>
-        <form onSubmit={createCrew} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div className="eyebrow" style={{ marginBottom: 0 }}>
-            New Crew
+        {step === 'name' ? (
+          <form onSubmit={createCrew} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="eyebrow" style={{ marginBottom: 0 }}>New Crew</div>
+            <h2 style={{ fontSize: 19, marginBottom: 2 }}>What&rsquo;s the Crew called?</h2>
+            <input className="field" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. The Boys, Flat 4B" required maxLength={60} />
+            <button className="btn btn-primary" disabled={creating || !name.trim()} type="submit">
+              {creating ? 'Creating…' : 'Continue'}
+            </button>
+          </form>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="eyebrow" style={{ marginBottom: 0 }}>You&rsquo;re ready</div>
+            <h2 style={{ fontSize: 19, marginBottom: 2 }}>Invite your people</h2>
+            <p className="muted" style={{ marginBottom: 4 }}>{name} is live. Share the link to get everyone in.</p>
+            {inviteUrl && (
+              <div className="card" style={{ padding: 12 }}>
+                <span className="muted" style={{ wordBreak: 'break-all', fontSize: 12.5 }}>{inviteUrl}</span>
+              </div>
+            )}
+            <button className="btn btn-primary" onClick={shareInvite} disabled={!inviteUrl}>
+              {copied ? '✓ Copied' : 'Share invite link'}
+            </button>
+            <button className="btn btn-ghost" onClick={finishCreate}>
+              Done
+            </button>
           </div>
-          <input className="field" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. The Boys, Flat 4B" required />
-          <button className="btn btn-primary" disabled={creating || !name.trim()} type="submit">
-            {creating ? 'Creating…' : 'Create Crew'}
-          </button>
-        </form>
+        )}
       </BottomSheet>
 
       <TabBar />

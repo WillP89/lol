@@ -4,9 +4,10 @@ import { redirect } from 'next/navigation';
 
 export default function HomePage() {
   // A returning, already-signed-in visitor has no reason to see the marketing pitch again —
-  // straight to their Crews. Same session-cookie check the Plan Card page already uses.
+  // straight to Home, the social heartbeat, not the Crew list (Home ≠ Crews). Same
+  // session-cookie check the Plan Card page already uses.
   if (cookies().get('plot_session')) {
-    redirect('/crews');
+    redirect('/home');
   }
 
   return (

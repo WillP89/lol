@@ -92,7 +92,7 @@ function OnboardingWizard() {
         // actually lives now, so saving returns there instead of leaving you stranded mid-wizard.
         router.replace(next || '/profile');
       } else {
-        router.replace(next || '/crews');
+        router.replace(next || '/home');
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong.');

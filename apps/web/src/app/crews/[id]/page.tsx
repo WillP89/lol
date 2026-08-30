@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import { TabBar } from '@/components/TabBar';
 import { categoryStyle } from '@/lib/categoryStyle';
+import { displayNameOf } from '@/lib/displayName';
 
 interface Plan {
   id: string;
@@ -218,7 +219,7 @@ export default function CrewDetailPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {crew.recentMessages.map((m) => (
                 <div key={m.id} style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  <span style={{ fontWeight: 700 }}>{m.author.displayName ?? m.author.email}: </span>
+                  <span style={{ fontWeight: 700 }}>{displayNameOf(m.author.displayName, m.author.email)}: </span>
                   <span className="muted">{m.body}</span>
                 </div>
               ))}

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import { categoryStyle } from '@/lib/categoryStyle';
 import { formatPriceFrom } from '@/lib/formatPrice';
+import { displayNameOf } from '@/lib/displayName';
 
 interface Reaction {
   emoji: string;
@@ -296,7 +297,7 @@ export default function CrewChatPage() {
               >
                 {!mine && !grouped && (
                   <div className="muted" style={{ fontSize: 10.5, marginBottom: 2, marginLeft: 4 }}>
-                    {m.author.displayName ?? m.author.email}
+                    {displayNameOf(m.author.displayName, m.author.email)}
                   </div>
                 )}
 

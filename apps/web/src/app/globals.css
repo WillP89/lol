@@ -350,8 +350,10 @@ input.field:focus {
   animation: fadeUp 0.3s ease both;
 }
 
-/* Persistent bottom nav — see components/TabBar.tsx. Fixed to the viewport, not .page's
-   scroll context, with safe-area padding so it clears the home-indicator on iOS. */
+/* Primary navigation — see components/TabBar.tsx. A bottom bar on mobile (fixed to the
+   viewport, not .page's scroll context, with safe-area padding so it clears the home-indicator
+   on iOS); a left sidebar on desktop (≥900px — see the @media block below). Same markup, same
+   component, two layouts — no separate desktop nav to keep in sync with the mobile one. */
 .tabbar {
   position: fixed;
   bottom: 0;
@@ -360,26 +362,33 @@ input.field:focus {
   max-width: 480px;
   margin: 0 auto;
   display: flex;
-  justify-content: space-around;
   align-items: center;
-  padding: 10px 6px calc(env(safe-area-inset-bottom, 0px) + 10px);
+  padding: 8px 4px calc(env(safe-area-inset-bottom, 0px) + 8px);
   border-top: 1px solid var(--ink-border);
   background: rgba(23, 24, 38, 0.88);
   backdrop-filter: blur(14px);
   z-index: 30;
 }
+.tabbar-brand {
+  /* Sidebar-only branding — see the desktop media query. Rendered unconditionally in the
+     component so there's exactly one TabBar for both layouts. */
+  display: none;
+}
 .tab {
+  flex: 1;
   background: none;
   border: none;
   color: var(--ink-text-muted);
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 700;
   text-decoration: none;
-  padding: 4px 18px;
+  padding: 6px 2px;
+  min-height: 48px;
   border-radius: 10px;
   transition: background 0.12s ease;
 }
@@ -388,6 +397,89 @@ input.field:focus {
 }
 .tab:active {
   background: var(--ink-surface-2);
+}
+
+/* Desktop composition (brief: "do not stretch the phone layout across desktop"). The nav
+   becomes a fixed left sidebar instead of competing for vertical space at the bottom of a
+   wide viewport; .page/.nav shift right to clear it and get a little more breathing room
+   than the mobile 480px column, but stay a deliberate reading width — not edge to edge. */
+@media (min-width: 900px) {
+  .tabbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: auto;
+    width: 236px;
+    max-width: none;
+    margin: 0;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 2px;
+    padding: 28px 14px;
+    border-top: none;
+    border-right: 1px solid var(--ink-border);
+    background: rgba(19, 19, 29, 0.6);
+    backdrop-filter: none;
+  }
+  .tabbar-brand {
+    display: block;
+    font-family: 'Fraunces', serif;
+    font-weight: 800;
+    font-size: 21px;
+    padding: 4px 12px 22px;
+  }
+  .tabbar-brand span {
+    color: var(--ink-gold);
+  }
+  .tab {
+    flex: none;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    font-size: 14px;
+    padding: 11px 12px;
+    min-height: 44px;
+    border-radius: 10px;
+  }
+  .tab:hover {
+    background: var(--ink-surface-2);
+  }
+
+  /* Only pages that actually render the sidebar (i.e. have a .tabbar) should have their
+     content pushed right to clear it — the immersive pages that deliberately go without one
+     (chat, auth, onboarding, the public Plan Card) stay full-width. */
+  body:has(.tabbar) .nav,
+  body:has(.tabbar) .page {
+    margin-left: 236px;
+    max-width: 720px;
+  }
+  body:has(.tabbar) .nav {
+    margin-right: auto;
+  }
+  body:has(.tabbar) .page {
+    padding-bottom: 48px;
+  }
+  /* The sidebar already carries the Plot wordmark — repeating it in every page's own top nav
+     bar is redundant once both are on screen together. */
+  body:has(.tabbar) .nav .wordmark {
+    display: none;
+  }
+}
+
+/* Explore's map view — a fixed 480px made sense as "most of a phone screen" but wastes most
+   of a desktop viewport's height (brief: "use the extra space intelligently"). Desktop gets a
+   viewport-relative height instead, capped so it doesn't run off-screen on a short window. */
+.explore-viewport {
+  height: 480px;
+}
+@media (min-width: 900px) {
+  .explore-viewport {
+    height: calc(100vh - 300px);
+    min-height: 480px;
+    max-height: 720px;
+  }
 }
 
 /* Leaflet's default zoom control is stock white buttons — jarring against a dark map. See

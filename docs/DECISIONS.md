@@ -193,3 +193,27 @@ interest signal on a message, not a general-purpose feature — the fixed palett
 (and the moderation surface) small. `crewId` is checked against the reacted-to message's own
 crew server-side, not inferred from the URL alone, so a member of one Crew can't react to a
 message id belonging to a Crew they're not in just by guessing/enumerating ids.
+
+## #nav-restructure
+
+Home ≠ Crews. The nav grew from 3 destinations (Crews/Explore/Profile) to 5 (Home/Explore/
+Crews/Plans/You), splitting what used to be one page doing two jobs:
+- `/crews` used to be both "what's happening across everyone" (a feed) and "the list of my
+  Crews" (a directory) — same page, same title ("Home"), same content. Now `/home` is the
+  feed (next plan, decisions needing your vote, a Crews preview strip, a light activity feed
+  built by re-sorting the same per-Crew data the old page already fetched — no new aggregate
+  table) and `/crews` is purely the directory + creation flow.
+- `/plans` is new: every BOOKED Plan across every Crew (`listUpcomingPlansForUser`,
+  `GET /plans/upcoming`), soonest-first. Confirmed plans previously only existed embedded in
+  whichever Crew booked them.
+- Crew creation moved from an always-visible inline `name` field + `Create Crew` button (reads
+  as "insert a database row") to a two-step sheet: name the Crew, then immediately get an
+  invite link to share, landing you in the new Crew when you're done — creation ends with
+  "there are people in this" instead of "there is a row in a table."
+
+`TabBar` (components/TabBar.tsx) is one component for both a mobile bottom bar and a desktop
+left sidebar — same markup, `@media (min-width: 900px)` in globals.css restyles it in place
+rather than a second desktop-only nav component to keep in sync. `.page`/`.nav` shift right to
+clear the sidebar only on pages that actually render one, via `body:has(.tabbar) .page`, since
+a handful of intentionally chrome-free pages (chat, auth, onboarding, the public Plan Card)
+still go full-width with no sidebar to clear.

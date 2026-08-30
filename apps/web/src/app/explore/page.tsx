@@ -146,8 +146,8 @@ export default function ExplorePage() {
   return (
     <>
       <nav className="nav">
-        <Link href="/crews" className="muted" style={{ fontSize: 13 }}>
-          ← Crews
+        <Link href="/home" className="muted" style={{ fontSize: 13 }}>
+          ← Home
         </Link>
         <div className="wordmark">Plot</div>
       </nav>
@@ -188,7 +188,7 @@ export default function ExplorePage() {
         </div>
 
         {view === 'map' ? (
-          <div style={{ height: 480, borderRadius: 18, overflow: 'hidden', border: '1px solid var(--ink-border)', boxShadow: 'var(--hard-shadow)' }}>
+          <div className="explore-viewport" style={{ borderRadius: 18, overflow: 'hidden', border: '1px solid var(--ink-border)', boxShadow: 'var(--hard-shadow)' }}>
             {experiences ? (
               filtered.length > 0 ? (
                 <ExploreMap experiences={filtered} center={center} onSelect={setSelected} />

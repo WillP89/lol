@@ -101,8 +101,8 @@ export default function ProfilePage() {
   return (
     <>
       <nav className="nav">
-        <Link href="/crews" className="muted" style={{ fontSize: 13 }}>
-          ← Crews
+        <Link href="/home" className="muted" style={{ fontSize: 13 }}>
+          ← Home
         </Link>
         <div className="wordmark">Plot</div>
       </nav>
@@ -159,7 +159,7 @@ export default function ProfilePage() {
 
         <div className="card">
           <button className="btn btn-ghost" onClick={signOut} disabled={busy} style={{ justifyContent: 'flex-start' }}>
-            🚪 Sign out
+            Sign out
           </button>
         </div>
 
