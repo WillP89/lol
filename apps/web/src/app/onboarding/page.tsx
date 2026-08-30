@@ -1,14 +1,33 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 
 const CATEGORIES = ['live_music', 'clubbing', 'restaurant', 'comedy', 'art_culture', 'sport', 'day_activity'];
 const AREAS = ['Shoreditch', 'Soho', 'Clapham', 'Brixton', 'Camden', 'Hackney'];
 
+interface ExistingProfile {
+  tasteProfile: {
+    categoryAffinity: Record<string, number>;
+    budgetMaxMinor: number;
+    energyPreference: 'LOW' | 'MEDIUM' | 'HIGH';
+  } | null;
+  locationPrefs: { kind: string; label: string }[];
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
+
+  // Whether an existing profile has loaded yet, and — once it has — whether the wizard should
+  // be shown at all. First-time visitors go straight into the wizard; returning users land on
+  // a summary instead and only see the wizard again if they tap Edit, pre-filled with what
+  // they already told Plot rather than a blank restart.
+  const [loaded, setLoaded] = useState(false);
+  const [existing, setExisting] = useState<ExistingProfile | null>(null);
+  const [editing, setEditing] = useState(false);
+
   const [step, setStep] = useState(0);
   const [homeArea, setHomeArea] = useState('Clapham');
   const [favAreas, setFavAreas] = useState<string[]>(['Shoreditch']);
@@ -17,6 +36,30 @@ export default function OnboardingPage() {
   const [energy, setEnergy] = useState<'LOW' | 'MEDIUM' | 'HIGH'>('MEDIUM');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    api
+      .get<{ user: ExistingProfile }>('/users/me')
+      .then((res) => {
+        setExisting(res.user);
+        if (res.user.tasteProfile) {
+          // Pre-fill the wizard with what's already there, so Edit is a tweak, not a restart.
+          const home = res.user.locationPrefs.find((p) => p.kind === 'HOME');
+          const favs = res.user.locationPrefs.filter((p) => p.kind === 'FAVOURITE').map((p) => p.label);
+          if (home) setHomeArea(home.label);
+          if (favs.length) setFavAreas(favs);
+          const affinityToChoice = (v: number): 'yes' | 'maybe' | 'no' => (v > 0.3 ? 'yes' : v < -0.3 ? 'no' : 'maybe');
+          const tasteFromAffinity = Object.fromEntries(
+            Object.entries(res.user.tasteProfile.categoryAffinity).map(([k, v]) => [k, affinityToChoice(v)]),
+          );
+          setTaste(tasteFromAffinity);
+          setBudgetMax(res.user.tasteProfile.budgetMaxMinor);
+          setEnergy(res.user.tasteProfile.energyPreference);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, []);
 
   function toggleFavArea(area: string) {
     setFavAreas((prev) => (prev.includes(area) ? prev.filter((a) => a !== area) : [...prev, area]));
@@ -39,18 +82,95 @@ export default function OnboardingPage() {
         travelRadiusMeters: 8000,
         energyPreference: energy,
       });
-      router.replace('/crews');
+      if (existing?.tasteProfile) {
+        // Editing an existing profile — drop back to the summary instead of leaving the page.
+        setExisting((prev) => (prev ? { ...prev, tasteProfile: { categoryAffinity: {}, budgetMaxMinor: budgetMax, energyPreference: energy } } : prev));
+        setEditing(false);
+        setSubmitting(false);
+      } else {
+        router.replace('/crews');
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong.');
       setSubmitting(false);
     }
   }
 
+  if (!loaded) {
+    return (
+      <div className="page" style={{ paddingTop: 40 }}>
+        <p className="muted">Loading…</p>
+      </div>
+    );
+  }
+
+  // Returning user, not editing: show what Plot already knows instead of the wizard.
+  if (existing?.tasteProfile && !editing) {
+    const home = existing.locationPrefs.find((p) => p.kind === 'HOME');
+    const favs = existing.locationPrefs.filter((p) => p.kind === 'FAVOURITE');
+    const liked = Object.entries(existing.tasteProfile.categoryAffinity)
+      .filter(([, v]) => v > 0.3)
+      .map(([k]) => k);
+
+    return (
+      <>
+        <nav className="nav">
+          <Link href="/crews" className="muted" style={{ fontSize: 13 }}>
+            ← Crews
+          </Link>
+          <div className="wordmark">Plot</div>
+        </nav>
+        <div className="page">
+          <h1 style={{ fontSize: 24, marginBottom: 16 }}>Your profile</h1>
+
+          <div className="card">
+            <div className="eyebrow">Areas</div>
+            <p style={{ margin: '6px 0 0' }}>
+              {home?.label ?? 'Not set'}
+              {favs.length > 0 && ` · also likes ${favs.map((f) => f.label).join(', ')}`}
+            </p>
+          </div>
+
+          <div className="card">
+            <div className="eyebrow">Into</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+              {liked.length ? (
+                liked.map((c) => (
+                  <span key={c} className="chip gold static">
+                    {c.replace('_', ' ')}
+                  </span>
+                ))
+              ) : (
+                <span className="muted">Nothing marked yet.</span>
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="eyebrow">Budget & energy</div>
+            <p style={{ margin: '6px 0 0' }}>
+              Up to £{(existing.tasteProfile.budgetMaxMinor / 100).toFixed(0)} · {existing.tasteProfile.energyPreference.toLowerCase()} energy
+            </p>
+          </div>
+
+          <button className="btn btn-primary" onClick={() => setEditing(true)} style={{ marginTop: 8 }}>
+            Edit profile
+          </button>
+        </div>
+      </>
+    );
+  }
+
   return (
     <div className="page" style={{ paddingTop: 40 }}>
       <div className="eyebrow">
-        Step {step + 1} of 3
+        {editing ? 'Editing your profile' : `Step ${step + 1} of 3`}
       </div>
+      {editing && (
+        <button className="btn btn-ghost" onClick={() => setEditing(false)} style={{ marginBottom: 12, alignSelf: 'flex-start' }}>
+          ← Back to profile
+        </button>
+      )}
 
       {step === 0 && (
         <>
@@ -72,9 +192,20 @@ export default function OnboardingPage() {
               </button>
             ))}
           </div>
-          <button className="btn btn-primary" onClick={() => setStep(1)}>
-            Continue
-          </button>
+          {editing ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={finish} disabled={submitting}>
+                {submitting ? 'Saving…' : 'Save'}
+              </button>
+              <button className="btn btn-primary" onClick={() => setStep(1)} style={{ flex: 1 }}>
+                Continue
+              </button>
+            </div>
+          ) : (
+            <button className="btn btn-primary" onClick={() => setStep(1)}>
+              Continue
+            </button>
+          )}
         </>
       )}
 
@@ -108,9 +239,14 @@ export default function OnboardingPage() {
               </button>
             ))}
           </div>
-          <button className="btn btn-primary" onClick={() => setStep(2)}>
-            Continue
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={() => setStep(0)}>
+              ← Back
+            </button>
+            <button className="btn btn-primary" onClick={() => setStep(2)} style={{ flex: 1 }}>
+              Continue
+            </button>
+          </div>
         </>
       )}
 
@@ -127,9 +263,14 @@ export default function OnboardingPage() {
             onChange={(e) => setBudgetMax(Number(e.target.value))}
             style={{ width: '100%', marginBottom: 24 }}
           />
-          <button className="btn btn-primary" onClick={finish} disabled={submitting}>
-            {submitting ? 'Building your Plot…' : "This is scarily accurate"}
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={() => setStep(1)}>
+              ← Back
+            </button>
+            <button className="btn btn-primary" onClick={finish} disabled={submitting} style={{ flex: 1 }}>
+              {submitting ? (editing ? 'Saving…' : 'Building your Plot…') : editing ? 'Save' : 'This is scarily accurate'}
+            </button>
+          </div>
           {error && <div className="error">{error}</div>}
         </>
       )}

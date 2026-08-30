@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import type { ExploreExperience } from './ExploreMap';
@@ -13,15 +14,30 @@ const ExploreMap = dynamic(() => import('./ExploreMap'), { ssr: false, loading: 
 
 const LONDON_CENTER: [number, number] = [51.5074, -0.1278];
 
+interface CrewSummary {
+  id: string;
+  name: string;
+}
+
 export default function ExplorePage() {
+  const router = useRouter();
   const [experiences, setExperiences] = useState<ExploreExperience[] | null>(null);
+  const [crews, setCrews] = useState<CrewSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // The experience someone tapped "Send to Crew →" on — non-null opens the crew picker.
+  const [sendTarget, setSendTarget] = useState<ExploreExperience | null>(null);
+  const [sending, setSending] = useState<string | null>(null);
 
   useEffect(() => {
     api
       .get<{ experiences: ExploreExperience[] }>('/explore/experiences?city=London')
       .then((res) => setExperiences(res.experiences))
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Could not load Explore.'));
+    api
+      .get<{ crews: CrewSummary[] }>('/crews')
+      .then((res) => setCrews(res.crews))
+      .catch(() => {});
   }, []);
 
   const center = useMemo<[number, number]>(() => {
@@ -30,6 +46,21 @@ export default function ExplorePage() {
     const avgLng = experiences.reduce((sum, e) => sum + e.venue.longitude, 0) / experiences.length;
     return [avgLat, avgLng];
   }, [experiences]);
+
+  async function sendToCrew(crewId: string) {
+    if (!sendTarget) return;
+    setSending(crewId);
+    try {
+      const res = await api.post<{ plan: { publicSlug: string } }>(`/crews/${crewId}/plans/send`, {
+        experienceId: sendTarget.id,
+      });
+      router.push(`/plans/${res.plan.publicSlug}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not send to Crew.');
+      setSending(null);
+      setSendTarget(null);
+    }
+  }
 
   return (
     <>
@@ -43,14 +74,42 @@ export default function ExplorePage() {
         <div className="eyebrow">Explore</div>
         <h1 style={{ fontSize: 24, marginBottom: 4 }}>What&rsquo;s on around London</h1>
         <p className="muted" style={{ marginBottom: 16 }}>
-          {experiences ? `${experiences.length} real, bookable options over the next 3 weeks.` : 'Loading real venues…'}
+          {experiences ? `${experiences.length} real, bookable options over the next 3 weeks. Tap a pin, then send one to a Crew.` : 'Loading real venues…'}
         </p>
 
         {error && <div className="error">{error}</div>}
 
         <div style={{ height: 480, borderRadius: 18, overflow: 'hidden', border: '1px solid var(--ink-border)' }}>
-          {experiences && <ExploreMap experiences={experiences} center={center} />}
+          {experiences && <ExploreMap experiences={experiences} center={center} onSend={setSendTarget} />}
         </div>
+
+        {sendTarget && (
+          <div className="card" style={{ marginTop: 16 }}>
+            <div className="eyebrow">Send &ldquo;{sendTarget.name}&rdquo; to…</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+              {crews === null && <p className="muted">Loading your Crews…</p>}
+              {crews?.length === 0 && (
+                <p className="muted">
+                  You&rsquo;re not in a Crew yet — <Link href="/crews">create one first</Link>.
+                </p>
+              )}
+              {crews?.map((crew) => (
+                <button
+                  key={crew.id}
+                  className="btn"
+                  disabled={sending !== null}
+                  onClick={() => sendToCrew(crew.id)}
+                  style={{ textAlign: 'left' }}
+                >
+                  {sending === crew.id ? 'Sending…' : crew.name}
+                </button>
+              ))}
+              <button className="btn btn-ghost" onClick={() => setSendTarget(null)} disabled={sending !== null}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

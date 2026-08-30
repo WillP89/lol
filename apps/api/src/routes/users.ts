@@ -31,7 +31,13 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     if (!requireUser(request, reply)) return;
     const user = await prisma.user.findUnique({
       where: { id: request.user.id },
-      select: { id: true, email: true, displayName: true },
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
+        tasteProfile: true,
+        locationPrefs: { orderBy: { createdAt: 'asc' } },
+      },
     });
     return reply.send({ user });
   });

@@ -36,9 +36,22 @@ export class AuthError extends Error {
  * flow is fully testable end-to-end; that response field is omitted outside development, at
  * which point this function needs a real `sendMagicLinkEmail` call wired in before launch.
  */
+/**
+ * Only ever a same-origin relative path (`/crews/join/abc`, never `https://evil.example/...`
+ * or `//evil.example/...`) — this value round-trips through an emailed link, so treating it
+ * as trusted would be an open-redirect vector. Anything else silently falls back to no
+ * redirect rather than erroring the whole sign-in over a malformed `next`.
+ */
+function sanitiseNext(next: string | undefined): string | undefined {
+  if (!next) return undefined;
+  if (!next.startsWith('/') || next.startsWith('//') || next.includes('://')) return undefined;
+  return next;
+}
+
 export async function requestMagicLink(
   email: string,
   requestIp: string | undefined,
+  next?: string,
 ): Promise<{ devMagicLinkUrl?: string }> {
   const normalisedEmail = email.trim().toLowerCase();
 
@@ -66,7 +79,8 @@ export async function requestMagicLink(
     },
   });
 
-  const url = `${config.WEB_APP_URL}/auth/callback?token=${rawToken}`;
+  const safeNext = sanitiseNext(next);
+  const url = `${config.WEB_APP_URL}/auth/callback?token=${rawToken}${safeNext ? `&next=${encodeURIComponent(safeNext)}` : ''}`;
 
   if (config.NODE_ENV === 'production') {
     // TODO(email-provider): send via Postmark/SES here. See docs/providers/email.md.
