@@ -8,6 +8,7 @@ import { api, ApiError } from '@/lib/api';
 import { TabBar } from '@/components/TabBar';
 import { BottomSheet } from '@/components/BottomSheet';
 import { categoryStyle } from '@/lib/categoryStyle';
+import { formatPriceRange } from '@/lib/formatPrice';
 import type { ExploreExperience } from './ExploreMap';
 
 // Leaflet touches `window` at module load, which breaks Next's server render — load the map
@@ -33,13 +34,7 @@ function formatWhen(startsAt: string) {
 }
 
 function formatPrice(exp: ExploreExperience) {
-  if (exp.priceMinMinor === null) return null;
-  if (exp.priceMinMinor === 0) return 'free';
-  const min = `£${(exp.priceMinMinor / 100).toFixed(0)}`;
-  if (exp.priceMaxMinor && exp.priceMaxMinor !== exp.priceMinMinor) {
-    return `£${(exp.priceMinMinor / 100).toFixed(0)}–£${(exp.priceMaxMinor / 100).toFixed(0)}`;
-  }
-  return `from ${min}`;
+  return formatPriceRange(exp.priceMinMinor, exp.priceMaxMinor, exp.currency);
 }
 
 type DiscoveryMode = 'all' | 'tonight' | 'weekend' | 'free';

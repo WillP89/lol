@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import { categoryStyle } from '@/lib/categoryStyle';
+import { formatPriceFrom } from '@/lib/formatPrice';
 
 interface Reaction {
   emoji: string;
@@ -75,7 +76,7 @@ function EventCard({ data }: { data: PlanCardData }) {
           <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>
             {exp.venue?.name ?? 'Venue TBC'} ·{' '}
             {new Date(exp.startsAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
-            {exp.priceMinMinor !== null && ` · from £${(exp.priceMinMinor / 100).toFixed(0)}`}
+            {formatPriceFrom(exp.priceMinMinor) && ` · ${formatPriceFrom(exp.priceMinMinor)}`}
           </div>
         )}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

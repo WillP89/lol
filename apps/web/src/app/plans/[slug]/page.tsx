@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { apiFetchServer } from '@/lib/apiServer';
 import { categoryStyle } from '@/lib/categoryStyle';
+import { formatPriceFrom } from '@/lib/formatPrice';
 import { VoteForm } from './VoteForm';
 
 interface PlanCardResponse {
@@ -68,7 +69,7 @@ export default async function PlanCardPage({ params }: { params: { slug: string 
         <p className="muted" style={{ marginBottom: 20 }}>
           {new Date(plan.experience.startsAt).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
           {plan.experience.venue && ` · ${plan.experience.venue.name}, ${plan.experience.venue.city}`}
-          {plan.experience.priceMinMinor !== null && ` · from £${(plan.experience.priceMinMinor / 100).toFixed(0)}`}
+          {formatPriceFrom(plan.experience.priceMinMinor) && ` · ${formatPriceFrom(plan.experience.priceMinMinor)}`}
         </p>
       )}
 

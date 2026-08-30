@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import { categoryStyle } from '@/lib/categoryStyle';
+import { formatPriceFrom } from '@/lib/formatPrice';
 
 export interface ExploreExperience {
   id: string;
@@ -60,7 +61,7 @@ export default function ExploreMap({
                 {exp.venue.name}
                 <br />
                 {new Date(exp.startsAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                {exp.priceMinMinor !== null && ` · from £${(exp.priceMinMinor / 100).toFixed(0)}`}
+                {formatPriceFrom(exp.priceMinMinor, exp.currency) && ` · ${formatPriceFrom(exp.priceMinMinor, exp.currency)}`}
               </div>
               <button
                 onClick={() => onSelect(exp)}

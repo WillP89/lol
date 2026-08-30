@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import { categoryStyle } from '@/lib/categoryStyle';
+import { formatPriceFrom } from '@/lib/formatPrice';
 
 interface MatchOption {
   experience: {
@@ -137,7 +138,7 @@ export default function MatchPage() {
                 </div>
                 <div className="muted" style={{ marginTop: 8 }}>
                   {option.availableMemberCount}/{option.totalMemberCount} free
-                  {option.experience.priceMinMinor !== null && ` · from £${(option.experience.priceMinMinor / 100).toFixed(0)}`}
+                  {formatPriceFrom(option.experience.priceMinMinor, option.experience.currency) && ` · ${formatPriceFrom(option.experience.priceMinMinor, option.experience.currency)}`}
                 </div>
                 {option.reasons.length > 0 && (
                   <ul style={{ margin: '10px 0 0', paddingLeft: 16, fontSize: 12, color: 'var(--ink-text-muted)' }}>
