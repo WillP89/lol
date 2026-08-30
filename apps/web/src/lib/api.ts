@@ -17,7 +17,11 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   const res = await fetch(`/api${path}`, {
     ...options,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    // Only send Content-Type: application/json when there's actually a body — Fastify's body
+    // parser sees that header as a promise of JSON and errors ("Body cannot be empty when
+    // content-type is set to 'application/json'") on the many POST calls that take no payload
+    // (e.g. /crews/:id/find-us-something).
+    headers: options.body ? { 'Content-Type': 'application/json', ...options.headers } : options.headers,
   });
 
   const body = await res.json().catch(() => ({}));
