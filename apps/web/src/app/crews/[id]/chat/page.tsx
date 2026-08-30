@@ -13,6 +13,25 @@ interface ChatMessage {
 }
 
 const POLL_INTERVAL_MS = 3000;
+const PLAN_LINK_SPLIT = /(\/plans\/[a-zA-Z0-9-]+)/g;
+// Separate, non-global regex for testing a single split part — reusing a `g`-flagged regex's
+// .test() across a loop advances its lastIndex and silently skips matches on later calls.
+const PLAN_LINK_MATCH = /^\/plans\/[a-zA-Z0-9-]+$/;
+
+// A plan sent to the Crew posts a chat message with a plain-text "/plans/<slug>" path in the
+// body (see services/plan.ts) — turn that back into a real tappable link rather than dead text.
+function renderMessageBody(body: string) {
+  const parts = body.split(PLAN_LINK_SPLIT);
+  return parts.map((part, i) =>
+    PLAN_LINK_MATCH.test(part) ? (
+      <Link key={i} href={part} style={{ color: 'inherit', textDecoration: 'underline' }}>
+        View plan →
+      </Link>
+    ) : (
+      <span key={i}>{part}</span>
+    ),
+  );
+}
 
 export default function CrewChatPage() {
   const { id: crewId } = useParams<{ id: string }>();
@@ -113,7 +132,7 @@ export default function CrewChatPage() {
                     wordBreak: 'break-word',
                   }}
                 >
-                  {m.body}
+                  {renderMessageBody(m.body)}
                 </div>
               </div>
             );

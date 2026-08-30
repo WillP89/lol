@@ -210,6 +210,18 @@ describe('golden path: signup through Rewind', () => {
     expect(plan.status).toBe('SHARED');
   });
 
+  test('sending the Plan also announces it in Crew chat, with a tappable plan link', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/crews/${crewId}/messages`,
+      headers: { cookie: sessions.ben.cookie },
+    });
+    const { messages } = res.json() as { messages: { body: string; author: { id: string } }[] };
+    const announcement = messages.find((m) => m.body.includes(`/plans/${planSlug}`));
+    expect(announcement).toBeTruthy();
+    expect(announcement!.author.id).toBe(sessions.alex.userId);
+  });
+
   test('the Plan Card is publicly viewable without auth', async () => {
     const res = await app.inject({ method: 'GET', url: `/plans/public/${planSlug}` });
     expect(res.statusCode).toBe(200);
