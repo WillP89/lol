@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import { TabBar } from '@/components/TabBar';
+import { BottomSheet } from '@/components/BottomSheet';
 import type { ExploreExperience } from './ExploreMap';
 
 // Leaflet touches `window` at module load, which breaks Next's server render — load the map
@@ -104,34 +105,34 @@ export default function ExplorePage() {
           )}
         </div>
 
-        {sendTarget && (
-          <div className="banner-card fade-up" style={{ marginTop: 16 }}>
-            <div className="eyebrow">Send &ldquo;{sendTarget.name}&rdquo; to…</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
-              {crews === null && <p className="muted">Loading your Crews…</p>}
-              {crews?.length === 0 && (
-                <p className="muted">
-                  You&rsquo;re not in a Crew yet — <Link href="/crews">create one first</Link>.
-                </p>
-              )}
-              {crews?.map((crew) => (
-                <button
-                  key={crew.id}
-                  className="btn"
-                  disabled={sending !== null}
-                  onClick={() => sendToCrew(crew.id)}
-                  style={{ textAlign: 'left', justifyContent: 'flex-start' }}
-                >
-                  {sending === crew.id ? 'Sending…' : `💬 ${crew.name}`}
-                </button>
-              ))}
-              <button className="btn btn-ghost" onClick={() => setSendTarget(null)} disabled={sending !== null}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
       </div>
+
+      <BottomSheet open={sendTarget !== null} onClose={() => sending === null && setSendTarget(null)}>
+        <div className="eyebrow">Send &ldquo;{sendTarget?.name}&rdquo; to…</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+          {crews === null && <p className="muted">Loading your Crews…</p>}
+          {crews?.length === 0 && (
+            <p className="muted">
+              You&rsquo;re not in a Crew yet — <Link href="/crews">create one first</Link>.
+            </p>
+          )}
+          {crews?.map((crew) => (
+            <button
+              key={crew.id}
+              className="btn"
+              disabled={sending !== null}
+              onClick={() => sendToCrew(crew.id)}
+              style={{ textAlign: 'left', justifyContent: 'flex-start' }}
+            >
+              {sending === crew.id ? 'Sending…' : `💬 ${crew.name}`}
+            </button>
+          ))}
+          <button className="btn btn-ghost" onClick={() => setSendTarget(null)} disabled={sending !== null}>
+            Cancel
+          </button>
+        </div>
+      </BottomSheet>
+
       <TabBar />
     </>
   );
