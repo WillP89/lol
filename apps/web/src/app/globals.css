@@ -73,7 +73,10 @@ input {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 20px;
+  /* Clears the notch/Dynamic Island when installed as a home-screen PWA (standalone mode) —
+     see manifest.json + viewportFit:'cover' in layout.tsx, which is what makes
+     env(safe-area-inset-*) report a real value instead of 0 on those devices. */
+  padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px 14px;
   border-bottom: 1px solid var(--ink-border);
   max-width: 480px;
   margin: 0 auto;
