@@ -332,3 +332,28 @@ describe('golden path: signup through Rewind', () => {
     expect(body.plansByStatus.COMPLETED).toBe(1);
   });
 });
+
+describe('magic-link "next" redirect (invite-join flow)', () => {
+  test('a safe relative next is embedded in the magic link', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/magic-link',
+      payload: { email: 'next-safe@plot-test.invalid', next: '/crews/join/abc123' },
+    });
+    expect(res.statusCode).toBe(200);
+    const { devMagicLinkUrl } = res.json() as { devMagicLinkUrl: string };
+    expect(devMagicLinkUrl).toContain(`next=${encodeURIComponent('/crews/join/abc123')}`);
+  });
+
+  test('an absolute URL in next is dropped, not embedded — open-redirect guard', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/magic-link',
+      payload: { email: 'next-unsafe@plot-test.invalid', next: 'https://evil.example/phish' },
+    });
+    expect(res.statusCode).toBe(200);
+    const { devMagicLinkUrl } = res.json() as { devMagicLinkUrl: string };
+    expect(devMagicLinkUrl).not.toContain('evil.example');
+    expect(devMagicLinkUrl).not.toContain('next=');
+  });
+});

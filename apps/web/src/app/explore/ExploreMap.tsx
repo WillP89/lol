@@ -25,7 +25,15 @@ const pinIcon = L.divIcon({
   iconAnchor: [7, 7],
 });
 
-export default function ExploreMap({ experiences, center }: { experiences: ExploreExperience[]; center: [number, number] }) {
+export default function ExploreMap({
+  experiences,
+  center,
+  onSend,
+}: {
+  experiences: ExploreExperience[];
+  center: [number, number];
+  onSend: (exp: ExploreExperience) => void;
+}) {
   return (
     <MapContainer center={center} zoom={12} scrollWheelZoom style={{ height: '100%', width: '100%', borderRadius: 18 }}>
       <TileLayer
@@ -34,7 +42,7 @@ export default function ExploreMap({ experiences, center }: { experiences: Explo
       />
       {experiences.map((exp) => (
         <Marker key={exp.id} position={[exp.venue.latitude, exp.venue.longitude]} icon={pinIcon}>
-          <Popup>
+          <Popup minWidth={200}>
             <strong>{exp.name}</strong>
             <br />
             {exp.venue.name}
@@ -46,6 +54,24 @@ export default function ExploreMap({ experiences, center }: { experiences: Explo
                 from £{(exp.priceMinMinor / 100).toFixed(0)}
               </>
             )}
+            <br />
+            <button
+              onClick={() => onSend(exp)}
+              style={{
+                marginTop: 8,
+                width: '100%',
+                padding: '7px 10px',
+                borderRadius: 8,
+                border: 'none',
+                background: '#F2A93B',
+                color: '#221806',
+                fontWeight: 700,
+                fontSize: 12.5,
+                cursor: 'pointer',
+              }}
+            >
+              Send to Crew →
+            </button>
           </Popup>
         </Marker>
       ))}

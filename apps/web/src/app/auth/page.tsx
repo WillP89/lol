@@ -1,9 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 
-export default function AuthPage() {
+function AuthForm() {
+  const searchParams = useSearchParams();
+  const next = searchParams.get('next') ?? undefined;
+
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState<{ devMagicLinkUrl?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -14,7 +18,10 @@ export default function AuthPage() {
     setError(null);
     setLoading(true);
     try {
-      const result = await api.post<{ ok: true; devMagicLinkUrl?: string }>('/auth/magic-link', { email });
+      // `next` (e.g. /crews/join/abc123 from an invite link) rides along in the magic-link
+      // email/dev-link itself — the API embeds it in the callback URL so signing in lands you
+      // back where you actually meant to go, instead of always dumping you on /onboarding.
+      const result = await api.post<{ ok: true; devMagicLinkUrl?: string }>('/auth/magic-link', { email, next });
       setSent(result);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong.');
@@ -63,5 +70,13 @@ export default function AuthPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense fallback={<div className="page" style={{ paddingTop: 60 }}><p className="muted">Loading…</p></div>}>
+      <AuthForm />
+    </Suspense>
   );
 }

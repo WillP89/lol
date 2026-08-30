@@ -5,7 +5,7 @@ import { SESSION_COOKIE, requireUser } from '../middleware/auth';
 import { config } from '../lib/config';
 import { oauthProviderStatus } from '../providers/oauth';
 
-const MagicLinkRequestSchema = z.object({ email: z.string().email() });
+const MagicLinkRequestSchema = z.object({ email: z.string().email(), next: z.string().optional() });
 const MagicLinkCallbackSchema = z.object({ token: z.string().min(10) });
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
@@ -16,7 +16,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const result = await requestMagicLink(parsed.data.email, request.ip);
+      const result = await requestMagicLink(parsed.data.email, request.ip, parsed.data.next);
       return reply.send({ ok: true, ...result });
     } catch (err) {
       if (err instanceof AuthError) {
