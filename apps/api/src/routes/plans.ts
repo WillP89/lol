@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../middleware/auth';
-import { isCrewMember } from '../services/crew';
+import { isCrewMember, listUpcomingPlansForUser } from '../services/crew';
 import {
   createPlanFromRecommendationOption,
   sendExperienceToCrew,
@@ -89,6 +89,14 @@ export async function planRoutes(app: FastifyInstance): Promise<void> {
       request.ip,
     );
     return reply.send(result);
+  });
+
+  // "Plans" nav destination — every confirmed Plan across every Crew you're in, not just the
+  // one you happen to have open. See services/crew.ts#listUpcomingPlansForUser.
+  app.get('/plans/upcoming', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const plans = await listUpcomingPlansForUser(request.user.id);
+    return reply.send({ plans });
   });
 
   app.get('/plans/:id', async (request, reply) => {

@@ -49,7 +49,7 @@ export async function joinCrewByInviteCode(userId: string, inviteCode: string) {
  * hand-tuned join, and each piece degrades independently (a Crew with no messages yet just
  * gets `latestMessage: null`, not a broken row).
  */
-async function crewSummaryExtras(crewId: string) {
+async function crewSummaryExtras(crewId: string, requestingUserId: string) {
   const [latestMessage, activePlan, upcomingPlan] = await Promise.all([
     prisma.crewMessage.findFirst({
       where: { crewId },
@@ -79,6 +79,10 @@ async function crewSummaryExtras(crewId: string) {
           publicSlug: activePlan.publicSlug,
           inCount: activePlan.votes.filter((v) => v.vote === 'IN').length,
           totalMembers: activePlan.members.length,
+          // Whether the requesting user still owes this decision a vote — Home's "needs your
+          // attention" list (docs/DECISIONS.md#home-surface) is only useful if it's actually
+          // scoped to *you*, not "someone in the Crew hasn't voted yet".
+          iVoted: activePlan.votes.some((v) => v.userId === requestingUserId),
         }
       : null,
     upcomingPlan: upcomingPlan
@@ -88,6 +92,8 @@ async function crewSummaryExtras(crewId: string) {
           publicSlug: upcomingPlan.publicSlug,
           startsAt: upcomingPlan.experience?.startsAt ?? null,
           venueName: upcomingPlan.experience?.venue?.name ?? null,
+          category: upcomingPlan.experience?.category ?? null,
+          imageUrl: upcomingPlan.experience?.imageUrl ?? null,
         }
       : null,
   };
@@ -103,7 +109,43 @@ export async function listCrewsForUser(userId: string) {
     orderBy: { updatedAt: 'desc' },
   });
 
-  return Promise.all(crews.map(async (crew) => ({ ...crew, ...(await crewSummaryExtras(crew.id)) })));
+  return Promise.all(crews.map(async (crew) => ({ ...crew, ...(await crewSummaryExtras(crew.id, userId)) })));
+}
+
+/**
+ * Every confirmed (BOOKED) Plan across every Crew the user belongs to, soonest first — the
+ * data behind the standalone "Plans" destination (brief: "confirmed plans should not disappear
+ * inside chat"). A Plan can go BOOKED without ever having an Experience attached (a soft plan
+ * booked by hand) — those are kept, just with `startsAt: null`, sorted after ones with a real
+ * date rather than dropped.
+ */
+export async function listUpcomingPlansForUser(userId: string) {
+  const plans = await prisma.plan.findMany({
+    where: { status: 'BOOKED', crew: { members: { some: { userId, status: 'ACTIVE' } } } },
+    include: { crew: { select: { id: true, name: true } }, experience: { include: { venue: true } } },
+    orderBy: { updatedAt: 'desc' },
+  });
+
+  return plans
+    .map((plan) => ({
+      id: plan.id,
+      publicSlug: plan.publicSlug,
+      title: plan.title,
+      crew: plan.crew,
+      startsAt: plan.experience?.startsAt ?? null,
+      venueName: plan.experience?.venue?.name ?? null,
+      venueCity: plan.experience?.venue?.city ?? null,
+      category: plan.experience?.category ?? null,
+      imageUrl: plan.experience?.imageUrl ?? null,
+      priceMinMinor: plan.experience?.priceMinMinor ?? null,
+      currency: plan.experience?.currency ?? 'GBP',
+    }))
+    .sort((a, b) => {
+      if (a.startsAt && b.startsAt) return new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();
+      if (a.startsAt) return -1;
+      if (b.startsAt) return 1;
+      return 0;
+    });
 }
 
 export async function getCrewDetail(crewId: string, requestingUserId: string) {

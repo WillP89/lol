@@ -282,6 +282,31 @@ describe('golden path: signup through Rewind', () => {
     expect(announcement!.author.id).toBe(sessions.alex.userId);
   });
 
+  test('GET /crews flags iVoted per-member, not per-Crew — the "needs your attention" signal', async () => {
+    // Nobody has voted on the freshly-sent Plan yet.
+    const beforeRes = await app.inject({ method: 'GET', url: '/crews', headers: { cookie: sessions.sam.cookie } });
+    const before = (beforeRes.json() as { crews: { id: string; activePlan: { iVoted: boolean } | null }[] }).crews.find((c) => c.id === crewId);
+    expect(before?.activePlan?.iVoted).toBe(false);
+
+    const voteRes = await app.inject({
+      method: 'POST',
+      url: `/plans/public/${planSlug}/vote`,
+      headers: { cookie: sessions.sam.cookie },
+      payload: { vote: 'in' },
+    });
+    expect(voteRes.statusCode).toBe(200);
+
+    // Sam voted — Sam's iVoted flips true, but Jack (who hasn't voted) still sees false on
+    // the exact same Plan, proving this is scoped to the requesting user, not the Crew.
+    const afterSamRes = await app.inject({ method: 'GET', url: '/crews', headers: { cookie: sessions.sam.cookie } });
+    const afterSam = (afterSamRes.json() as { crews: { id: string; activePlan: { iVoted: boolean } | null }[] }).crews.find((c) => c.id === crewId);
+    expect(afterSam?.activePlan?.iVoted).toBe(true);
+
+    const afterJackRes = await app.inject({ method: 'GET', url: '/crews', headers: { cookie: sessions.jack.cookie } });
+    const afterJack = (afterJackRes.json() as { crews: { id: string; activePlan: { iVoted: boolean } | null }[] }).crews.find((c) => c.id === crewId);
+    expect(afterJack?.activePlan?.iVoted).toBe(false);
+  });
+
   test('the Plan Card is publicly viewable without auth', async () => {
     const res = await app.inject({ method: 'GET', url: `/plans/public/${planSlug}` });
     expect(res.statusCode).toBe(200);
@@ -371,6 +396,15 @@ describe('golden path: signup through Rewind', () => {
     const { crew: detail } = detailRes.json() as { crew: { recentMessages: { body: string }[] } };
     expect(detail.recentMessages.length).toBeGreaterThan(0);
     expect(detail.recentMessages[detail.recentMessages.length - 1].body).toContain('/plans/');
+  });
+
+  test('GET /plans/upcoming surfaces the booked Plan for the standalone Plans destination', async () => {
+    const res = await app.inject({ method: 'GET', url: '/plans/upcoming', headers: { cookie: sessions.alex.cookie } });
+    expect(res.statusCode).toBe(200);
+    const { plans } = res.json() as { plans: { id: string; crew: { id: string; name: string } }[] };
+    const upcoming = plans.find((p) => p.id === planId);
+    expect(upcoming).toBeTruthy();
+    expect(upcoming?.crew.id).toBe(crewId);
   });
 
   test('the plan moves to BOOKED, then COMPLETED, and Rewind can be submitted', async () => {
