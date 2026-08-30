@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
+import { TabBar } from '@/components/TabBar';
 
 interface CrewSummary {
   id: string;
@@ -59,14 +60,6 @@ export default function CrewsPage() {
       <nav className="nav">
         <div className="wordmark">
           Plot<span>·</span>
-        </div>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-          <Link href="/explore" className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
-            Explore
-          </Link>
-          <Link href="/onboarding" className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
-            Profile
-          </Link>
         </div>
       </nav>
       <div className="page">
@@ -125,6 +118,7 @@ export default function CrewsPage() {
         </form>
         {error && <div className="error">{error}</div>}
       </div>
+      <TabBar />
     </>
   );
 }

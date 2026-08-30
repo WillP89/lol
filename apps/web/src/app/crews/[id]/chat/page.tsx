@@ -192,14 +192,21 @@ export default function CrewChatPage() {
               <p className="muted">No messages yet — say hi, or send an event from Explore.</p>
             </div>
           )}
-          {messages?.map((m) => {
+          {messages?.map((m, i) => {
             const mine = m.author.id === me;
             const planMatch = m.body.match(PLAN_ANNOUNCEMENT);
             const cardData = planMatch ? planCards[planMatch[2]] : undefined;
+            // Consecutive messages from the same sender group together — a name/avatar on
+            // every single line reads as unfinished the moment someone sends two in a row.
+            const prev = i > 0 ? messages[i - 1] : null;
+            const grouped = prev !== null && prev.author.id === m.author.id;
 
             return (
-              <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
-                {!mine && (
+              <div
+                key={m.id}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start', marginTop: grouped ? -6 : 6 }}
+              >
+                {!mine && !grouped && (
                   <div className="muted" style={{ fontSize: 10.5, marginBottom: 2, marginLeft: 4 }}>
                     {m.author.displayName ?? m.author.email}
                   </div>

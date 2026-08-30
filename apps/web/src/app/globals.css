@@ -337,3 +337,43 @@ input.field:focus {
 .fade-up {
   animation: fadeUp 0.3s ease both;
 }
+
+/* Persistent bottom nav — see components/TabBar.tsx. Fixed to the viewport, not .page's
+   scroll context, with safe-area padding so it clears the home-indicator on iOS. */
+.tabbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding: 10px 6px calc(env(safe-area-inset-bottom, 0px) + 10px);
+  border-top: 1px solid var(--ink-border);
+  background: rgba(23, 24, 38, 0.88);
+  backdrop-filter: blur(14px);
+  z-index: 30;
+}
+.tab {
+  background: none;
+  border: none;
+  color: var(--ink-text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+  padding: 4px 18px;
+  border-radius: 10px;
+  transition: background 0.12s ease;
+}
+.tab.active {
+  color: var(--ink-gold);
+}
+.tab:active {
+  background: var(--ink-surface-2);
+}

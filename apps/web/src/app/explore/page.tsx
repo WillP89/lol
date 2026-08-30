@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
+import { TabBar } from '@/components/TabBar';
 import type { ExploreExperience } from './ExploreMap';
 
 // Leaflet touches `window` at module load, which breaks Next's server render — load the map
@@ -131,6 +132,7 @@ export default function ExplorePage() {
           </div>
         )}
       </div>
+      <TabBar />
     </>
   );
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
+import { TabBar } from '@/components/TabBar';
 
 interface CrewDetail {
   id: string;
@@ -232,6 +233,7 @@ export default function CrewDetailPage() {
 
         {error && <div className="error">{error}</div>}
       </div>
+      <TabBar />
     </>
   );
 }

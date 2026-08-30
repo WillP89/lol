@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
+import { TabBar } from '@/components/TabBar';
 
 const CATEGORIES = ['live_music', 'clubbing', 'restaurant', 'comedy', 'art_culture', 'sport', 'day_activity'];
 const AREAS = ['Shoreditch', 'Soho', 'Clapham', 'Brixton', 'Camden', 'Hackney'];
@@ -101,8 +102,9 @@ function OnboardingWizard() {
 
   if (!loaded) {
     return (
-      <div className="page" style={{ paddingTop: 40 }}>
-        <p className="muted">Loading…</p>
+      <div className="page" style={{ paddingTop: 40, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="card" style={{ height: 90, opacity: 0.5 }} />
+        <div className="card" style={{ height: 60, opacity: 0.5 }} />
       </div>
     );
   }
@@ -160,6 +162,7 @@ function OnboardingWizard() {
             Edit profile
           </button>
         </div>
+        <TabBar />
       </>
     );
   }

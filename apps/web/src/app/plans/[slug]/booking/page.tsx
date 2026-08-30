@@ -72,7 +72,20 @@ export default function BookingPage() {
     }
   }
 
-  if (!data) return <div className="page">{error ? <div className="error">{error}</div> : <p className="muted">Loading…</p>}</div>;
+  if (!data) {
+    return (
+      <div className="page">
+        {error ? (
+          <div className="error">{error}</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 20 }}>
+            <div className="art-block" style={{ background: 'var(--ink-surface-2)', height: 88, margin: '0 -20px', opacity: 0.6 }} />
+            <div className="card" style={{ height: 70, opacity: 0.5 }} />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const { plan } = data;
   const isBooked = plan.status === 'BOOKED' || Boolean(existingBooking && existingBooking.status === 'CONFIRMED');
