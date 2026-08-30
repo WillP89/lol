@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
+import { categoryStyle } from '@/lib/categoryStyle';
 
 interface PlanDetail {
   plan: {
@@ -11,7 +12,7 @@ interface PlanDetail {
     title: string;
     status: string;
     crewId: string;
-    experience: { name: string; priceMinMinor: number | null; currency: string; venue: { name: string } | null } | null;
+    experience: { name: string; category: string; priceMinMinor: number | null; currency: string; venue: { name: string } | null } | null;
     votes: { userId: string; vote: string }[];
     members: { user: { id: string; displayName: string | null; email: string } }[];
     bookings: { id: string; status: string; externalUrl: string | null }[];
@@ -75,6 +76,7 @@ export default function BookingPage() {
 
   const { plan } = data;
   const isBooked = plan.status === 'BOOKED' || Boolean(existingBooking && existingBooking.status === 'CONFIRMED');
+  const style = categoryStyle(plan.experience?.category);
 
   return (
     <>
@@ -84,17 +86,21 @@ export default function BookingPage() {
         </Link>
         <div className="wordmark">Plot</div>
       </nav>
-      <div className="page">
+      <div className="page" style={{ paddingTop: 0 }}>
+        <div className="art-block" style={{ background: style.bg, height: 88, fontSize: 30, borderRadius: 0, margin: '0 -20px 20px' }}>
+          {style.emoji}
+        </div>
+
         <div className="eyebrow">Book for the Crew</div>
         <h1 style={{ fontSize: 24, marginBottom: 8 }}>{plan.title}</h1>
         {plan.experience?.venue && <p className="muted" style={{ marginBottom: 20 }}>{plan.experience.venue.name}</p>}
 
-        <div className="card">
+        <div className="banner-card">
           <div className="muted" style={{ marginBottom: 4 }}>
             {inVoterIds.length} of {plan.members.length} paying now
           </div>
           {plan.experience?.priceMinMinor !== null && plan.experience?.priceMinMinor !== undefined && (
-            <div style={{ fontFamily: 'Fraunces, serif', fontSize: 20 }}>
+            <div style={{ fontFamily: 'Fraunces, serif', fontSize: 22, color: 'var(--ink-gold)' }}>
               £{((plan.experience.priceMinMinor * inVoterIds.length) / 100).toFixed(2)} total
             </div>
           )}
@@ -103,9 +109,9 @@ export default function BookingPage() {
         {isBooked ? (
           <div className="card" style={{ borderColor: 'var(--ink-moss)' }}>
             <div className="eyebrow" style={{ color: 'var(--ink-moss)' }}>
-              Booked
+              ✓ Booked
             </div>
-            <p>The Crew is going. Added to everyone&rsquo;s calendar.</p>
+            <p style={{ margin: 0 }}>The Crew is going. Added to everyone&rsquo;s calendar.</p>
           </div>
         ) : !booking ? (
           <button className="btn btn-primary" onClick={startBooking} disabled={busy || inVoterIds.length === 0}>

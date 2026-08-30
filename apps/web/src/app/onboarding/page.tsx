@@ -126,15 +126,15 @@ function OnboardingWizard() {
         <div className="page">
           <h1 style={{ fontSize: 24, marginBottom: 16 }}>Your profile</h1>
 
-          <div className="card">
+          <div className="banner-card">
             <div className="eyebrow">Areas</div>
             <p style={{ margin: '6px 0 0' }}>
               {home?.label ?? 'Not set'}
               {favs.length > 0 && ` · also likes ${favs.map((f) => f.label).join(', ')}`}
             </p>
-          </div>
 
-          <div className="card">
+            <div style={{ height: 1, background: 'var(--ink-border)', margin: '14px 0' }} />
+
             <div className="eyebrow">Into</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
               {liked.length ? (
@@ -147,10 +147,10 @@ function OnboardingWizard() {
                 <span className="muted">Nothing marked yet.</span>
               )}
             </div>
-          </div>
 
-          <div className="card">
-            <div className="eyebrow">Budget & energy</div>
+            <div style={{ height: 1, background: 'var(--ink-border)', margin: '14px 0' }} />
+
+            <div className="eyebrow">Budget &amp; energy</div>
             <p style={{ margin: '6px 0 0' }}>
               Up to £{(existing.tasteProfile.budgetMaxMinor / 100).toFixed(0)} · {existing.tasteProfile.energyPreference.toLowerCase()} energy
             </p>
@@ -166,13 +166,19 @@ function OnboardingWizard() {
 
   return (
     <div className="page" style={{ paddingTop: 40 }}>
-      <div className="eyebrow">
-        {editing ? 'Editing your profile' : `Step ${step + 1} of 3`}
-      </div>
-      {editing && (
-        <button className="btn btn-ghost" onClick={() => setEditing(false)} style={{ marginBottom: 12, alignSelf: 'flex-start' }}>
+      {editing ? (
+        <button className="btn btn-ghost" onClick={() => setEditing(false)} style={{ marginBottom: 14, width: 'auto', padding: '8px 0' }}>
           ← Back to profile
         </button>
+      ) : (
+        <>
+          <div className="eyebrow">Step {step + 1} of 3</div>
+          <div style={{ display: 'flex', gap: 5, marginBottom: 20 }}>
+            {[0, 1, 2].map((s) => (
+              <div key={s} style={{ flex: 1, height: 3, borderRadius: 3, background: s <= step ? 'var(--ink-gold)' : 'var(--ink-border)' }} />
+            ))}
+          </div>
+        </>
       )}
 
       {step === 0 && (

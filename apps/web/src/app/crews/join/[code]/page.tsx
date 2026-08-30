@@ -39,12 +39,15 @@ export default function JoinCrewPage() {
 
   return (
     <div className="page" style={{ paddingTop: 80, textAlign: 'center' }}>
+      <div className="wordmark" style={{ fontSize: 22, marginBottom: 28, justifyContent: 'center' }}>
+        Plot<span>·</span>
+      </div>
       <div className="eyebrow">You&rsquo;re invited</div>
       {joined ? (
-        <>
+        <div className="fade-up">
           <div style={{ fontSize: 40, marginBottom: 8 }}>🎉</div>
           <h1 style={{ fontSize: 22 }}>You&rsquo;re in — taking you there…</h1>
-        </>
+        </div>
       ) : error ? (
         <>
           <h1 style={{ fontSize: 22, marginBottom: 16 }}>Couldn&rsquo;t join this Crew</h1>
