@@ -290,6 +290,29 @@ describe('golden path: signup through Rewind', () => {
     expect(confirmRes.statusCode).toBe(200);
   });
 
+  test('the Home surface (GET /crews) and Crew page (GET /crews/:id) both surface the upcoming Plan and recent chat', async () => {
+    const listRes = await app.inject({ method: 'GET', url: '/crews', headers: { cookie: sessions.alex.cookie } });
+    const { crews } = listRes.json() as {
+      crews: {
+        id: string;
+        latestMessage: { body: string; authorName: string } | null;
+        activePlan: { id: string } | null;
+        upcomingPlan: { id: string; title: string; venueName: string | null } | null;
+      }[];
+    };
+    const crew = crews[0];
+    // Booked, not one of the still-deciding statuses — should no longer show as an open
+    // decision, and should show as the upcoming Plan instead.
+    expect(crew.activePlan).toBeNull();
+    expect(crew.upcomingPlan?.id).toBe(planId);
+    expect(crew.latestMessage?.body).toContain('/plans/');
+
+    const detailRes = await app.inject({ method: 'GET', url: `/crews/${crewId}`, headers: { cookie: sessions.alex.cookie } });
+    const { crew: detail } = detailRes.json() as { crew: { recentMessages: { body: string }[] } };
+    expect(detail.recentMessages.length).toBeGreaterThan(0);
+    expect(detail.recentMessages[detail.recentMessages.length - 1].body).toContain('/plans/');
+  });
+
   test('the plan moves to BOOKED, then COMPLETED, and Rewind can be submitted', async () => {
     const planViewRes = await app.inject({ method: 'GET', url: `/plans/public/${planSlug}` });
     expect((planViewRes.json() as { plan: { status: string } }).plan.status).toBe('BOOKED');
