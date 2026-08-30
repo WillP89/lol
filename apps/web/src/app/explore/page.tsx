@@ -34,11 +34,51 @@ function formatWhen(startsAt: string) {
 
 function formatPrice(exp: ExploreExperience) {
   if (exp.priceMinMinor === null) return null;
+  if (exp.priceMinMinor === 0) return 'free';
   const min = `£${(exp.priceMinMinor / 100).toFixed(0)}`;
   if (exp.priceMaxMinor && exp.priceMaxMinor !== exp.priceMinMinor) {
     return `£${(exp.priceMinMinor / 100).toFixed(0)}–£${(exp.priceMaxMinor / 100).toFixed(0)}`;
   }
   return `from ${min}`;
+}
+
+type DiscoveryMode = 'all' | 'tonight' | 'weekend' | 'free';
+
+const DISCOVERY_MODES: { id: DiscoveryMode; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'tonight', label: '🌙 Tonight' },
+  { id: 'weekend', label: '📅 This weekend' },
+  { id: 'free', label: '🆓 Free' },
+];
+
+/**
+ * "This weekend" always means the *next* Friday-evening-through-Sunday-night window, including
+ * the one currently underway if today is already Fri/Sat/Sun — never a weekend that's already
+ * passed. Kept as plain Date math (no library) since it's one small, well-tested rule.
+ */
+function weekendWindow(now: Date): [Date, Date] {
+  const day = now.getDay(); // 0 Sun … 6 Sat
+  const daysSinceFriday = (day - 5 + 7) % 7; // 0 on Fri, 1 on Sat, 2 on Sun, else 3-6
+  const friday = new Date(now);
+  friday.setHours(0, 0, 0, 0);
+  friday.setDate(now.getDate() - (daysSinceFriday <= 2 ? daysSinceFriday : daysSinceFriday - 7));
+  const mondayStart = new Date(friday);
+  mondayStart.setDate(friday.getDate() + 3);
+  return [friday, mondayStart];
+}
+
+function matchesDiscoveryMode(exp: ExploreExperience, mode: DiscoveryMode, now: Date): boolean {
+  if (mode === 'all') return true;
+  if (mode === 'free') return exp.priceMinMinor === 0;
+  const starts = new Date(exp.startsAt);
+  if (mode === 'tonight') {
+    const endOfToday = new Date(now);
+    endOfToday.setHours(23, 59, 59, 999);
+    return starts >= now && starts <= endOfToday;
+  }
+  // weekend
+  const [from, to] = weekendWindow(now);
+  return starts >= from && starts < to;
 }
 
 export default function ExplorePage() {
@@ -48,6 +88,7 @@ export default function ExplorePage() {
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<'map' | 'list'>('map');
+  const [mode, setMode] = useState<DiscoveryMode>('all');
 
   // The experience someone tapped for a closer look — non-null opens the detail sheet. Sending
   // it to a Crew is a second step *inside* that same sheet (see `pickingCrew`), not a separate
@@ -70,12 +111,21 @@ export default function ExplorePage() {
       .catch(() => {});
   }, []);
 
+  // Computed once per mount rather than per render — a discovery mode like "tonight" only needs
+  // to be accurate to the minute, not re-evaluated on every keystroke elsewhere on the page.
+  const now = useMemo(() => new Date(), []);
+
+  const filtered = useMemo(
+    () => (experiences ?? []).filter((exp) => matchesDiscoveryMode(exp, mode, now)),
+    [experiences, mode, now],
+  );
+
   const center = useMemo<[number, number]>(() => {
-    if (!experiences?.length) return LONDON_CENTER;
-    const avgLat = experiences.reduce((sum, e) => sum + e.venue.latitude, 0) / experiences.length;
-    const avgLng = experiences.reduce((sum, e) => sum + e.venue.longitude, 0) / experiences.length;
+    if (!filtered.length) return LONDON_CENTER;
+    const avgLat = filtered.reduce((sum, e) => sum + e.venue.latitude, 0) / filtered.length;
+    const avgLng = filtered.reduce((sum, e) => sum + e.venue.longitude, 0) / filtered.length;
     return [avgLat, avgLng];
-  }, [experiences]);
+  }, [filtered]);
 
   function closeSheet() {
     if (sending !== null) return;
@@ -112,7 +162,7 @@ export default function ExplorePage() {
           <h1 style={{ fontSize: 22 }}>What&rsquo;s on around London</h1>
           <p className="muted" style={{ marginBottom: 0 }}>
             {experiences
-              ? `${experiences.length} option${experiences.length === 1 ? '' : 's'} over the next 3 weeks — tap one, then send it to a Crew.`
+              ? `${filtered.length} option${filtered.length === 1 ? '' : 's'}${mode === 'all' ? ' over the next 3 weeks' : ''} — tap one, then send it to a Crew.`
               : 'Finding what’s on…'}
           </p>
         </div>
@@ -124,6 +174,14 @@ export default function ExplorePage() {
             ⚠️ Sample events — no real event provider is connected yet. What you send to your Crew right now won&rsquo;t be bookable.
           </div>
         )}
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, overflowX: 'auto', paddingBottom: 2 }}>
+          {DISCOVERY_MODES.map((m) => (
+            <button key={m.id} className={`chip ${mode === m.id ? 'selected' : ''}`} style={{ whiteSpace: 'nowrap' }} onClick={() => setMode(m.id)}>
+              {m.label}
+            </button>
+          ))}
+        </div>
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
           <button className={`chip ${view === 'map' ? 'selected' : ''}`} onClick={() => setView('map')}>
@@ -137,7 +195,13 @@ export default function ExplorePage() {
         {view === 'map' ? (
           <div style={{ height: 480, borderRadius: 18, overflow: 'hidden', border: '1px solid var(--ink-border)', boxShadow: 'var(--hard-shadow)' }}>
             {experiences ? (
-              <ExploreMap experiences={experiences} center={center} onSelect={setSelected} />
+              filtered.length > 0 ? (
+                <ExploreMap experiences={filtered} center={center} onSelect={setSelected} />
+              ) : (
+                <div style={{ height: '100%', background: 'var(--ink-surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, textAlign: 'center' }}>
+                  <p className="muted">Nothing matches &ldquo;{DISCOVERY_MODES.find((m) => m.id === mode)?.label}&rdquo; right now — try a different filter.</p>
+                </div>
+              )
             ) : (
               <div style={{ height: '100%', background: 'var(--ink-surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <p className="muted">Loading map…</p>
@@ -147,8 +211,12 @@ export default function ExplorePage() {
         ) : (
           <div>
             {experiences === null && <p className="muted">Finding what’s on…</p>}
-            {experiences?.length === 0 && <p className="muted">Nothing found for London right now — check back soon.</p>}
-            {experiences?.map((exp) => {
+            {experiences && filtered.length === 0 && (
+              <p className="muted">
+                {mode === 'all' ? 'Nothing found for London right now — check back soon.' : `Nothing matches this filter right now — try a different one.`}
+              </p>
+            )}
+            {filtered.map((exp) => {
               const style = categoryStyle(exp.category);
               const price = formatPrice(exp);
               return (
