@@ -44,8 +44,17 @@ DATABASE_URL=<your Neon connection string>
 SESSION_SECRET=<random 32+ character string>
 TOKEN_HASH_SECRET=<a different random 32+ character string>
 WEB_APP_URL=<filled in after Step 3>
-NODE_ENV=production
+NODE_ENV=development
 ```
+
+**Leave `NODE_ENV` as `development`, not `production`, until a real email provider is wired
+up.** No transactional email provider is implemented yet (see `docs/providers/email.md` —
+Postmark/SES is a TODO in `apps/api/src/services/auth.ts`). In `development`, the magic-link
+API response includes the raw sign-in link directly so the web app can show a "Continue →"
+button — that's the only way to sign in today. Setting `NODE_ENV=production` silently disables
+that fallback (the API just logs a warning server-side) with **no email ever sent to replace
+it**, which is a dead end for anyone testing the pilot. Switch this to `production` only once
+Postmark/SES is actually sending mail.
 
 ## Step 3 — deploy the web app
 
