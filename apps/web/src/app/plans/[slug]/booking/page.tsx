@@ -26,6 +26,9 @@ export default function BookingPage() {
   const [booking, setBooking] = useState<{ bookingId: string; externalUrl: string } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [markingDone, setMarkingDone] = useState(false);
+  const [rewindRating, setRewindRating] = useState<string | null>(null);
+  const [rewindSubmitting, setRewindSubmitting] = useState(false);
 
   function load() {
     // Resolve the public slug to a plan id first, then load the authenticated (fuller) view —
@@ -69,6 +72,36 @@ export default function BookingPage() {
       setError(err instanceof ApiError ? err.message : 'Could not confirm booking.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Nothing anywhere in the product ever transitioned a Plan from BOOKED to COMPLETED — the
+  // fully-built Rewind feature (POST /plans/:id/rewind) was consequently unreachable end to
+  // end. This is the missing link: once the Crew has actually been, anyone can mark it done,
+  // which unlocks the one-tap "would we do this again?" prompt.
+  async function markAsDone() {
+    if (!data) return;
+    setMarkingDone(true);
+    try {
+      await api.post(`/plans/${data.plan.id}/complete`);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not mark as done.');
+    } finally {
+      setMarkingDone(false);
+    }
+  }
+
+  async function submitRewind(rating: 'love' | 'like' | 'meh' | 'no') {
+    if (!data) return;
+    setRewindSubmitting(true);
+    try {
+      await api.post(`/plans/${data.plan.id}/rewind`, { rating, reasons: [] });
+      setRewindRating(rating);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not submit — try again.');
+    } finally {
+      setRewindSubmitting(false);
     }
   }
 
@@ -119,13 +152,52 @@ export default function BookingPage() {
           )}
         </div>
 
-        {isBooked ? (
-          <div className="card" style={{ borderColor: 'var(--ink-moss)' }}>
-            <div className="eyebrow" style={{ color: 'var(--ink-moss)' }}>
-              ✓ Booked
-            </div>
-            <p style={{ margin: 0 }}>The Crew is going. Added to everyone&rsquo;s calendar.</p>
+        {plan.status === 'COMPLETED' ? (
+          <div className="banner-card" style={{ textAlign: 'center' }}>
+            {rewindRating ? (
+              <>
+                <div style={{ fontSize: 30, marginBottom: 8 }}>✓</div>
+                <p style={{ margin: 0 }}>Thanks — noted for next time.</p>
+              </>
+            ) : (
+              <>
+                <div className="eyebrow">Rewind</div>
+                <p style={{ margin: '4px 0 14px', fontFamily: 'Fraunces, serif', fontSize: 17 }}>Would the Crew do this again?</p>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                  {([
+                    ['love', '😍', 'Love it'],
+                    ['like', '🙂', 'Liked it'],
+                    ['meh', '😐', 'Meh'],
+                    ['no', '👎', 'Not for us'],
+                  ] as const).map(([value, emoji, label]) => (
+                    <button
+                      key={value}
+                      onClick={() => submitRewind(value)}
+                      disabled={rewindSubmitting}
+                      className="chip"
+                      style={{ flexDirection: 'column', gap: 4, padding: '10px 8px', flex: 1 }}
+                      aria-label={label}
+                    >
+                      <span style={{ fontSize: 18 }}>{emoji}</span>
+                      <span style={{ fontSize: 9 }}>{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
+        ) : isBooked ? (
+          <>
+            <div className="card" style={{ borderColor: 'var(--ink-moss)' }}>
+              <div className="eyebrow" style={{ color: 'var(--ink-moss)' }}>
+                ✓ Booked
+              </div>
+              <p style={{ margin: 0 }}>The Crew is going. Added to everyone&rsquo;s calendar.</p>
+            </div>
+            <button className="btn btn-ghost" onClick={markAsDone} disabled={markingDone}>
+              {markingDone ? 'Marking…' : 'Already happened? Mark as done →'}
+            </button>
+          </>
         ) : !booking ? (
           <button className="btn btn-primary" onClick={startBooking} disabled={busy || inVoterIds.length === 0}>
             {busy ? 'Starting…' : 'Book for the Crew →'}

@@ -380,3 +380,21 @@ input.field:focus {
 .tab:active {
   background: var(--ink-surface-2);
 }
+
+/* Leaflet's default zoom control is stock white buttons — jarring against a dark map. See
+   explore/ExploreMap.tsx. */
+.leaflet-control-zoom a {
+  background: var(--ink-surface) !important;
+  color: var(--ink-text) !important;
+  border-color: var(--ink-border) !important;
+}
+.leaflet-control-zoom a:hover {
+  background: var(--ink-surface-2) !important;
+}
+.leaflet-control-attribution {
+  background: rgba(16, 15, 23, 0.75) !important;
+  color: var(--ink-text-dim) !important;
+}
+.leaflet-control-attribution a {
+  color: var(--ink-text-muted) !important;
+}

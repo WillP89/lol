@@ -174,7 +174,10 @@ export default function CrewChatPage() {
       </nav>
       {/* 100dvh (not 100vh) so the composer stays reachable when a mobile keyboard eats
           viewport height, instead of getting pushed off-screen below the fold. */}
-      <div className="page" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - 90px)', paddingBottom: 12 }}>
+      <div
+        className="page"
+        style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - 90px)', paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
+      >
         <div className="eyebrow">Crew chat</div>
         <p className="muted" style={{ marginBottom: 14 }}>Just this Crew. No one else can see it.</p>
 
