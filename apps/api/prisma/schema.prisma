@@ -1,0 +1,774 @@
+// Plot data model.
+//
+// Design decisions worth flagging up front (full rationale in docs/DECISIONS.md):
+//
+// 1. Canonical `Experience` vs `ProviderListing`. The brief asks for Event / Experience /
+//    Restaurant / Performance as separate entities. We instead model ONE canonical
+//    `Experience` with a `category` enum + a JSON `attributes` bag for category-specific
+//    fields (cuisine, artist, dress code, ...). A restaurant and a gig are structurally the
+//    same thing to Plot: something bookable, at a place, at a time, that a group either does
+//    or doesn't want to do together. Splitting them into separate tables would mean the Match
+//    engine, dedup pipeline and quality scorer all need N near-identical code paths instead of
+//    one. `ProviderListing` is the raw, provider-specific row (possibly several per
+//    Experience, since the same gig can appear on DICE, RA and the venue site) — see
+//    docs/DECISIONS.md#canonical-vs-listing.
+//
+// 2. One `IntentSignal` event log, not N interaction tables (SearchInteraction,
+//    RecommendationInteraction, ...). Event `name` + typed `payload` JSON, validated against
+//    the taxonomy in packages/shared/src/analytics.ts at the application layer. This keeps
+//    "add a new event" a one-line change in shared code, not a migration.
+//
+// 3. AvailabilityWindow stores free/busy booleans only — never calendar event titles. This is
+//    a privacy commitment, not just a modelling choice; see docs/PRIVACY.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id              String     @id @default(uuid())
+  email           String     @unique
+  emailVerifiedAt DateTime?
+  phone           String?    @unique
+  displayName     String?
+  status          UserStatus @default(ACTIVE)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?
+
+  profile               Profile?
+  tasteProfile          TasteProfile?
+  locationPrefs         LocationPreference[]
+  authTokens            AuthToken[]
+  sessions              Session[]
+  crewMemberships       CrewMember[]
+  calendarConnections   CalendarConnection[]
+  availabilityWindows   AvailabilityWindow[]
+  planMemberships       PlanMember[]
+  planVotes             PlanVote[]
+  bookingParticipations BookingParticipant[]
+  notifications         Notification[]
+  intentSignals         IntentSignal[]
+  feedbackSignals       FeedbackSignal[]
+  rewindSignals         RewindSignal[]
+  experimentAssignments ExperimentAssignment[]
+  referralsSent         Referral[]             @relation("ReferralSender")
+  referralsReceived     Referral[]             @relation("ReferralRecipient")
+  contactMatchesAsOwner ContactMatch[]         @relation("ContactOwner")
+  contactMatchesAsMatch ContactMatch[]         @relation("ContactMatched")
+  blocksInitiated       UserBlock[]            @relation("BlockInitiator")
+  blocksReceived        UserBlock[]            @relation("BlockTarget")
+  auditEvents           AuditEvent[]
+
+  @@index([status])
+}
+
+enum UserStatus {
+  ACTIVE
+  DEACTIVATED
+  DELETED
+  BLOCKED
+}
+
+model Profile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  avatarUrl String?
+  homeCity  String?
+  bio       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Social geography: not just "London" — home area, work area, favourite areas, each with a
+/// weight. This is what lets Match reason about travel radius per-context (a Tuesday dinner
+/// vs a Saturday night) instead of a single dumb radius. See brief §Location intelligence.
+model LocationPreference {
+  id        String       @id @default(uuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      LocationKind
+  label     String // e.g. "Clapham", "Shoreditch"
+  latitude  Float?
+  longitude Float?
+  createdAt DateTime     @default(now())
+
+  @@index([userId])
+}
+
+enum LocationKind {
+  HOME
+  WORK
+  FAVOURITE
+  CITY
+}
+
+model TasteProfile {
+  id                 String      @id @default(uuid())
+  userId             String      @unique
+  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// category -> affinity score -1..1, built from onboarding swipes + ongoing signals.
+  categoryAffinity   Json
+  budgetMinMinor     Int         @default(0)
+  budgetMaxMinor     Int         @default(0)
+  currency           String      @default("GBP")
+  travelRadiusMeters Int         @default(6000)
+  energyPreference   EnergyLevel @default(MEDIUM)
+  updatedAt          DateTime    @updatedAt
+  createdAt          DateTime    @default(now())
+}
+
+enum EnergyLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+/// Single-use magic-link tokens. We store a hash, never the raw token (see
+/// apps/api/src/lib/auth.ts) — the raw token only ever exists in the emailed URL and in
+/// memory for the duration of the request that issues it.
+model AuthToken {
+  id         String           @id @default(uuid())
+  userId     String
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String           @unique
+  purpose    AuthTokenPurpose
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime         @default(now())
+  requestIp  String?
+
+  @@index([userId, purpose])
+}
+
+enum AuthTokenPurpose {
+  MAGIC_LINK
+  EMAIL_VERIFY
+}
+
+model Session {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique
+  userAgent        String?
+  ipAddress        String?
+  createdAt        DateTime  @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+
+  @@index([userId])
+}
+
+/// OAuth identity linkage, scaffolded for Apple/Google. Inactive until real client
+/// credentials are configured — see docs/providers/oauth.md.
+model OAuthIdentity {
+  id             String        @id @default(uuid())
+  userId         String
+  provider       OAuthProvider
+  providerUserId String
+  createdAt      DateTime      @default(now())
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+}
+
+enum OAuthProvider {
+  APPLE
+  GOOGLE
+}
+
+// ---------------------------------------------------------------------------
+// Social graph / Crews
+// ---------------------------------------------------------------------------
+
+model Relationship {
+  id        String             @id @default(uuid())
+  userId    String
+  friendId  String
+  status    RelationshipStatus @default(ACTIVE)
+  createdAt DateTime           @default(now())
+
+  @@unique([userId, friendId])
+}
+
+enum RelationshipStatus {
+  ACTIVE
+  BLOCKED
+}
+
+model UserBlock {
+  id          String   @id @default(uuid())
+  initiatorId String
+  initiator   User     @relation("BlockInitiator", fields: [initiatorId], references: [id], onDelete: Cascade)
+  targetId    String
+  target      User     @relation("BlockTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([initiatorId, targetId])
+}
+
+/// Privacy-conscious contact matching: we store a salted hash of a normalised contact
+/// identifier (e.g. HMAC-SHA256(phone, serverSecret)), never the raw contact book. See
+/// docs/PRIVACY.md#contacts. This table records a MATCH (a hashed contact turned out to
+/// belong to an existing Plot user) — it does not store the full uploaded contact list.
+model ContactMatch {
+  id            String   @id @default(uuid())
+  ownerId       String
+  owner         User     @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  matchedUserId String
+  matchedUser   User     @relation("ContactMatched", fields: [matchedUserId], references: [id], onDelete: Cascade)
+  contactHash   String
+  createdAt     DateTime @default(now())
+
+  @@unique([ownerId, matchedUserId])
+}
+
+model Crew {
+  id          String    @id @default(uuid())
+  name        String
+  imageUrl    String?
+  defaultCity String?
+  createdById String
+  inviteCode  String    @unique @default(cuid())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  archivedAt  DateTime?
+
+  members CrewMember[]
+  dna     CrewDNA?
+  plans   Plan[]
+
+  @@index([createdById])
+}
+
+model CrewMember {
+  id       String           @id @default(uuid())
+  crewId   String
+  crew     Crew             @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     CrewRole         @default(MEMBER)
+  status   CrewMemberStatus @default(ACTIVE)
+  joinedAt DateTime         @default(now())
+
+  @@unique([crewId, userId])
+  @@index([userId])
+}
+
+enum CrewRole {
+  OWNER
+  MEMBER
+}
+
+enum CrewMemberStatus {
+  INVITED
+  ACTIVE
+  LEFT
+}
+
+/// Cached, recomputed Group DNA. This is a derived/materialised view over member
+/// TasteProfiles + this crew's IntentSignal history — see apps/api/src/services/crewDna.ts.
+/// Never hand-authored; always recomputed by the CrewDNA service so it stays honest about
+/// `confidence` for new crews (see brief §12 "do not fake confidence").
+model CrewDNA {
+  id                  String              @id @default(uuid())
+  crewId              String              @unique
+  crew                Crew                @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  confidence          DnaConfidence       @default(LOW)
+  topCategories       Json // string[]
+  medianSpendMinor    Int                 @default(0)
+  currency            String              @default("GBP")
+  bestNights          Json // string[]
+  usualAreas          Json // string[]
+  planningPersonality PlanningPersonality @default(MIXED)
+  computedAt          DateTime            @default(now())
+}
+
+enum DnaConfidence {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum PlanningPersonality {
+  LAST_MINUTE
+  PLANNER
+  MIXED
+}
+
+// ---------------------------------------------------------------------------
+// Availability
+// ---------------------------------------------------------------------------
+
+model CalendarConnection {
+  id                String                   @id @default(uuid())
+  userId            String
+  user              User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          CalendarProvider
+  externalAccountId String
+  /// Encrypted token blob (see apps/api/src/lib/crypto.ts). In production this column would
+  /// hold ciphertext produced with a KMS-managed key, never a plaintext OAuth token.
+  encryptedTokenRef String
+  status            CalendarConnectionStatus @default(ACTIVE)
+  lastSyncedAt      DateTime?
+  createdAt         DateTime                 @default(now())
+  revokedAt         DateTime?
+
+  @@index([userId])
+}
+
+enum CalendarProvider {
+  GOOGLE
+  APPLE
+  MICROSOFT
+}
+
+enum CalendarConnectionStatus {
+  ACTIVE
+  REVOKED
+  ERROR
+}
+
+/// Free/busy only. No event titles, no locations, no attendees. This is the entire point of
+/// the calendar integration — see brief §26 "the value is availability intelligence, not
+/// copying somebody's diary."
+model AvailabilityWindow {
+  id        String             @id @default(uuid())
+  userId    String
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startsAt  DateTime
+  endsAt    DateTime
+  busy      Boolean
+  source    AvailabilitySource
+  createdAt DateTime           @default(now())
+
+  @@index([userId, startsAt, endsAt])
+}
+
+enum AvailabilitySource {
+  CALENDAR_SYNC
+  MANUAL
+  INFERRED
+}
+
+// ---------------------------------------------------------------------------
+// Inventory (see docs/ARCHITECTURE.md §Provider abstraction)
+// ---------------------------------------------------------------------------
+
+model Provider {
+  id                String         @id // adapter id, e.g. "mock_ticketing"
+  name              String
+  categories        Json // ExperienceCategory[]
+  status            ProviderStatus @default(ACTIVE)
+  lastHealthCheckAt DateTime?
+  lastError         String?
+  createdAt         DateTime       @default(now())
+
+  listings ProviderListing[]
+}
+
+enum ProviderStatus {
+  ACTIVE
+  DEGRADED
+  DOWN
+  DISABLED
+}
+
+model Venue {
+  id        String   @id @default(uuid())
+  name      String
+  latitude  Float
+  longitude Float
+  address   String?
+  city      String
+  createdAt DateTime @default(now())
+
+  experiences Experience[]
+}
+
+/// The canonical, deduplicated thing a Crew can plan around. See schema-level comment (1).
+model Experience {
+  id            String             @id @default(uuid())
+  canonicalKey  String             @unique // stable dedup key, see entityResolution.ts
+  name          String
+  description   String
+  category      ExperienceCategory
+  subcategories Json // string[]
+  venueId       String?
+  venue         Venue?             @relation(fields: [venueId], references: [id])
+  startsAt      DateTime
+  endsAt        DateTime?
+  timezone      String             @default("Europe/London")
+  priceMinMinor Int?
+  priceMaxMinor Int?
+  currency      String             @default("GBP")
+  bookingStatus BookingStatus      @default(UNKNOWN)
+  imageUrl      String?
+  tags          Json // energy/formality/crowd/etc, see shared CanonicalEvent['tags']
+  qualityScore  Int                @default(0)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  listings                  ProviderListing[]
+  planRecommendationOptions PlanRecommendationOption[]
+  plans                     Plan[]
+
+  @@index([category, startsAt])
+  @@index([qualityScore])
+}
+
+enum ExperienceCategory {
+  LIVE_MUSIC
+  CLUBBING
+  RESTAURANT
+  BAR
+  COMEDY
+  THEATRE
+  CINEMA
+  ART_CULTURE
+  SPORT
+  FITNESS
+  FESTIVAL
+  DAY_ACTIVITY
+  COMMUNITY
+}
+
+enum BookingStatus {
+  AVAILABLE
+  LIMITED
+  SOLD_OUT
+  UNKNOWN
+}
+
+/// The raw, provider-specific offer. Multiple listings can resolve to one Experience.
+model ProviderListing {
+  id                 String      @id @default(uuid())
+  providerId         String
+  provider           Provider    @relation(fields: [providerId], references: [id])
+  providerListingId  String
+  experienceId       String?
+  experience         Experience? @relation(fields: [experienceId], references: [id])
+  rawPayload         Json
+  externalUrl        String
+  commissionEligible Boolean     @default(false)
+  confidence         Float       @default(1.0) // entity-resolution match confidence to `experience`
+  lastRefreshedAt    DateTime    @default(now())
+  createdAt          DateTime    @default(now())
+
+  @@unique([providerId, providerListingId])
+  @@index([experienceId])
+}
+
+// ---------------------------------------------------------------------------
+// Plans (MATCH -> AGREE -> LOCK)
+// ---------------------------------------------------------------------------
+
+/// One "Find us something" invocation — stored for explainability/audit, not just ephemeral
+/// API response. Lets us answer "why did Plot suggest this" after the fact, and lets the
+/// Match engine's ranking be evaluated offline later. See brief §13 Intent Graph.
+model PlanRecommendation {
+  id                String   @id @default(uuid())
+  crewId            String
+  requestedByUserId String
+  inputSnapshot     Json // constraints used: budget, radius, date window, member availability
+  createdAt         DateTime @default(now())
+
+  options PlanRecommendationOption[]
+}
+
+model PlanRecommendationOption {
+  id                   String             @id @default(uuid())
+  planRecommendationId String
+  planRecommendation   PlanRecommendation @relation(fields: [planRecommendationId], references: [id], onDelete: Cascade)
+  experienceId         String
+  experience           Experience         @relation(fields: [experienceId], references: [id])
+  matchScore           Int
+  reasons              Json // MatchReason[]
+  rank                 Int
+
+  plan Plan?
+}
+
+model Plan {
+  id               String                    @id @default(uuid())
+  crewId           String
+  crew             Crew                      @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  experienceId     String?
+  experience       Experience?               @relation(fields: [experienceId], references: [id])
+  sourceOptionId   String?                   @unique
+  sourceOption     PlanRecommendationOption? @relation(fields: [sourceOptionId], references: [id])
+  title            String
+  status           PlanStatusValue           @default(IDEA)
+  proposedByUserId String
+  publicSlug       String                    @unique @default(cuid())
+  readyThreshold   Float                     @default(0.6) // fraction of members voting "in" to reach LIKELY
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  completedAt      DateTime?
+  cancelledAt      DateTime?
+
+  members       PlanMember[]
+  votes         PlanVote[]
+  bookings      Booking[]
+  rewindSignals RewindSignal[]
+  referrals     Referral[]
+
+  @@index([crewId, status])
+}
+
+enum PlanStatusValue {
+  IDEA
+  SHARED
+  GATHERING_INTEREST
+  LIKELY
+  READY
+  BOOKED
+  COMPLETED
+  CANCELLED
+}
+
+model PlanMember {
+  id        String   @id @default(uuid())
+  planId    String
+  plan      Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invitedAt DateTime @default(now())
+
+  @@unique([planId, userId])
+}
+
+model PlanVote {
+  id        String    @id @default(uuid())
+  planId    String
+  plan      Plan      @relation(fields: [planId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vote      VoteValue
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([planId, userId])
+}
+
+enum VoteValue {
+  IN
+  MAYBE
+  OUT
+}
+
+// ---------------------------------------------------------------------------
+// Booking / payments
+// ---------------------------------------------------------------------------
+
+model Booking {
+  id           String             @id @default(uuid())
+  planId       String
+  plan         Plan               @relation(fields: [planId], references: [id])
+  model        BookingModel
+  status       BookingModelStatus @default(PENDING)
+  externalUrl  String?
+  externalRef  String?
+  amountMinor  Int?
+  currency     String             @default("GBP")
+  createdAt    DateTime           @default(now())
+  confirmedAt  DateTime?
+  failedReason String?
+
+  participants BookingParticipant[]
+  payments     Payment[]
+}
+
+enum BookingModel {
+  DEEP_LINK
+  AFFILIATE
+  API
+  NATIVE
+}
+
+enum BookingModelStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  CANCELLED
+}
+
+model BookingParticipant {
+  id        String  @id @default(uuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+  paid      Boolean @default(false)
+
+  @@unique([bookingId, userId])
+}
+
+/// Scaffolded for the native-checkout (Model D) booking model. Inactive without a real
+/// payment-processor account — see docs/providers/payments.md.
+model Payment {
+  id                  String        @id @default(uuid())
+  bookingId           String
+  booking             Booking       @relation(fields: [bookingId], references: [id])
+  provider            String        @default("stripe")
+  providerIntentId    String?
+  amountMinor         Int
+  currency            String
+  status              PaymentStatus @default(REQUIRES_PAYMENT)
+  createdAt           DateTime      @default(now())
+  confirmedAt         DateTime?
+  refundedAmountMinor Int           @default(0)
+}
+
+enum PaymentStatus {
+  REQUIRES_PAYMENT
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+// ---------------------------------------------------------------------------
+// Notifications / feedback / analytics
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id        String               @id @default(uuid())
+  userId    String
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category  NotificationCategory
+  title     String
+  body      String
+  deepLink  String?
+  createdAt DateTime             @default(now())
+  readAt    DateTime?
+}
+
+enum NotificationCategory {
+  ACTION_REQUIRED
+  PLAN_MOMENTUM
+  AVAILABILITY_OPPORTUNITY
+  RELEVANT_INVENTORY
+  BOOKING_CHANGE
+  REMINDER
+  SOCIAL_ACTIVITY
+}
+
+/// Generic analytics event log — see schema comment (2) and packages/shared/src/analytics.ts.
+model IntentSignal {
+  id          String   @id @default(uuid())
+  name        String
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  anonymousId String?
+  crewId      String?
+  planId      String?
+  payload     Json
+  occurredAt  DateTime @default(now())
+
+  @@index([name, occurredAt])
+  @@index([userId, occurredAt])
+  @@index([crewId])
+  @@index([planId])
+}
+
+model FeedbackSignal {
+  id        String           @id @default(uuid())
+  userId    String?
+  user      User?            @relation(fields: [userId], references: [id])
+  context   String // e.g. "experience:<id>", "booking:<id>"
+  category  FeedbackCategory
+  note      String?
+  createdAt DateTime         @default(now())
+}
+
+enum FeedbackCategory {
+  WRONG_INFO
+  RECOMMENDATION_FEEDBACK
+  BOOKING_ISSUE
+  EVENT_CANCELLED
+  PRICE_INCORRECT
+  VENUE_INCORRECT
+  NOT_MY_VIBE
+  TOO_FAR
+  TOO_EXPENSIVE
+  ALREADY_KNEW
+  GREAT_RECOMMENDATION
+}
+
+model RewindSignal {
+  id        String       @id @default(uuid())
+  planId    String
+  plan      Plan         @relation(fields: [planId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User         @relation(fields: [userId], references: [id])
+  rating    RewindRating
+  reasons   Json // string[], e.g. ["great_venue", "too_expensive"]
+  createdAt DateTime     @default(now())
+
+  @@unique([planId, userId])
+}
+
+enum RewindRating {
+  LOVE
+  LIKE
+  MEH
+  NO
+}
+
+model ExperimentAssignment {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  experimentKey String
+  variant       String
+  assignedAt    DateTime @default(now())
+
+  @@unique([userId, experimentKey])
+}
+
+/// Attribution for the Plan Card growth loop: who invited whom, via which plan, and whether
+/// it converted to an install/signup. See brief §16-19.
+model Referral {
+  id          String    @id @default(uuid())
+  planId      String?
+  plan        Plan?     @relation(fields: [planId], references: [id])
+  senderId    String
+  sender      User      @relation("ReferralSender", fields: [senderId], references: [id])
+  recipientId String?
+  recipient   User?     @relation("ReferralRecipient", fields: [recipientId], references: [id])
+  channel     String // 'whatsapp' | 'imessage' | 'sms' | 'link' | 'other'
+  clickedAt   DateTime?
+  installedAt DateTime?
+  signedUpAt  DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model AuditEvent {
+  id          String   @id @default(uuid())
+  actorUserId String?
+  actor       User?    @relation(fields: [actorUserId], references: [id])
+  action      String // e.g. "user.delete", "admin.experience.feature"
+  targetType  String?
+  targetId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([actorUserId, createdAt])
+}

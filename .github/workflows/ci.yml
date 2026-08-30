@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: plot
+          POSTGRES_PASSWORD: plot_ci
+          POSTGRES_DB: plot_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://plot:plot_ci@localhost:5432/plot_test
+      TEST_DATABASE_URL: postgresql://plot:plot_ci@localhost:5432/plot_test
+      SESSION_SECRET: ci_session_secret_at_least_16_chars
+      TOKEN_HASH_SECRET: ci_token_secret_at_least_16_chars
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Build shared package
+        run: npm run build --workspace=packages/shared
+      - name: Run API migrations
+        run: npx prisma migrate deploy
+        working-directory: apps/api
+      - name: Typecheck
+        run: npm run typecheck --workspaces --if-present
+      - name: Test (API)
+        run: npm run test --workspace=apps/api
+      - name: Build (web)
+        run: npm run build --workspace=apps/web
