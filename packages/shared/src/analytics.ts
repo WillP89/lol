@@ -37,6 +37,7 @@ export const AnalyticsEvents = {
   RecommendationShown: 'RecommendationShown',
   RecommendationOpened: 'RecommendationOpened',
   RecommendationDismissed: 'RecommendationDismissed',
+  SuggestionsSentToChat: 'SuggestionsSentToChat',
 
   // Agree (Plan / consensus)
   SentToCrew: 'SentToCrew',
@@ -84,6 +85,9 @@ export interface AnalyticsEventPayloads {
   RecommendationShown: { crewId: string; planRecommendationId: string; optionCount: number };
   RecommendationOpened: { crewId: string; planRecommendationId: string; optionId: string };
   RecommendationDismissed: { crewId: string; planRecommendationId: string; reason?: string };
+  // The core-loop action: "find something" and post it straight into the Crew's chat in one
+  // tap, rather than reviewing options on a separate results screen first.
+  SuggestionsSentToChat: { crewId: string; count: number };
 
   SentToCrew: { crewId: string; planId: string; source: 'find_us_something' | 'individual_send' };
   PlanCardViewed: { planId: string; viewerUserId?: string; authenticated: boolean };

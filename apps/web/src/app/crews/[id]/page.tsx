@@ -74,9 +74,19 @@ export default function CrewDetailPage() {
       .catch(() => {});
   }, [id]);
 
-  function findUsSomething() {
+  // The core loop: find good options and put them straight into the Crew's own conversation —
+  // no separate results screen to review alone first. Everyone sees the suggestions land as
+  // rich cards in chat and reacts/votes together. See services/match.ts#suggestToCrewChat.
+  async function findUsSomething() {
     setFinding(true);
-    router.push(`/crews/${id}/match`);
+    setError(null);
+    try {
+      await api.post(`/crews/${id}/suggest-to-chat`);
+      router.push(`/crews/${id}/chat`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not find anything right now — try again.');
+      setFinding(false);
+    }
   }
 
   async function getInviteLink() {

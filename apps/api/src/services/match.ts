@@ -4,7 +4,8 @@ import { MIN_PUBLISHABLE_QUALITY_SCORE } from './qualityScoring';
 import { getMemberAvailability } from './availability';
 import { ensureInventory } from './inventorySync';
 import { track } from './analytics';
-import type { Experience, TasteProfile } from '@prisma/client';
+import { sendExperienceToCrew } from './plan';
+import type { Experience, TasteProfile, Plan } from '@prisma/client';
 
 export interface MatchReason {
   code: string;
@@ -180,6 +181,25 @@ export async function findUsSomething(
   );
 
   return { recommendationId: recommendation.id, options: top };
+}
+
+/**
+ * The core loop, made literal: Plot's job is to put good options in front of the group, in the
+ * group's own conversation — not to make someone go browse a separate results screen and act
+ * as the group's single filter. Runs the same ranking as `findUsSomething`, then immediately
+ * sends each top option to the Crew exactly as if a member had reviewed and tapped "Send to
+ * Crew" on it themselves (`sendExperienceToCrew` — same Plan creation, same rich event card
+ * posted into chat, same everything). The whole crew sees the suggestions land as messages
+ * they can react to and vote on together, with zero intermediate screen.
+ */
+export async function suggestToCrewChat(crewId: string, requestedByUserId: string): Promise<Plan[]> {
+  const { options } = await findUsSomething(crewId, requestedByUserId);
+  const plans: Plan[] = [];
+  for (const option of options) {
+    plans.push(await sendExperienceToCrew(crewId, option.experience.id, requestedByUserId));
+  }
+  await track('SuggestionsSentToChat', { crewId, count: plans.length }, { userId: requestedByUserId, crewId });
+  return plans;
 }
 
 function medianOf(values: number[]): number {

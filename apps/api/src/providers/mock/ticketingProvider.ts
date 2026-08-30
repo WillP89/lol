@@ -45,27 +45,40 @@ function seededRandom(seed: number): () => number {
   };
 }
 
+/**
+ * Each mock listing is a coherent (name, category, venue, image) tuple, not independently
+ * randomised fields — a previous version cycled category by `index % 3` against a flat artist
+ * list, which produced nonsense like "New Material Night ft. Skepta B2B" (a DJ b2b set labeled
+ * as a stand-up comedy show). A picsum.photos seed keyed to the listing id gives every card a
+ * real photograph instead of a flat colour block — free, no API key, deterministic per seed
+ * (same event always gets the same image, not a new random one per request).
+ */
+function mockImageUrl(seed: string): string {
+  return `https://picsum.photos/seed/${seed}/640/480`;
+}
+
+const CLUBBING_LIVE_LINEUP: { name: string; cat: 'CLUBBING' | 'LIVE_MUSIC'; sub: string[]; venue: number }[] = [
+  { name: 'Fred again..', cat: 'CLUBBING', sub: ['house', 'techno'], venue: 0 },
+  { name: 'Bicep', cat: 'CLUBBING', sub: ['house', 'techno'], venue: 1 },
+  { name: 'Overmono', cat: 'LIVE_MUSIC', sub: ['electronic', 'indie'], venue: 2 },
+  { name: 'Nia Archives', cat: 'CLUBBING', sub: ['house', 'techno'], venue: 6 },
+  { name: 'Peggy Gou', cat: 'CLUBBING', sub: ['house', 'techno'], venue: 5 },
+  { name: 'Jamie xx', cat: 'LIVE_MUSIC', sub: ['electronic', 'indie'], venue: 3 },
+  { name: 'Jorja Smith DJ Set', cat: 'LIVE_MUSIC', sub: ['electronic', 'indie'], venue: 7 },
+];
+const COMEDY_LINEUP: { name: string; venue: number }[] = [
+  { name: 'New Material Night', venue: 4 },
+  { name: 'Saturday Night Stand-Up Social', venue: 4 },
+];
+
 function generateMockCatalogue(): MockTicketingRaw[] {
   const rand = seededRandom(42);
-  const artists = [
-    'Fred again..',
-    'Bicep',
-    'Overmono',
-    'Nia Archives',
-    'Peggy Gou',
-    'Skepta B2B',
-    'Jamie xx',
-    'Jorja Smith DJ Set',
-  ];
-  const categories: { cat: ExperienceCategory; sub: string[] }[] = [
-    { cat: 'CLUBBING', sub: ['house', 'techno'] },
-    { cat: 'LIVE_MUSIC', sub: ['electronic', 'indie'] },
-    { cat: 'COMEDY', sub: ['stand_up'] },
+  const entries: { id: string; name: string; venue: (typeof LONDON_VENUES)[number]; cat: ExperienceCategory; sub: string[] }[] = [
+    ...CLUBBING_LIVE_LINEUP.map((a, i) => ({ id: `mock-tkt-${i}`, name: a.name, venue: LONDON_VENUES[a.venue], cat: a.cat as ExperienceCategory, sub: a.sub })),
+    ...COMEDY_LINEUP.map((c, i) => ({ id: `mock-tkt-comedy-${i}`, name: c.name, venue: LONDON_VENUES[c.venue], cat: 'COMEDY' as ExperienceCategory, sub: ['stand_up'] })),
   ];
 
-  return artists.map((artist, i) => {
-    const venue = LONDON_VENUES[i % LONDON_VENUES.length];
-    const { cat, sub } = categories[i % categories.length];
+  return entries.map(({ id, name, venue, cat, sub }) => {
     const daysOut = 2 + Math.floor(rand() * 21);
     const start = new Date();
     start.setDate(start.getDate() + daysOut);
@@ -74,8 +87,8 @@ function generateMockCatalogue(): MockTicketingRaw[] {
     end.setHours(23, 59, 0, 0);
 
     return {
-      id: `mock-tkt-${i}`,
-      name: cat === 'COMEDY' ? `New Material Night ft. ${artist}` : artist,
+      id,
+      name,
       venue: { name: venue.name, lat: venue.lat, lng: venue.lng },
       category: cat,
       subgenres: sub,
@@ -84,7 +97,7 @@ function generateMockCatalogue(): MockTicketingRaw[] {
       priceFromMinor: (18 + Math.floor(rand() * 40)) * 100,
       priceToMinor: (45 + Math.floor(rand() * 60)) * 100,
       soldOutPct: Math.floor(rand() * 100),
-      imageUrl: '',
+      imageUrl: mockImageUrl(id),
       tags: {
         energy: cat === 'COMEDY' ? 'medium' : 'high',
         crowd: rand() > 0.5 ? 'mainstream' : 'alternative',

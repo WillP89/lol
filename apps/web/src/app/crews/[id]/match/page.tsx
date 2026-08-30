@@ -16,6 +16,7 @@ interface MatchOption {
     priceMinMinor: number | null;
     priceMaxMinor: number | null;
     currency: string;
+    imageUrl: string | null;
     venue?: { name: string } | null;
   };
   matchScore: number;
@@ -114,8 +115,19 @@ export default function MatchPage() {
               className="card fade-up"
               style={{ padding: 0, overflow: 'hidden', border: best ? '1.5px solid var(--ink-gold)' : undefined }}
             >
-              <div className="art-block" style={{ background: style.bg, borderRadius: 0, position: 'relative', justifyContent: 'flex-start', padding: '0 16px' }}>
-                <span style={{ fontSize: 22, marginRight: 10 }}>{style.emoji}</span>
+              <div
+                className="art-block"
+                style={{
+                  borderRadius: 0,
+                  position: 'relative',
+                  justifyContent: 'flex-start',
+                  padding: '0 16px',
+                  ...(option.experience.imageUrl
+                    ? { backgroundImage: `linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.45)), url(${option.experience.imageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                    : { background: style.bg }),
+                }}
+              >
+                {!option.experience.imageUrl && <span style={{ fontSize: 22, marginRight: 10 }}>{style.emoji}</span>}
                 {best && (
                   <span className="chip gold static" style={{ fontSize: 10, padding: '4px 9px', position: 'absolute', top: 10, right: 12 }}>
                     ✨ best match

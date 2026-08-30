@@ -44,9 +44,16 @@ export default function ExploreMap({
 }) {
   return (
     <MapContainer center={center} zoom={12} scrollWheelZoom style={{ height: '100%', width: '100%', borderRadius: 18 }}>
+      {/* CARTO's dark basemap, not raw OpenStreetMap tiles: (1) OSM's own tile server explicitly
+          asks production apps not to hotlink it directly — it's meant for light/dev use, not
+          real traffic; CARTO's tile CDN is built for exactly this. (2) OSM's default style is a
+          bright white/grey map, which looks broken sitting inside an all-dark app — this reads
+          as "the map is part of the product," not a mismatched embed. Free, no API key. */}
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        subdomains="abcd"
+        maxZoom={19}
       />
       {experiences.map((exp) => {
         const style = categoryStyle(exp.category);

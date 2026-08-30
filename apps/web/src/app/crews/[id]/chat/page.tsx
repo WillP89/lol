@@ -36,6 +36,7 @@ interface PlanCardData {
       startsAt: string;
       priceMinMinor: number | null;
       currency: string;
+      imageUrl: string | null;
       venue: { name: string } | null;
     } | null;
   };
@@ -66,8 +67,15 @@ function EventCard({ data }: { data: PlanCardData }) {
         boxShadow: 'var(--hard-shadow)',
       }}
     >
-      <div className="art-block" style={{ background: style.bg }}>
-        {style.emoji}
+      <div
+        className="art-block"
+        style={
+          exp?.imageUrl
+            ? { backgroundImage: `url(${exp.imageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+            : { background: style.bg }
+        }
+      >
+        {!exp?.imageUrl && style.emoji}
       </div>
       <div style={{ padding: '10px 12px' }}>
         <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 14.5, lineHeight: 1.25, marginBottom: 3 }}>
@@ -163,6 +171,7 @@ export default function CrewChatPage() {
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const [planCards, setPlanCards] = useState<Record<string, PlanCardData | 'loading' | 'error'>>({});
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -180,7 +189,13 @@ export default function CrewChatPage() {
       const res = await api.get<{ messages: ChatMessage[] }>(
         `/crews/${crewId}/messages${lastIdRef.current ? `?after=${lastIdRef.current}` : ''}`,
       );
-      if (res.messages.length === 0) return;
+      if (res.messages.length === 0) {
+        // Resolve loading -> "nothing here yet" even when the Crew's chat is genuinely empty —
+        // without this, `messages` never leaves its initial `null` and the skeleton loader
+        // shows forever instead of the real empty state below.
+        setMessages((prev) => prev ?? []);
+        return;
+      }
       lastIdRef.current = res.messages[res.messages.length - 1].id;
       setMessages((prev) => (prev ? [...prev, ...res.messages] : res.messages));
     } catch (err) {
@@ -229,6 +244,22 @@ export default function CrewChatPage() {
     } catch {
       // A failed reaction toggle isn't worth an error banner over — the pill just won't
       // change, which is feedback enough; the next poll tick will also reconcile it.
+    }
+  }
+
+  // The core loop, reachable without ever leaving the conversation: find good options and
+  // post them straight in, as real messages the whole Crew reacts to together — not a private
+  // results screen only the tapper sees. See services/match.ts#suggestToCrewChat.
+  async function suggestSomething() {
+    setSuggesting(true);
+    setError(null);
+    try {
+      await api.post(`/crews/${crewId}/suggest-to-chat`);
+      await poll(); // pull the new messages in now rather than waiting for the next 3s tick
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not find anything right now — try again.');
+    } finally {
+      setSuggesting(false);
     }
   }
 
@@ -345,7 +376,17 @@ export default function CrewChatPage() {
 
         {error && <div className="error">{error}</div>}
 
-        <form onSubmit={send} style={{ display: 'flex', gap: 8, paddingTop: 10, alignItems: 'center' }}>
+        <button
+          type="button"
+          onClick={suggestSomething}
+          disabled={suggesting}
+          className="chip gold"
+          style={{ alignSelf: 'flex-start', marginBottom: 8, fontSize: 12.5, padding: '8px 14px' }}
+        >
+          {suggesting ? 'Finding something…' : '✨ Suggest something'}
+        </button>
+
+        <form onSubmit={send} style={{ display: 'flex', gap: 8, paddingTop: 0, alignItems: 'center' }}>
           <input
             className="field"
             style={{ flex: 1, borderRadius: 100 }}

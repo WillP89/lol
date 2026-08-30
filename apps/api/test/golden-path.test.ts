@@ -538,3 +538,44 @@ describe('account lifecycle: sign out, deactivate, delete', () => {
     expect(relogin.userId).not.toBe(session.userId);
   });
 });
+
+describe('suggest-to-chat: the core loop puts suggestions straight into the conversation', () => {
+  test('POST /crews/:id/suggest-to-chat creates Plans and posts each one into chat directly — no separate review screen', async () => {
+    const owner = await loginByEmail('suggest-owner@plot-test.invalid');
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/crews',
+      headers: { cookie: owner.cookie },
+      payload: { name: 'Suggest Test Crew', defaultCity: 'London' },
+    });
+    const { crew } = createRes.json() as { crew: { id: string } };
+
+    const res = await app.inject({ method: 'POST', url: `/crews/${crew.id}/suggest-to-chat`, headers: { cookie: owner.cookie } });
+    expect(res.statusCode).toBe(200);
+    const { plans } = res.json() as { plans: { id: string; status: string }[] };
+    expect(plans.length).toBeGreaterThan(0);
+    expect(plans.every((p) => p.status === 'SHARED')).toBe(true);
+
+    const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
+    const { messages } = messagesRes.json() as { messages: { body: string }[] };
+    // One chat announcement per suggested Plan, each carrying a tappable Plan link — exactly
+    // what a member would see if they'd reviewed and sent each option by hand.
+    const planLinks = messages.filter((m) => m.body.includes('/plans/'));
+    expect(planLinks.length).toBe(plans.length);
+  });
+
+  test('a non-member cannot trigger suggestions for a Crew they are not in', async () => {
+    const outsider = await loginByEmail('suggest-outsider@plot-test.invalid');
+    const owner2 = await loginByEmail('suggest-owner2@plot-test.invalid');
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/crews',
+      headers: { cookie: owner2.cookie },
+      payload: { name: 'Private Suggest Crew', defaultCity: 'London' },
+    });
+    const { crew } = createRes.json() as { crew: { id: string } };
+
+    const res = await app.inject({ method: 'POST', url: `/crews/${crew.id}/suggest-to-chat`, headers: { cookie: outsider.cookie } });
+    expect(res.statusCode).toBe(403);
+  });
+});
