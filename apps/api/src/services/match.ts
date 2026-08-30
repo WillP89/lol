@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { MIN_PUBLISHABLE_QUALITY_SCORE } from './qualityScoring';
 import { getMemberAvailability } from './availability';
+import { ensureInventory } from './inventorySync';
 import { track } from './analytics';
 import type { Experience, TasteProfile } from '@prisma/client';
 
@@ -55,13 +56,17 @@ export async function findUsSomething(
   crewId: string,
   requestedByUserId: string,
 ): Promise<{ recommendationId: string; options: MatchOption[] }> {
-  const [members, dna] = await Promise.all([
+  const [members, dna, crew] = await Promise.all([
     prisma.crewMember.findMany({
       where: { crewId, status: 'ACTIVE' },
       include: { user: { include: { tasteProfile: true } } },
     }),
     prisma.crewDNA.findUnique({ where: { crewId } }),
+    prisma.crew.findUnique({ where: { id: crewId }, select: { defaultCity: true } }),
   ]);
+
+  // Self-heals an unseeded city on first use — see ensureInventory's own comment.
+  await ensureInventory(crew?.defaultCity ?? 'London');
 
   const userIds = members.map((m) => m.userId);
   const tasteProfiles = members

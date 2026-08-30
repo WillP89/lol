@@ -51,6 +51,7 @@ model User {
   authTokens            AuthToken[]
   sessions              Session[]
   crewMemberships       CrewMember[]
+  crewMessages          CrewMessage[]
   calendarConnections   CalendarConnection[]
   availabilityWindows   AvailabilityWindow[]
   planMemberships       PlanMember[]
@@ -249,9 +250,10 @@ model Crew {
   updatedAt   DateTime  @updatedAt
   archivedAt  DateTime?
 
-  members CrewMember[]
-  dna     CrewDNA?
-  plans   Plan[]
+  members  CrewMember[]
+  dna      CrewDNA?
+  plans    Plan[]
+  messages CrewMessage[]
 
   @@index([createdById])
 }
@@ -309,6 +311,25 @@ enum PlanningPersonality {
   LAST_MINUTE
   PLANNER
   MIXED
+}
+
+/// Simple text-only group chat scoped to a Crew — the "actual chat" the pilot needs beyond
+/// Plan Pulse's one-tap reactions. Deliberately minimal: no read receipts, no typing
+/// indicators, no edit/delete, no threading. The web client polls GET /crews/:id/messages
+/// every few seconds rather than a websocket/SSE transport — simplest thing that works for a
+/// pilot-sized Crew (a handful of people), see docs/DECISIONS.md#crew-chat for the tradeoff
+/// and the upgrade path once that stops being true. Membership (ACTIVE CrewMember), not
+/// authorship, gates both read and write.
+model CrewMessage {
+  id        String   @id @default(uuid())
+  crewId    String
+  crew      Crew     @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([crewId, createdAt])
 }
 
 // ---------------------------------------------------------------------------

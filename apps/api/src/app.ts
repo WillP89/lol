@@ -13,6 +13,7 @@ import { bookingRoutes } from './routes/bookings';
 import { rewindRoutes } from './routes/rewind';
 import { adminRoutes } from './routes/admin';
 import { feedbackRoutes } from './routes/feedback';
+import { exploreRoutes } from './routes/explore';
 
 /**
  * Builds the Fastify app without calling `listen()` — kept separate from server.ts so
@@ -55,6 +56,7 @@ export function buildApp() {
   app.register(bookingRoutes);
   app.register(rewindRoutes);
   app.register(feedbackRoutes);
+  app.register(exploreRoutes);
   app.register(adminRoutes, { prefix: '/admin' });
 
   return app;

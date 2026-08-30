@@ -133,3 +133,19 @@ export async function syncAllProviders(city = 'London'): Promise<Awaited<ReturnT
   }
   return results;
 }
+
+/**
+ * Nothing in this codebase runs `syncProvider` on a schedule (see `POST /admin/sync` for the
+ * manual trigger docs/PILOT.md assumes an operator runs periodically) — so a fresh database
+ * has zero Experience rows and Match/the map silently return empty. Since the registered
+ * providers are all in-memory mocks (no real API cost, no rate limit), it's safe and cheap to
+ * self-heal on demand: call this before reading Experience data for a city and it syncs once
+ * if that city looks unseeded. Real provider adapters should keep going through the scheduled
+ * `/admin/sync` path instead — this guard exists for the pilot's zero-ops mock-data path.
+ */
+export async function ensureInventory(city: string): Promise<void> {
+  const count = await prisma.experience.count({ where: { venue: { city } } });
+  if (count === 0) {
+    await syncAllProviders(city);
+  }
+}

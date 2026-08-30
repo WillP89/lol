@@ -30,6 +30,7 @@ export const AnalyticsEvents = {
   CrewInviteSent: 'CrewInviteSent',
   CrewJoined: 'CrewJoined',
   CrewLeft: 'CrewLeft',
+  CrewMessageSent: 'CrewMessageSent',
 
   // Match (Discover -> Match)
   FindUsSomethingOpened: 'FindUsSomethingOpened',
@@ -77,6 +78,7 @@ export interface AnalyticsEventPayloads {
   CrewInviteSent: { crewId: string; channel: 'link' | 'whatsapp' | 'imessage' | 'sms' | 'other' };
   CrewJoined: { crewId: string; userId: string; viaInvite: boolean };
   CrewLeft: { crewId: string; userId: string };
+  CrewMessageSent: { crewId: string; userId: string };
 
   FindUsSomethingOpened: { crewId: string; userId: string };
   RecommendationShown: { crewId: string; planRecommendationId: string; optionCount: number };
