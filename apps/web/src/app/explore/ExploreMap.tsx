@@ -8,10 +8,14 @@ import { categoryStyle } from '@/lib/categoryStyle';
 export interface ExploreExperience {
   id: string;
   name: string;
+  description: string;
   category: string;
+  subcategories?: unknown;
   startsAt: string;
   priceMinMinor: number | null;
+  priceMaxMinor?: number | null;
   currency: string;
+  imageUrl?: string | null;
   venue: { name: string; latitude: number; longitude: number };
 }
 
@@ -29,11 +33,13 @@ const pinIcon = L.divIcon({
 export default function ExploreMap({
   experiences,
   center,
-  onSend,
+  onSelect,
 }: {
   experiences: ExploreExperience[];
   center: [number, number];
-  onSend: (exp: ExploreExperience) => void;
+  // Opens the full event-detail sheet — tapping a pin should let you read about the event
+  // before committing to sending it anywhere, same as tapping a card in List view.
+  onSelect: (exp: ExploreExperience) => void;
 }) {
   return (
     <MapContainer center={center} zoom={12} scrollWheelZoom style={{ height: '100%', width: '100%', borderRadius: 18 }}>
@@ -57,7 +63,7 @@ export default function ExploreMap({
                 {exp.priceMinMinor !== null && ` · from £${(exp.priceMinMinor / 100).toFixed(0)}`}
               </div>
               <button
-                onClick={() => onSend(exp)}
+                onClick={() => onSelect(exp)}
                 style={{
                   marginTop: 10,
                   width: '100%',
@@ -71,7 +77,7 @@ export default function ExploreMap({
                   cursor: 'pointer',
                 }}
               >
-                Send to Crew →
+                View details →
               </button>
             </Popup>
           </Marker>
