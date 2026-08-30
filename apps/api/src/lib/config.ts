@@ -30,6 +30,9 @@ const EnvSchema = z.object({
   DICE_API_KEY: z.string().optional(),
   EVENTBRITE_API_KEY: z.string().optional(),
   OPENTABLE_API_KEY: z.string().optional(),
+  POSTMARK_API_KEY: z.string().optional(),
+  // Must be on a domain verified in Postmark (SPF/DKIM) — see docs/providers/email.md.
+  EMAIL_FROM: z.string().email().default('hello@plot.invalid'),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -49,4 +52,5 @@ export const providerReadiness = {
   dice: Boolean(config.DICE_API_KEY),
   eventbrite: Boolean(config.EVENTBRITE_API_KEY),
   openTable: Boolean(config.OPENTABLE_API_KEY),
+  postmarkEmail: Boolean(config.POSTMARK_API_KEY),
 };

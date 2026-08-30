@@ -19,20 +19,17 @@ function CallbackInner() {
     api
       .post('/auth/callback', { token })
       .then(async () => {
-        // An invite link (or anywhere else that sent you through sign-in) wins — go back to
-        // exactly where you meant to go, e.g. /crews/join/abc123, instead of always landing
-        // on /onboarding regardless of intent.
-        if (next) {
-          router.replace(next);
-          return;
-        }
-        // Otherwise: returning users with a profile already built skip straight past
-        // onboarding instead of being run through it again on every sign-in.
+        const destination = next || '/crews';
+        // A brand-new user (no profile yet) always completes onboarding first — including
+        // when they arrived via an invite link. Onboarding itself carries `next` through
+        // (?next=/crews/join/abc123) so finishing it lands them exactly back on the invite,
+        // not on the generic /crews list. A returning user with a profile already skips
+        // straight to `destination` — the invite, or /crews by default.
         try {
           const { user } = await api.get<{ user: { tasteProfile: unknown } }>('/users/me');
-          router.replace(user.tasteProfile ? '/crews' : '/onboarding');
+          router.replace(user.tasteProfile ? destination : `/onboarding?next=${encodeURIComponent(destination)}`);
         } catch {
-          router.replace('/onboarding');
+          router.replace(`/onboarding?next=${encodeURIComponent(destination)}`);
         }
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Sign-in failed.'));

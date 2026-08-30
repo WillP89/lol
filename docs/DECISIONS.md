@@ -143,3 +143,31 @@ rows and both Match and Explore would silently return empty. `ensureInventory(ci
 is safe only because the registered providers are in-memory mocks with no real API cost or
 rate limit. A real provider adapter should keep going through the scheduled `/admin/sync` path
 instead of leaning on this fallback.
+
+## #real-events
+
+Ticketmaster's Discovery API (`providers/live/ticketmaster.ts`) is the first real provider,
+per docs/providers/ticketing.md's existing plan. `providers/registry.ts` registers it — and
+only it, dropping both mocks entirely — the moment `TICKETMASTER_API_KEY` is set; without a
+key, the mocks are the only source, same as before. This is a deliberate either/or, not
+mock-plus-real: presenting fabricated sample events alongside real bookable ones with no way
+to tell them apart would be actively misleading once real inventory exists.
+
+`hasLiveProvider` (registry.ts) is threaded through `GET /explore/experiences` and
+`POST /crews/:id/find-us-something` as a `dataSource: 'live' | 'mock'` field, and the web app
+shows an explicit "Sample events — no real event provider connected" banner whenever it's
+`'mock'`. The alternative — silently rendering fake events as if they were real — is exactly
+what was explicitly ruled out.
+
+Not verified against a live Ticketmaster account: this was written in an environment with no
+outbound network access to `app.ticketmaster.com`. The category/booking-status mapping logic
+is unit-tested against hand-built fixtures shaped like real Discovery API responses
+(`test/unit/ticketmaster.test.ts`), which catches a wrong mapping but not "does our actual API
+key work" or "does Ticketmaster's real response shape match what we assumed" — that needs a
+real key and a real request against the deployed service.
+
+`ensureInventory`'s "sync once if this city has zero Experience rows, then never again" logic
+(see above) is a real limitation once a live provider is involved: it means a city's event
+data, once synced, never refreshes on its own — no cron, no staleness check. Fine for a first
+pilot city seeded once; a real ongoing product needs a scheduled `POST /admin/sync` (e.g. a
+Render Cron Job hitting it daily) rather than relying on this on-demand fallback indefinitely.

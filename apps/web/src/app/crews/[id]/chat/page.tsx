@@ -12,44 +12,106 @@ interface ChatMessage {
   author: { id: string; displayName: string | null; email: string };
 }
 
-const POLL_INTERVAL_MS = 3000;
-const PLAN_LINK_SPLIT = /(\/plans\/[a-zA-Z0-9-]+)/g;
-// Separate, non-global regex for testing a single split part — reusing a `g`-flagged regex's
-// .test() across a loop advances its lastIndex and silently skips matches on later calls.
-const PLAN_LINK_MATCH = /^\/plans\/[a-zA-Z0-9-]+$/;
+interface PlanCardData {
+  plan: {
+    id: string;
+    title: string;
+    publicSlug: string;
+    status: string;
+    experience: {
+      name: string;
+      category: string;
+      startsAt: string;
+      priceMinMinor: number | null;
+      currency: string;
+      venue: { name: string } | null;
+    } | null;
+  };
+  pulse: { inCount: number; totalMembers: number };
+}
 
-// A plan sent to the Crew posts a chat message with a plain-text "/plans/<slug>" path in the
-// body (see services/plan.ts) — turn that back into a real tappable link rather than dead text.
-function renderMessageBody(body: string) {
-  const parts = body.split(PLAN_LINK_SPLIT);
-  return parts.map((part, i) =>
-    PLAN_LINK_MATCH.test(part) ? (
-      <Link key={i} href={part} style={{ color: 'inherit', textDecoration: 'underline' }}>
-        View plan →
-      </Link>
-    ) : (
-      <span key={i}>{part}</span>
-    ),
+const POLL_INTERVAL_MS = 3000;
+// Matches the exact shape services/plan.ts posts when a Plan is sent to the Crew — see
+// createPlanForCrew's chat announcement.
+const PLAN_ANNOUNCEMENT = /^📍 Sent "(.+)" to the Crew — \/plans\/([a-zA-Z0-9-]+)$/;
+
+const CATEGORY_STYLE: Record<string, { emoji: string; bg: string }> = {
+  LIVE_MUSIC: { emoji: '🎵', bg: 'linear-gradient(135deg, #4a2f6b, #241a2e)' },
+  CLUBBING: { emoji: '🕺', bg: 'linear-gradient(135deg, #6b2f4a, #241a2e)' },
+  RESTAURANT: { emoji: '🍽️', bg: 'linear-gradient(135deg, #3f6b54, #182016)' },
+  BAR: { emoji: '🍸', bg: 'linear-gradient(135deg, #6b4a1f, #241a10)' },
+  COMEDY: { emoji: '🎤', bg: 'linear-gradient(135deg, #6b5a1f, #241f10)' },
+  THEATRE: { emoji: '🎭', bg: 'linear-gradient(135deg, #55483a, #201c16)' },
+  CINEMA: { emoji: '🎬', bg: 'linear-gradient(135deg, #2f3f6b, #16182a)' },
+  ART_CULTURE: { emoji: '🖼️', bg: 'linear-gradient(135deg, #6b3a5c, #241628)' },
+  SPORT: { emoji: '⚽', bg: 'linear-gradient(135deg, #2f6b4a, #16241c)' },
+  FITNESS: { emoji: '🏋️', bg: 'linear-gradient(135deg, #6b2f2f, #241616)' },
+  FESTIVAL: { emoji: '🎪', bg: 'linear-gradient(135deg, #cf8a3a, #241a10)' },
+  DAY_ACTIVITY: { emoji: '☀️', bg: 'linear-gradient(135deg, #e0a94c, #241c10)' },
+  COMMUNITY: { emoji: '🤝', bg: 'linear-gradient(135deg, #4a5c6b, #161e24)' },
+};
+
+function EventCard({ data }: { data: PlanCardData }) {
+  const exp = data.plan.experience;
+  const style = exp ? CATEGORY_STYLE[exp.category] ?? { emoji: '📍', bg: 'var(--ink-surface-2)' } : { emoji: '📍', bg: 'var(--ink-surface-2)' };
+  return (
+    <Link
+      href={`/plans/${data.plan.publicSlug}`}
+      style={{
+        display: 'block',
+        width: 240,
+        borderRadius: 16,
+        overflow: 'hidden',
+        border: '1px solid var(--ink-border)',
+        background: 'var(--ink-surface)',
+        textDecoration: 'none',
+        color: 'inherit',
+      }}
+    >
+      <div style={{ height: 64, background: style.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>
+        {style.emoji}
+      </div>
+      <div style={{ padding: '10px 12px' }}>
+        <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 14.5, lineHeight: 1.25, marginBottom: 3 }}>
+          {data.plan.title}
+        </div>
+        {exp && (
+          <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>
+            {exp.venue?.name ?? 'Venue TBC'} ·{' '}
+            {new Date(exp.startsAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+            {exp.priceMinMinor !== null && ` · from £${(exp.priceMinMinor / 100).toFixed(0)}`}
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="chip gold static" style={{ fontSize: 10, padding: '4px 9px' }}>
+            {data.pulse.inCount}/{data.pulse.totalMembers} in
+          </span>
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-gold)' }}>View plan →</span>
+        </div>
+      </div>
+    </Link>
   );
+}
+
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
 export default function CrewChatPage() {
   const { id: crewId } = useParams<{ id: string }>();
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
+  const [me, setMe] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [planCards, setPlanCards] = useState<Record<string, PlanCardData | 'loading' | 'error'>>({});
   const listRef = useRef<HTMLDivElement>(null);
-  // Refs, not state, for values the polling loop reads but shouldn't re-run its effect over.
   const lastIdRef = useRef<string | undefined>(undefined);
-  const meRef = useRef<string | null>(null);
 
   useEffect(() => {
     api
       .get<{ user: { id: string } }>('/users/me')
-      .then((res) => {
-        meRef.current = res.user.id;
-      })
+      .then((res) => setMe(res.user.id))
       .catch(() => {});
   }, []);
 
@@ -62,8 +124,8 @@ export default function CrewChatPage() {
       lastIdRef.current = res.messages[res.messages.length - 1].id;
       setMessages((prev) => (prev ? [...prev, ...res.messages] : res.messages));
     } catch (err) {
-      // A single failed poll tick shouldn't nuke the chat the user is already reading —
-      // only surface an error if we never managed to load anything.
+      // A single failed poll tick shouldn't nuke the chat someone's already reading — only
+      // surface an error if nothing has ever loaded.
       setMessages((prev) => prev ?? []);
       setError((prev) => prev ?? (err instanceof ApiError ? err.message : 'Could not load chat.'));
     }
@@ -74,6 +136,24 @@ export default function CrewChatPage() {
     const interval = setInterval(poll, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [poll]);
+
+  // Fetch (once, cached) the real Plan + Experience data behind every "sent to Crew" chat
+  // message, so it renders as a real event card instead of a bare text link.
+  useEffect(() => {
+    if (!messages) return;
+    for (const m of messages) {
+      const match = m.body.match(PLAN_ANNOUNCEMENT);
+      if (!match) continue;
+      const slug = match[2];
+      if (planCards[slug]) continue;
+      setPlanCards((prev) => ({ ...prev, [slug]: 'loading' }));
+      api
+        .get<PlanCardData>(`/plans/public/${slug}`)
+        .then((data) => setPlanCards((prev) => ({ ...prev, [slug]: data })))
+        .catch(() => setPlanCards((prev) => ({ ...prev, [slug]: 'error' })));
+    }
+    // planCards intentionally omitted — it's the cache being written, not a trigger.
+  }, [messages]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
@@ -105,15 +185,31 @@ export default function CrewChatPage() {
         </Link>
         <div className="wordmark">Plot</div>
       </nav>
-      <div className="page" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 90px)' }}>
+      {/* 100dvh (not 100vh) so the composer stays reachable when a mobile keyboard eats
+          viewport height, instead of getting pushed off-screen below the fold. */}
+      <div className="page" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - 90px)', paddingBottom: 12 }}>
         <div className="eyebrow">Crew chat</div>
         <p className="muted" style={{ marginBottom: 14 }}>Just this Crew. No one else can see it.</p>
 
-        <div ref={listRef} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 10 }}>
-          {messages === null && !error && <p className="muted">Loading…</p>}
-          {messages?.length === 0 && <p className="muted">No messages yet — say something.</p>}
+        <div ref={listRef} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 10 }}>
+          {messages === null && !error && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {[1, 2, 3].map((i) => (
+                <div key={i} style={{ height: 34, borderRadius: 16, background: 'var(--ink-surface-2)', width: `${50 + i * 12}%`, opacity: 0.6 }} />
+              ))}
+            </div>
+          )}
+          {messages?.length === 0 && (
+            <div style={{ textAlign: 'center', margin: 'auto', color: 'var(--ink-text-muted)' }}>
+              <div style={{ fontSize: 30, marginBottom: 8 }}>💬</div>
+              <p className="muted">No messages yet — say hi, or send an event from Explore.</p>
+            </div>
+          )}
           {messages?.map((m) => {
-            const mine = m.author.id === meRef.current;
+            const mine = m.author.id === me;
+            const planMatch = m.body.match(PLAN_ANNOUNCEMENT);
+            const cardData = planMatch ? planCards[planMatch[2]] : undefined;
+
             return (
               <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
                 {!mine && (
@@ -121,18 +217,33 @@ export default function CrewChatPage() {
                     {m.author.displayName ?? m.author.email}
                   </div>
                 )}
-                <div
-                  className="card"
-                  style={{
-                    margin: 0,
-                    padding: '9px 13px',
-                    maxWidth: '78%',
-                    background: mine ? 'var(--ink-gold)' : undefined,
-                    color: mine ? 'var(--ink-gold-ink)' : undefined,
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {renderMessageBody(m.body)}
+
+                {planMatch && cardData && cardData !== 'loading' && cardData !== 'error' ? (
+                  <>
+                    <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+                      📍 sent an event
+                    </div>
+                    <EventCard data={cardData} />
+                  </>
+                ) : planMatch && cardData === 'loading' ? (
+                  <div style={{ width: 240, height: 108, borderRadius: 16, background: 'var(--ink-surface-2)', opacity: 0.6 }} />
+                ) : (
+                  <div
+                    className="card"
+                    style={{
+                      margin: 0,
+                      padding: '9px 13px',
+                      maxWidth: '78%',
+                      background: mine ? 'var(--ink-gold)' : undefined,
+                      color: mine ? 'var(--ink-gold-ink)' : undefined,
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {m.body}
+                  </div>
+                )}
+                <div className="muted" style={{ fontSize: 9.5, marginTop: 3, marginInline: 4 }}>
+                  {formatTime(m.createdAt)}
                 </div>
               </div>
             );
@@ -148,10 +259,11 @@ export default function CrewChatPage() {
             placeholder="Message the Crew…"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            disabled={sending}
             maxLength={2000}
           />
-          <button className="btn btn-primary" type="submit" disabled={sending || !draft.trim()} style={{ flex: '0 0 auto', padding: '10px 18px' }}>
-            Send
+          <button className="btn btn-primary" type="submit" disabled={sending || !draft.trim()} style={{ flex: '0 0 auto', width: 'auto', padding: '10px 18px' }}>
+            {sending ? '…' : 'Send'}
           </button>
         </form>
       </div>

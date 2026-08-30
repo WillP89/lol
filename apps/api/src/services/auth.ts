@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
-import { config } from '../lib/config';
+import { config, providerReadiness } from '../lib/config';
+import { sendMagicLinkEmail } from '../lib/email';
 import {
   generateRawToken,
   hashToken,
@@ -30,11 +31,14 @@ export class AuthError extends Error {
  * gating on email verification round-trip — email gets verified implicitly the moment they
  * click the link.
  *
- * NOTE on email delivery: we do not have a transactional email provider configured (see
- * docs/providers/email.md — Postmark or SES, needs a verified sending domain). In development
- * and the pilot, the raw magic-link URL is logged and returned in the API response so the
- * flow is fully testable end-to-end; that response field is omitted outside development, at
- * which point this function needs a real `sendMagicLinkEmail` call wired in before launch.
+ * NOTE on email delivery: whether a real email actually gets sent depends only on whether
+ * Postmark is configured (`POSTMARK_API_KEY`, see docs/providers/email.md) — NOT on NODE_ENV.
+ * Earlier this was gated on NODE_ENV === 'production', which meant setting that (the normal,
+ * correct thing to do for a real deployment) silently disabled sign-in entirely with no real
+ * email to replace it. Now: Postmark configured -> real email, response omits the raw link.
+ * Not configured (any environment) -> the link is returned directly in the response so the
+ * flow stays fully testable without a provider. `NODE_ENV === 'test'` always skips a real send
+ * regardless of whether a key is present, so the test suite never calls out to Postmark.
  */
 /**
  * Only ever a same-origin relative path (`/crews/join/abc`, never `https://evil.example/...`
@@ -82,13 +86,25 @@ export async function requestMagicLink(
   const safeNext = sanitiseNext(next);
   const url = `${config.WEB_APP_URL}/auth/callback?token=${rawToken}${safeNext ? `&next=${encodeURIComponent(safeNext)}` : ''}`;
 
-  if (config.NODE_ENV === 'production') {
-    // TODO(email-provider): send via Postmark/SES here. See docs/providers/email.md.
-    logger.warn('No email provider configured — magic link was generated but NOT sent to the user.');
-    return {};
+  if (providerReadiness.postmarkEmail && config.NODE_ENV !== 'test') {
+    try {
+      await sendMagicLinkEmail(normalisedEmail, url);
+      return {};
+    } catch (err) {
+      // A real send failing (bad key, Postmark outage, unverified domain) shouldn't fully
+      // lock someone out of signing in — log loudly and fall through to the dev-link
+      // response rather than leaving them with nothing. This does mean the raw link is
+      // exposed in the API response on that failure path; that's a deliberate pilot-scale
+      // tradeoff (this response only ever reaches the person who made the request), not an
+      // oversight.
+      logger.error({ err, email: normalisedEmail }, 'Postmark send failed — falling back to dev-mode link in the response');
+    }
   }
 
-  logger.info({ email: normalisedEmail, url }, 'Magic link (dev mode — would normally be emailed)');
+  logger.info(
+    { email: normalisedEmail, url },
+    providerReadiness.postmarkEmail ? 'Magic link (test mode — Postmark send skipped)' : 'Magic link — no email provider configured, returning link directly',
+  );
   return { devMagicLinkUrl: url };
 }
 

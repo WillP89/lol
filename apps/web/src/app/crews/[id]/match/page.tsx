@@ -13,6 +13,7 @@ interface MatchOption {
     priceMinMinor: number | null;
     priceMaxMinor: number | null;
     currency: string;
+    venue?: { name: string } | null;
   };
   matchScore: number;
   reasons: { code: string; label: string }[];
@@ -24,13 +25,17 @@ export default function MatchPage() {
   const { id: crewId } = useParams<{ id: string }>();
   const router = useRouter();
   const [options, setOptions] = useState<MatchOption[] | null>(null);
+  const [dataSource, setDataSource] = useState<'live' | 'mock' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
 
   useEffect(() => {
     api
-      .post<{ options: MatchOption[] }>(`/crews/${crewId}/find-us-something`)
-      .then((res) => setOptions(res.options))
+      .post<{ options: MatchOption[]; dataSource: 'live' | 'mock' }>(`/crews/${crewId}/find-us-something`)
+      .then((res) => {
+        setOptions(res.options);
+        setDataSource(res.dataSource);
+      })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Could not find recommendations.'));
   }, [crewId]);
 
@@ -58,17 +63,56 @@ export default function MatchPage() {
         <h1 style={{ fontSize: 24, marginBottom: 6 }}>Three plans, not 300 results</h1>
         <p className="muted" style={{ marginBottom: 20 }}>Based on who&rsquo;s in, who&rsquo;s free, and what you&rsquo;re usually into.</p>
 
-        {!options && !error && <p className="muted">Thinking…</p>}
+        {dataSource === 'mock' && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '9px 13px',
+              borderRadius: 10,
+              background: 'rgba(242, 169, 59, 0.1)',
+              border: '1px solid rgba(242, 169, 59, 0.3)',
+              fontSize: 12,
+              color: 'var(--ink-gold)',
+              marginBottom: 16,
+            }}
+          >
+            ⚠️ Sample events — no real event provider is connected yet.
+          </div>
+        )}
+
+        {!options && !error && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="card" style={{ height: 92, opacity: 0.5 }} />
+            ))}
+          </div>
+        )}
         {error && <div className="error">{error}</div>}
+
+        {options?.length === 0 && (
+          <div className="card" style={{ textAlign: 'center', padding: '28px 16px' }}>
+            <div style={{ fontSize: 30, marginBottom: 8 }}>🤔</div>
+            <p style={{ marginBottom: 4 }}>Nothing matched right now.</p>
+            <p className="muted">
+              Try widening the Crew&rsquo;s taste in <Link href="/onboarding">Profile</Link>, or check back once more of the Crew has marked
+              their evenings free.
+            </p>
+          </div>
+        )}
 
         {options?.map((option, i) => (
           <div key={option.experience.id} className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 17 }}>{option.experience.name}</div>
-                <div className="muted">{new Date(option.experience.startsAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                <div className="muted">
+                  {option.experience.venue?.name && `${option.experience.venue.name} · `}
+                  {new Date(option.experience.startsAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
+                </div>
               </div>
-              <div style={{ textAlign: 'center' }}>
+              <div style={{ textAlign: 'center', flexShrink: 0, marginLeft: 12 }}>
                 <div style={{ fontFamily: 'Fraunces, serif', fontSize: 20, color: 'var(--ink-gold)' }}>{option.matchScore}%</div>
                 <div className="muted" style={{ fontSize: 9 }}>match</div>
               </div>

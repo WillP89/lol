@@ -44,17 +44,33 @@ DATABASE_URL=<your Neon connection string>
 SESSION_SECRET=<random 32+ character string>
 TOKEN_HASH_SECRET=<a different random 32+ character string>
 WEB_APP_URL=<filled in after Step 3>
-NODE_ENV=development
+NODE_ENV=production
+POSTMARK_API_KEY=<your Postmark server API token>
+EMAIL_FROM=<a sender address on a domain verified in Postmark, e.g. hello@yourdomain.com>
+TICKETMASTER_API_KEY=<your Ticketmaster Discovery API key, see docs/providers/ticketing.md>
 ```
 
-**Leave `NODE_ENV` as `development`, not `production`, until a real email provider is wired
-up.** No transactional email provider is implemented yet (see `docs/providers/email.md` —
-Postmark/SES is a TODO in `apps/api/src/services/auth.ts`). In `development`, the magic-link
-API response includes the raw sign-in link directly so the web app can show a "Continue →"
-button — that's the only way to sign in today. Setting `NODE_ENV=production` silently disables
-that fallback (the API just logs a warning server-side) with **no email ever sent to replace
-it**, which is a dead end for anyone testing the pilot. Switch this to `production` only once
-Postmark/SES is actually sending mail.
+Both `POSTMARK_API_KEY` and `TICKETMASTER_API_KEY` are optional — the app runs without them
+(dev-mode sign-in link, sample/mock events respectively) but neither is real until it's set.
+Without `TICKETMASTER_API_KEY`, every event a Crew sees is fabricated sample data with a
+`.invalid` booking link that goes nowhere — fine for trying the product, not for a real pilot.
+
+**`NODE_ENV` is safe to leave as `production` now** — email delivery no longer depends on it.
+Whether a real email actually gets sent depends only on whether `POSTMARK_API_KEY` is set (see
+`docs/providers/email.md` and `apps/api/src/lib/email.ts`): configured → a real email goes out
+and the API response doesn't include the raw link; not configured → the link comes back
+directly in the response so the web app can show a "Continue →" button, in any environment.
+This used to be tied to `NODE_ENV`, which meant the "correct" production setting silently
+disabled sign-in entirely — that coupling is gone now that a real provider exists to wire up
+instead.
+
+**Postmark setup** (~15 minutes once DNS propagates): sign up at
+[postmarkapp.com](https://postmarkapp.com), create a Server, add its sending domain, add the
+SPF/DKIM DNS records it gives you to your domain (propagation is usually fast but budget up to
+a few hours), then grab the Server API token from the Postmark dashboard for
+`POSTMARK_API_KEY`. Without a domain of your own, Postmark's sandbox lets you send to
+pre-approved test addresses only — fine for verifying the integration works, not for a real
+pilot with friends.
 
 ## Step 3 — deploy the web app
 

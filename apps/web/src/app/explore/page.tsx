@@ -22,6 +22,7 @@ interface CrewSummary {
 export default function ExplorePage() {
   const router = useRouter();
   const [experiences, setExperiences] = useState<ExploreExperience[] | null>(null);
+  const [dataSource, setDataSource] = useState<'live' | 'mock' | null>(null);
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,8 +32,11 @@ export default function ExplorePage() {
 
   useEffect(() => {
     api
-      .get<{ experiences: ExploreExperience[] }>('/explore/experiences?city=London')
-      .then((res) => setExperiences(res.experiences))
+      .get<{ experiences: ExploreExperience[]; dataSource: 'live' | 'mock' }>('/explore/experiences?city=London')
+      .then((res) => {
+        setExperiences(res.experiences);
+        setDataSource(res.dataSource);
+      })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Could not load Explore.'));
     api
       .get<{ crews: CrewSummary[] }>('/crews')
@@ -78,6 +82,25 @@ export default function ExplorePage() {
         </p>
 
         {error && <div className="error">{error}</div>}
+
+        {dataSource === 'mock' && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '9px 13px',
+              borderRadius: 10,
+              background: 'rgba(242, 169, 59, 0.1)',
+              border: '1px solid rgba(242, 169, 59, 0.3)',
+              fontSize: 12,
+              color: 'var(--ink-gold)',
+              marginBottom: 14,
+            }}
+          >
+            ⚠️ Sample events — no real event provider is connected yet. What you send to your Crew right now won&rsquo;t be bookable.
+          </div>
+        )}
 
         <div style={{ height: 480, borderRadius: 18, overflow: 'hidden', border: '1px solid var(--ink-border)' }}>
           {experiences && <ExploreMap experiences={experiences} center={center} onSend={setSendTarget} />}

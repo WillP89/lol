@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 
@@ -17,8 +17,11 @@ interface ExistingProfile {
   locationPrefs: { kind: string; label: string }[];
 }
 
-export default function OnboardingPage() {
+function OnboardingWizard() {
   const router = useRouter();
+  // Carries an invite (or anywhere else that required a profile first) through onboarding —
+  // finishing lands you back on the invite instead of the generic Crews list.
+  const next = useSearchParams().get('next');
 
   // Whether an existing profile has loaded yet, and — once it has — whether the wizard should
   // be shown at all. First-time visitors go straight into the wizard; returning users land on
@@ -88,7 +91,7 @@ export default function OnboardingPage() {
         setEditing(false);
         setSubmitting(false);
       } else {
-        router.replace('/crews');
+        router.replace(next || '/crews');
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong.');
@@ -275,5 +278,13 @@ export default function OnboardingPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense fallback={<div className="page" style={{ paddingTop: 40 }}><p className="muted">Loading…</p></div>}>
+      <OnboardingWizard />
+    </Suspense>
   );
 }
