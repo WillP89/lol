@@ -11,30 +11,41 @@ URL, then use iPhone Safari's **Add to Home Screen** to install it as a full-scr
 — no App Store, no review, no developer account. `layout.tsx` and `public/manifest.json` are
 already set up for this (standalone display mode, a proper app icon, status bar styling).
 
-## Step 1 — a free hosted Postgres database
+## Step 1 — a free hosted Postgres database ✅ done
 
-[Neon](https://neon.tech) or [Supabase](https://supabase.com) both have a free tier and give
-you a `DATABASE_URL` in about a minute — sign up, create a project, copy the connection
-string. This replaces the local `plot_dev` database this session used.
+Neon, schema applied directly via the SQL Editor (this sandbox can't reach Neon's port or its
+HTTP API directly, so the migration SQL was pasted and run by hand instead of via `prisma
+migrate deploy`). One consequence, harmless today but worth doing once before this database's
+schema ever changes again: the `_prisma_migrations` bookkeeping table Prisma normally
+maintains was never created, so a future `npx prisma migrate deploy` against this database
+needs to be preceded once by `npx prisma migrate resolve --applied 20260830142130_init` (run
+from `apps/api`, with `DATABASE_URL` pointed at this Neon database) to tell Prisma "this
+migration is already applied." Not needed for anything today — just don't run `migrate deploy`
+against this database before doing that once.
 
 ## Step 2 — deploy the API
 
-Any of Railway, Render, or Fly.io will run a Node/Fastify app from a GitHub repo with a free
-or near-free tier. In each case: connect your GitHub account, pick the `WillP89/lol` repo, set
-the **root directory to `apps/api`**, build command `npm install && npm run build`, start
-command `npm start`, and set these environment variables (values from Step 1 and your own
-generated secrets):
+Railway, Render, or Fly.io will all run a Node/Fastify app from a GitHub repo on a free tier.
+**Important for this repo specifically**: it's an npm-workspaces monorepo (`apps/api` depends
+on `packages/shared` via a workspace link) — do **not** set the service's root directory to
+`apps/api`, that breaks the dependency resolution. Instead, leave the root directory as the
+repo root and set:
+
+- **Build command**: `npm install && npm run build --workspace=packages/shared && npm run build --workspace=apps/api`
+- **Start command**: `npm run start --workspace=apps/api`
+
+Environment variables (values from Step 1 and your own generated secrets — any random 32+
+character string works for the two secrets, e.g. generate one at
+[random.org/strings](https://www.random.org/strings/) or just mash the keyboard for 40
+characters):
 
 ```
-DATABASE_URL=<from Neon/Supabase>
-SESSION_SECRET=<any random 32+ character string>
+DATABASE_URL=<your Neon connection string>
+SESSION_SECRET=<random 32+ character string>
 TOKEN_HASH_SECRET=<a different random 32+ character string>
 WEB_APP_URL=<filled in after Step 3>
 NODE_ENV=production
 ```
-
-Then run the migration once against the new database (from your machine, with `DATABASE_URL`
-set to the hosted one): `cd apps/api && npx prisma migrate deploy`.
 
 ## Step 3 — deploy the web app
 
