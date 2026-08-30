@@ -14,9 +14,10 @@ const CHOICE_WEIGHT: Record<SwipeChoice, number> = { yes: 1, maybe: 0.3, no: -1 
 /**
  * Builds a TasteProfile from onboarding swipes (brief §"Build my taste" — rapid yes/maybe/not
  * me reactions, not a checklist). This is intentionally the ONLY place a TasteProfile's
- * categoryAffinity is bulk-written; ongoing signals (saves, Rewind, votes) should nudge it
- * incrementally elsewhere rather than duplicating this logic — see TODO in services/match.ts
- * for where that incremental-update hook belongs once there's real usage to tune it against.
+ * categoryAffinity is bulk-written; ongoing signals (Rewind ratings, message reactions on a
+ * shared event, repeat category choices in Find Us Something) should eventually nudge it
+ * incrementally rather than duplicating this bulk-write logic — no such hook exists yet;
+ * building one before there's enough real usage data to tune it against would be guessing.
  */
 export async function submitTasteSwipes(
   userId: string,

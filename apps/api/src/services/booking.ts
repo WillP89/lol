@@ -29,7 +29,16 @@ export async function startDeepLinkBooking(
     where: { experienceId: plan.experienceId },
     orderBy: { lastRefreshedAt: 'desc' },
   });
-  const externalUrl = listing?.externalUrl ?? `https://example-provider.invalid/experiences/${plan.experienceId}`;
+  // Every real Experience — synced or manually curated (POST /admin/experiences/manual) —
+  // gets a ProviderListing alongside it (see inventorySync.ts, admin.ts). A missing one here
+  // means a genuine data problem, not something to silently paper over with a dead
+  // `.invalid` placeholder URL — that would mean a user taps "Book" and lands nowhere real
+  // with no indication anything was wrong. Fail loudly instead; the route layer turns this
+  // into a normal error response, same as any other booking failure.
+  if (!listing?.externalUrl) {
+    throw new Error(`No real booking URL available for experience ${plan.experienceId} — missing ProviderListing.`);
+  }
+  const externalUrl = listing.externalUrl;
 
   const perPersonMinor = plan.experience.priceMinMinor ?? 0;
   const amountMinor = perPersonMinor * participantUserIds.length;
