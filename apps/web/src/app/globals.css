@@ -4,6 +4,7 @@
   --ink-bg: #100f17;
   --ink-surface: #1a1a26;
   --ink-surface-2: #212233;
+  --ink-surface-3: #282a3d;
   --ink-text: #f5f1e7;
   --ink-text-muted: #9c97ae;
   --ink-text-dim: #615d74;
@@ -12,19 +13,30 @@
   --ink-ember: #ea5b3d;
   --ink-moss: #7fb79a;
   --ink-border: #2a2b3b;
+  --hard-shadow: 0 14px 32px -12px rgba(0, 0, 0, 0.55);
 }
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html,
 body {
   margin: 0;
   padding: 0;
-  background: var(--ink-bg);
   color: var(--ink-text);
   font-family: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  /* Same warm-glow treatment as the founding-team demo — two soft radial washes over the flat
+     ink background, subtle enough to read as "considered", not decorative. */
+  background:
+    radial-gradient(ellipse 900px 500px at 15% -8%, rgba(242, 169, 59, 0.07), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 100% 15%, rgba(127, 183, 154, 0.05), transparent 55%),
+    var(--ink-bg);
+  background-attachment: fixed;
 }
 
 h1,
@@ -33,6 +45,7 @@ h3,
 .display {
   font-family: 'Fraunces', Georgia, serif;
   margin: 0;
+  letter-spacing: -0.01em;
 }
 
 a {
@@ -42,6 +55,11 @@ a {
 button,
 input {
   font-family: inherit;
+}
+
+::selection {
+  background: var(--ink-gold);
+  color: var(--ink-gold-ink);
 }
 
 .page {
@@ -59,23 +77,75 @@ input {
   border-bottom: 1px solid var(--ink-border);
   max-width: 480px;
   margin: 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(16, 15, 23, 0.82);
+  backdrop-filter: blur(10px);
 }
 
 .wordmark {
   font-family: 'Fraunces', serif;
   font-weight: 800;
   font-size: 20px;
+  display: inline-flex;
+  align-items: baseline;
 }
 .wordmark span {
   color: var(--ink-gold);
 }
 
+.masthead {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 24px;
+}
+.masthead .wordmark {
+  font-size: clamp(30px, 8vw, 40px);
+  font-weight: 900;
+}
+.masthead .tagline {
+  font-family: 'Fraunces', serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--ink-text-muted);
+  border-left: 2px solid var(--ink-gold);
+  padding-left: 10px;
+}
+
 .card {
   background: var(--ink-surface);
   border: 1px solid var(--ink-border);
-  border-radius: 16px;
+  border-radius: 18px;
   padding: 16px;
   margin-bottom: 14px;
+  box-shadow: var(--hard-shadow);
+}
+
+/* A more prominent card for a single highlighted piece of content (Group DNA, "for your
+   Crew" headers, the operating status of a Plan) — a subtle two-tone gradient instead of the
+   flat surface every other card uses, so it reads as "the important one" without shouting. */
+.banner-card {
+  background: linear-gradient(150deg, var(--ink-surface), var(--ink-surface-2));
+  border: 1px solid var(--ink-border);
+  border-radius: 18px;
+  padding: 18px;
+  margin-bottom: 14px;
+  box-shadow: var(--hard-shadow);
+}
+
+/* A colour-blocked header for an event/experience card — no real photography exists for
+   sample data, so category becomes the visual identity instead: consistent across the map,
+   Find Us Something, and Crew chat's shared-event cards. See lib/categoryStyle.ts. */
+.art-block {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  border-radius: 18px 18px 0 0;
 }
 
 .btn {
@@ -93,18 +163,28 @@ input {
   cursor: pointer;
   width: 100%;
   text-decoration: none;
+  transition: transform 0.12s ease, filter 0.12s ease, background 0.12s ease;
+}
+.btn:hover {
+  filter: brightness(1.08);
+}
+.btn:active {
+  transform: scale(0.97);
 }
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 .btn-primary {
   background: var(--ink-gold);
   color: var(--ink-gold-ink);
   border-color: transparent;
+  box-shadow: 0 6px 20px -8px rgba(242, 169, 59, 0.5);
 }
 .btn-ghost {
   background: transparent;
+  box-shadow: none;
 }
 
 input.field {
@@ -115,6 +195,11 @@ input.field {
   background: var(--ink-surface-2);
   color: var(--ink-text);
   font-size: 15px;
+  transition: border-color 0.15s ease;
+}
+input.field:focus {
+  outline: none;
+  border-color: var(--ink-gold);
 }
 
 .chip {
@@ -128,6 +213,10 @@ input.field {
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.chip:active {
+  transform: scale(0.95);
 }
 .chip.selected {
   background: var(--ink-gold);
@@ -136,6 +225,9 @@ input.field {
 }
 .chip.static {
   cursor: default;
+}
+.chip.static:active {
+  transform: none;
 }
 .chip.gold {
   background: rgba(242, 169, 59, 0.15);
@@ -167,6 +259,21 @@ input.field {
   margin-top: 8px;
 }
 
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 13px;
+  border-radius: 10px;
+  font-size: 12px;
+  margin-bottom: 14px;
+}
+.banner.warn {
+  background: rgba(242, 169, 59, 0.1);
+  border: 1px solid rgba(242, 169, 59, 0.3);
+  color: var(--ink-gold);
+}
+
 .stack {
   display: flex;
 }
@@ -182,12 +289,24 @@ input.field {
   color: #1b1608;
   border: 2px solid var(--ink-bg);
   flex-shrink: 0;
+  position: relative;
 }
 .stack .avatar {
   margin-left: -10px;
 }
 .stack .avatar:first-child {
   margin-left: 0;
+}
+.avatar.free::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ink-moss);
+  border: 2px solid var(--ink-bg);
 }
 
 .pulse-flames {
@@ -203,4 +322,18 @@ input.field {
 }
 .pulse-flame.on {
   background: var(--ink-gold);
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-up {
+  animation: fadeUp 0.3s ease both;
 }

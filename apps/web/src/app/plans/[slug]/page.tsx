@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { apiFetchServer } from '@/lib/apiServer';
+import { categoryStyle } from '@/lib/categoryStyle';
 import { VoteForm } from './VoteForm';
 
 interface PlanCardResponse {
@@ -10,7 +11,7 @@ interface PlanCardResponse {
     title: string;
     status: string;
     crew: { name: string };
-    experience: { name: string; venue: { name: string; city: string } | null; startsAt: string; priceMinMinor: number | null } | null;
+    experience: { name: string; category: string; venue: { name: string; city: string } | null; startsAt: string; priceMinMinor: number | null } | null;
   };
   pulse: { inCount: number; maybeCount: number; outCount: number; totalMembers: number; level: number; status: string };
 }
@@ -52,9 +53,14 @@ export default async function PlanCardPage({ params }: { params: { slug: string 
 
   const { plan, pulse } = data;
   const isAuthenticated = Boolean(cookies().get('plot_session'));
+  const style = categoryStyle(plan.experience?.category);
 
   return (
-    <div className="page" style={{ paddingTop: 40 }}>
+    <div className="page" style={{ paddingTop: 0, maxWidth: 480 }}>
+      <div className="art-block" style={{ background: style.bg, height: 96, fontSize: 34, borderRadius: 0, margin: '0 -20px 20px' }}>
+        {style.emoji}
+      </div>
+
       <div className="eyebrow">{plan.crew.name}</div>
       <h1 style={{ fontSize: 26, marginBottom: 8 }}>{plan.title}</h1>
 

@@ -20,6 +20,16 @@ interface DayAvailability {
   totalMembers: number;
 }
 
+const AVATAR_COLORS = ['#f2a93b', '#7fb79a', '#ea5b3d', '#9c97ae', '#6b8ef2'];
+function avatarColor(seed: string) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[hash];
+}
+function initials(displayName: string | null, email: string) {
+  return (displayName?.trim() || email).slice(0, 1).toUpperCase();
+}
+
 export default function CrewDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -27,6 +37,7 @@ export default function CrewDetailPage() {
   const [availability, setAvailability] = useState<DayAvailability[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [finding, setFinding] = useState(false);
 
   useEffect(() => {
@@ -50,7 +61,41 @@ export default function CrewDetailPage() {
     setInviteUrl(res.inviteUrl);
   }
 
-  if (!crew) return <div className="page">{error ? <div className="error">{error}</div> : <p className="muted">Loading…</p>}</div>;
+  async function copyInvite() {
+    if (!inviteUrl) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `Join ${crew?.name} on Plot`, url: inviteUrl });
+        return;
+      }
+    } catch {
+      // user cancelled the share sheet — fall through to clipboard, nothing to report
+    }
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // clipboard blocked (permissions, non-HTTPS context) — the link is still visible to copy by hand
+    }
+  }
+
+  if (!crew) {
+    return (
+      <div className="page">
+        {error ? (
+          <div className="error">{error}</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 20 }}>
+            <div className="card" style={{ height: 90, opacity: 0.5 }} />
+            <div className="card" style={{ height: 64, opacity: 0.5 }} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const solo = crew.members.length === 1;
 
   return (
     <>
@@ -61,11 +106,41 @@ export default function CrewDetailPage() {
         <div className="wordmark">Plot</div>
       </nav>
       <div className="page">
-        <h1 style={{ fontSize: 26, marginBottom: 4 }}>{crew.name}</h1>
-        <p className="muted" style={{ marginBottom: 18 }}>{crew.members.length} people</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
+          <div>
+            <h1 style={{ fontSize: 26, marginBottom: 4 }}>{crew.name}</h1>
+            <p className="muted" style={{ marginBottom: 0 }}>
+              {crew.members.length} {crew.members.length === 1 ? 'person' : 'people'}
+            </p>
+          </div>
+          <div className="stack">
+            {crew.members.slice(0, 5).map((m) => (
+              <div key={m.user.id} className="avatar" style={{ background: avatarColor(m.user.displayName ?? m.user.email) }}>
+                {initials(m.user.displayName, m.user.email)}
+              </div>
+            ))}
+          </div>
+        </div>
 
-        {crew.dna && (
-          <div className="card">
+        {solo && (
+          <div className="banner-card" style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 26, marginBottom: 6 }}>🎉</div>
+            <p style={{ marginBottom: 4 }}>It&rsquo;s just you here so far.</p>
+            <p className="muted" style={{ marginBottom: 12 }}>Invite your friends to start planning together.</p>
+            {inviteUrl ? (
+              <button className="btn btn-primary" onClick={copyInvite}>
+                {copied ? '✓ Copied' : 'Share invite link'}
+              </button>
+            ) : (
+              <button className="btn btn-primary" onClick={getInviteLink}>
+                Get invite link
+              </button>
+            )}
+          </div>
+        )}
+
+        {crew.dna && !solo && (
+          <div className="banner-card">
             <div className="eyebrow">Group DNA · {crew.dna.confidence.toLowerCase()} confidence</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0 12px' }}>
               {crew.dna.topCategories.length ? (
@@ -82,7 +157,7 @@ export default function CrewDetailPage() {
           </div>
         )}
 
-        {availability.length > 0 && (
+        {availability.length > 0 && !solo && (
           <div className="card">
             <div className="eyebrow">Everyone&rsquo;s evening</div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -137,17 +212,22 @@ export default function CrewDetailPage() {
           </>
         )}
 
-        <div className="eyebrow" style={{ marginTop: 20 }}>
-          Invite
-        </div>
-        {inviteUrl ? (
-          <div className="card muted" style={{ wordBreak: 'break-all' }}>
-            {inviteUrl}
-          </div>
-        ) : (
-          <button className="btn" onClick={getInviteLink}>
-            Get invite link
-          </button>
+        {!solo && (
+          <>
+            <div className="eyebrow" style={{ marginTop: 20 }}>
+              Invite
+            </div>
+            {inviteUrl ? (
+              <button className="card" onClick={copyInvite} style={{ width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                <span className="muted" style={{ wordBreak: 'break-all' }}>{inviteUrl}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-gold)', flexShrink: 0 }}>{copied ? '✓ Copied' : 'Copy'}</span>
+              </button>
+            ) : (
+              <button className="btn" onClick={getInviteLink}>
+                Get invite link
+              </button>
+            )}
+          </>
         )}
 
         {error && <div className="error">{error}</div>}

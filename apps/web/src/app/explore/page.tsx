@@ -75,39 +75,36 @@ export default function ExplorePage() {
         <div className="wordmark">Plot</div>
       </nav>
       <div className="page">
-        <div className="eyebrow">Explore</div>
-        <h1 style={{ fontSize: 24, marginBottom: 4 }}>What&rsquo;s on around London</h1>
-        <p className="muted" style={{ marginBottom: 16 }}>
-          {experiences ? `${experiences.length} real, bookable options over the next 3 weeks. Tap a pin, then send one to a Crew.` : 'Loading real venues…'}
-        </p>
+        <div className="masthead" style={{ marginBottom: 16 }}>
+          <div className="eyebrow" style={{ marginBottom: 0 }}>Explore</div>
+          <h1 style={{ fontSize: 22 }}>What&rsquo;s on around London</h1>
+          <p className="muted" style={{ marginBottom: 0 }}>
+            {experiences
+              ? `${experiences.length} option${experiences.length === 1 ? '' : 's'} over the next 3 weeks — tap a pin, then send one to a Crew.`
+              : 'Finding what’s on…'}
+          </p>
+        </div>
 
         {error && <div className="error">{error}</div>}
 
         {dataSource === 'mock' && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '9px 13px',
-              borderRadius: 10,
-              background: 'rgba(242, 169, 59, 0.1)',
-              border: '1px solid rgba(242, 169, 59, 0.3)',
-              fontSize: 12,
-              color: 'var(--ink-gold)',
-              marginBottom: 14,
-            }}
-          >
+          <div className="banner warn">
             ⚠️ Sample events — no real event provider is connected yet. What you send to your Crew right now won&rsquo;t be bookable.
           </div>
         )}
 
-        <div style={{ height: 480, borderRadius: 18, overflow: 'hidden', border: '1px solid var(--ink-border)' }}>
-          {experiences && <ExploreMap experiences={experiences} center={center} onSend={setSendTarget} />}
+        <div style={{ height: 480, borderRadius: 18, overflow: 'hidden', border: '1px solid var(--ink-border)', boxShadow: 'var(--hard-shadow)' }}>
+          {experiences ? (
+            <ExploreMap experiences={experiences} center={center} onSend={setSendTarget} />
+          ) : (
+            <div style={{ height: '100%', background: 'var(--ink-surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <p className="muted">Loading map…</p>
+            </div>
+          )}
         </div>
 
         {sendTarget && (
-          <div className="card" style={{ marginTop: 16 }}>
+          <div className="banner-card fade-up" style={{ marginTop: 16 }}>
             <div className="eyebrow">Send &ldquo;{sendTarget.name}&rdquo; to…</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
               {crews === null && <p className="muted">Loading your Crews…</p>}
@@ -122,9 +119,9 @@ export default function ExplorePage() {
                   className="btn"
                   disabled={sending !== null}
                   onClick={() => sendToCrew(crew.id)}
-                  style={{ textAlign: 'left' }}
+                  style={{ textAlign: 'left', justifyContent: 'flex-start' }}
                 >
-                  {sending === crew.id ? 'Sending…' : crew.name}
+                  {sending === crew.id ? 'Sending…' : `💬 ${crew.name}`}
                 </button>
               ))}
               <button className="btn btn-ghost" onClick={() => setSendTarget(null)} disabled={sending !== null}>

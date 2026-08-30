@@ -89,14 +89,14 @@ export function VoteForm({
               style={{ marginBottom: 10 }}
             />
           )}
+          <button className="btn btn-primary" disabled={submitting} onClick={() => vote('in')} style={{ marginBottom: 8, fontSize: 15, padding: '15px 18px' }}>
+            {submitting ? '…' : "I'm in"}
+          </button>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary" disabled={submitting} onClick={() => vote('in')}>
-              I&rsquo;m in
-            </button>
-            <button className="btn" disabled={submitting} onClick={() => vote('maybe')}>
+            <button className="btn" disabled={submitting} onClick={() => vote('maybe')} style={{ flex: 1 }}>
               Maybe
             </button>
-            <button className="btn btn-ghost" disabled={submitting} onClick={() => vote('out')}>
+            <button className="btn btn-ghost" disabled={submitting} onClick={() => vote('out')} style={{ flex: 1 }}>
               Not for me
             </button>
           </div>

@@ -3,6 +3,7 @@
 import 'leaflet/dist/leaflet.css';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
+import { categoryStyle } from '@/lib/categoryStyle';
 
 export interface ExploreExperience {
   id: string;
@@ -40,41 +41,42 @@ export default function ExploreMap({
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      {experiences.map((exp) => (
-        <Marker key={exp.id} position={[exp.venue.latitude, exp.venue.longitude]} icon={pinIcon}>
-          <Popup minWidth={200}>
-            <strong>{exp.name}</strong>
-            <br />
-            {exp.venue.name}
-            <br />
-            {new Date(exp.startsAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-            {exp.priceMinMinor !== null && (
-              <>
+      {experiences.map((exp) => {
+        const style = categoryStyle(exp.category);
+        return (
+          <Marker key={exp.id} position={[exp.venue.latitude, exp.venue.longitude]} icon={pinIcon}>
+            <Popup minWidth={210}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 18, lineHeight: 1 }}>{style.emoji}</span>
+                <strong style={{ fontFamily: 'Fraunces, serif', fontSize: 14.5 }}>{exp.name}</strong>
+              </div>
+              <div style={{ fontSize: 12.5, color: '#555', lineHeight: 1.6 }}>
+                {exp.venue.name}
                 <br />
-                from £{(exp.priceMinMinor / 100).toFixed(0)}
-              </>
-            )}
-            <br />
-            <button
-              onClick={() => onSend(exp)}
-              style={{
-                marginTop: 8,
-                width: '100%',
-                padding: '7px 10px',
-                borderRadius: 8,
-                border: 'none',
-                background: '#F2A93B',
-                color: '#221806',
-                fontWeight: 700,
-                fontSize: 12.5,
-                cursor: 'pointer',
-              }}
-            >
-              Send to Crew →
-            </button>
-          </Popup>
-        </Marker>
-      ))}
+                {new Date(exp.startsAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                {exp.priceMinMinor !== null && ` · from £${(exp.priceMinMinor / 100).toFixed(0)}`}
+              </div>
+              <button
+                onClick={() => onSend(exp)}
+                style={{
+                  marginTop: 10,
+                  width: '100%',
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'var(--ink-gold)',
+                  color: 'var(--ink-gold-ink)',
+                  fontWeight: 700,
+                  fontSize: 12.5,
+                  cursor: 'pointer',
+                }}
+              >
+                Send to Crew →
+              </button>
+            </Popup>
+          </Marker>
+        );
+      })}
     </MapContainer>
   );
 }

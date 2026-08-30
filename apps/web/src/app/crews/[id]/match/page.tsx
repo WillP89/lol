@@ -4,11 +4,13 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
+import { categoryStyle } from '@/lib/categoryStyle';
 
 interface MatchOption {
   experience: {
     id: string;
     name: string;
+    category: string;
     startsAt: string;
     priceMinMinor: number | null;
     priceMaxMinor: number | null;
@@ -102,42 +104,60 @@ export default function MatchPage() {
           </div>
         )}
 
-        {options?.map((option, i) => (
-          <div key={option.experience.id} className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 17 }}>{option.experience.name}</div>
-                <div className="muted">
-                  {option.experience.venue?.name && `${option.experience.venue.name} · `}
-                  {new Date(option.experience.startsAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
-                </div>
-              </div>
-              <div style={{ textAlign: 'center', flexShrink: 0, marginLeft: 12 }}>
-                <div style={{ fontFamily: 'Fraunces, serif', fontSize: 20, color: 'var(--ink-gold)' }}>{option.matchScore}%</div>
-                <div className="muted" style={{ fontSize: 9 }}>match</div>
-              </div>
-            </div>
-            <div className="muted" style={{ marginTop: 8 }}>
-              {option.availableMemberCount}/{option.totalMemberCount} free
-              {option.experience.priceMinMinor !== null && ` · from £${(option.experience.priceMinMinor / 100).toFixed(0)}`}
-            </div>
-            {option.reasons.length > 0 && (
-              <ul style={{ margin: '10px 0 0', paddingLeft: 16, fontSize: 12, color: 'var(--ink-text-muted)' }}>
-                {option.reasons.map((r) => (
-                  <li key={r.code}>{r.label}</li>
-                ))}
-              </ul>
-            )}
-            <button
-              className={`btn ${i === 0 ? 'btn-primary' : ''}`}
-              style={{ marginTop: 12 }}
-              onClick={() => sendToCrew(option.experience.id)}
-              disabled={sendingId === option.experience.id}
+        {options?.map((option, i) => {
+          const style = categoryStyle(option.experience.category);
+          const best = i === 0;
+          return (
+            <div
+              key={option.experience.id}
+              className="card fade-up"
+              style={{ padding: 0, overflow: 'hidden', border: best ? '1.5px solid var(--ink-gold)' : undefined }}
             >
-              {sendingId === option.experience.id ? 'Sending…' : 'Send to Crew'}
-            </button>
-          </div>
-        ))}
+              <div className="art-block" style={{ background: style.bg, borderRadius: 0, position: 'relative', justifyContent: 'flex-start', padding: '0 16px' }}>
+                <span style={{ fontSize: 22, marginRight: 10 }}>{style.emoji}</span>
+                {best && (
+                  <span className="chip gold static" style={{ fontSize: 10, padding: '4px 9px', position: 'absolute', top: 10, right: 12 }}>
+                    ✨ best match
+                  </span>
+                )}
+              </div>
+              <div style={{ padding: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 17 }}>{option.experience.name}</div>
+                    <div className="muted">
+                      {option.experience.venue?.name && `${option.experience.venue.name} · `}
+                      {new Date(option.experience.startsAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'center', flexShrink: 0, marginLeft: 12 }}>
+                    <div style={{ fontFamily: 'Fraunces, serif', fontSize: 20, color: 'var(--ink-gold)' }}>{option.matchScore}%</div>
+                    <div className="muted" style={{ fontSize: 9 }}>match</div>
+                  </div>
+                </div>
+                <div className="muted" style={{ marginTop: 8 }}>
+                  {option.availableMemberCount}/{option.totalMemberCount} free
+                  {option.experience.priceMinMinor !== null && ` · from £${(option.experience.priceMinMinor / 100).toFixed(0)}`}
+                </div>
+                {option.reasons.length > 0 && (
+                  <ul style={{ margin: '10px 0 0', paddingLeft: 16, fontSize: 12, color: 'var(--ink-text-muted)' }}>
+                    {option.reasons.map((r) => (
+                      <li key={r.code}>{r.label}</li>
+                    ))}
+                  </ul>
+                )}
+                <button
+                  className={`btn ${best ? 'btn-primary' : ''}`}
+                  style={{ marginTop: 12 }}
+                  onClick={() => sendToCrew(option.experience.id)}
+                  disabled={sendingId === option.experience.id}
+                >
+                  {sendingId === option.experience.id ? 'Sending…' : 'Send to Crew'}
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </>
   );

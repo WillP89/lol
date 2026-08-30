@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
+import { categoryStyle } from '@/lib/categoryStyle';
 
 interface ChatMessage {
   id: string;
@@ -35,40 +36,26 @@ const POLL_INTERVAL_MS = 3000;
 // createPlanForCrew's chat announcement.
 const PLAN_ANNOUNCEMENT = /^📍 Sent "(.+)" to the Crew — \/plans\/([a-zA-Z0-9-]+)$/;
 
-const CATEGORY_STYLE: Record<string, { emoji: string; bg: string }> = {
-  LIVE_MUSIC: { emoji: '🎵', bg: 'linear-gradient(135deg, #4a2f6b, #241a2e)' },
-  CLUBBING: { emoji: '🕺', bg: 'linear-gradient(135deg, #6b2f4a, #241a2e)' },
-  RESTAURANT: { emoji: '🍽️', bg: 'linear-gradient(135deg, #3f6b54, #182016)' },
-  BAR: { emoji: '🍸', bg: 'linear-gradient(135deg, #6b4a1f, #241a10)' },
-  COMEDY: { emoji: '🎤', bg: 'linear-gradient(135deg, #6b5a1f, #241f10)' },
-  THEATRE: { emoji: '🎭', bg: 'linear-gradient(135deg, #55483a, #201c16)' },
-  CINEMA: { emoji: '🎬', bg: 'linear-gradient(135deg, #2f3f6b, #16182a)' },
-  ART_CULTURE: { emoji: '🖼️', bg: 'linear-gradient(135deg, #6b3a5c, #241628)' },
-  SPORT: { emoji: '⚽', bg: 'linear-gradient(135deg, #2f6b4a, #16241c)' },
-  FITNESS: { emoji: '🏋️', bg: 'linear-gradient(135deg, #6b2f2f, #241616)' },
-  FESTIVAL: { emoji: '🎪', bg: 'linear-gradient(135deg, #cf8a3a, #241a10)' },
-  DAY_ACTIVITY: { emoji: '☀️', bg: 'linear-gradient(135deg, #e0a94c, #241c10)' },
-  COMMUNITY: { emoji: '🤝', bg: 'linear-gradient(135deg, #4a5c6b, #161e24)' },
-};
-
 function EventCard({ data }: { data: PlanCardData }) {
   const exp = data.plan.experience;
-  const style = exp ? CATEGORY_STYLE[exp.category] ?? { emoji: '📍', bg: 'var(--ink-surface-2)' } : { emoji: '📍', bg: 'var(--ink-surface-2)' };
+  const style = categoryStyle(exp?.category);
   return (
     <Link
       href={`/plans/${data.plan.publicSlug}`}
+      className="fade-up"
       style={{
         display: 'block',
         width: 240,
-        borderRadius: 16,
+        borderRadius: 18,
         overflow: 'hidden',
         border: '1px solid var(--ink-border)',
         background: 'var(--ink-surface)',
         textDecoration: 'none',
         color: 'inherit',
+        boxShadow: 'var(--hard-shadow)',
       }}
     >
-      <div style={{ height: 64, background: style.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>
+      <div className="art-block" style={{ background: style.bg }}>
         {style.emoji}
       </div>
       <div style={{ padding: '10px 12px' }}>
@@ -229,7 +216,7 @@ export default function CrewChatPage() {
                   <div style={{ width: 240, height: 108, borderRadius: 16, background: 'var(--ink-surface-2)', opacity: 0.6 }} />
                 ) : (
                   <div
-                    className="card"
+                    className="card fade-up"
                     style={{
                       margin: 0,
                       padding: '9px 13px',
@@ -237,6 +224,7 @@ export default function CrewChatPage() {
                       background: mine ? 'var(--ink-gold)' : undefined,
                       color: mine ? 'var(--ink-gold-ink)' : undefined,
                       wordBreak: 'break-word',
+                      boxShadow: 'none', // a shadow on every bubble is too heavy for a chat thread
                     }}
                   >
                     {m.body}
@@ -252,18 +240,24 @@ export default function CrewChatPage() {
 
         {error && <div className="error">{error}</div>}
 
-        <form onSubmit={send} style={{ display: 'flex', gap: 8, paddingTop: 10 }}>
+        <form onSubmit={send} style={{ display: 'flex', gap: 8, paddingTop: 10, alignItems: 'center' }}>
           <input
             className="field"
-            style={{ flex: 1 }}
+            style={{ flex: 1, borderRadius: 100 }}
             placeholder="Message the Crew…"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             disabled={sending}
             maxLength={2000}
           />
-          <button className="btn btn-primary" type="submit" disabled={sending || !draft.trim()} style={{ flex: '0 0 auto', width: 'auto', padding: '10px 18px' }}>
-            {sending ? '…' : 'Send'}
+          <button
+            className="btn btn-primary"
+            type="submit"
+            disabled={sending || !draft.trim()}
+            style={{ flex: '0 0 auto', width: 44, height: 44, padding: 0, borderRadius: '50%', fontSize: 16 }}
+            aria-label="Send"
+          >
+            {sending ? '…' : '↑'}
           </button>
         </form>
       </div>
