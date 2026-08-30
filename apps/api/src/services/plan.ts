@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { track } from './analytics';
 import { computeCrewDna } from './crewDna';
 import { requestMagicLink } from './auth';
+import { sendCrewMessage } from './chat';
 import type { Plan, PlanStatusValue, VoteValue } from '@prisma/client';
 
 const READY_THRESHOLD = 0.6;
@@ -83,6 +84,14 @@ async function createPlanForCrew(
     crewId,
     planId: plan.id,
   });
+
+  // Sending an event to the Crew is meaningless if nothing tells the Crew — post it into chat
+  // so "talk it over" has somewhere to happen. Only for a real experience (not a vague
+  // IDEA-status soft plan with nothing attached yet). Chat posting failing should never take
+  // the Plan itself down with it — the Plan exists either way, so log and move on.
+  if (data.experienceId) {
+    await sendCrewMessage(crewId, proposedByUserId, `📍 Sent "${plan.title}" to the Crew — /plans/${plan.publicSlug}`).catch(() => {});
+  }
 
   return plan;
 }
