@@ -1496,3 +1496,27 @@ actually drives the `loading` state). Confirmed mid-load: 2 `.v2-skeleton` eleme
 computed `animation-name: v2Shimmer`, `animation-duration: 1.6s`, a real gradient background —
 and confirmed they're gone once the delayed response resolves. Screenshot taken mid-shimmer as
 visual evidence, not just computed-style assertions.
+
+## #button-focus-visible
+
+Button/tactile accessibility audit found tap feedback itself was already real (`.v2-btn:active`
+scales down, `.v2-tap-feedback:active` runs a press animation, both correctly guarded behind
+`prefers-reduced-motion`), but keyboard focus was not: no button or link anywhere in the app had
+its own `:focus-visible` style, so every one fell back to the browser default. Verified live
+(tab to the Crews page's "+" New Crew button) that this default — a thin `auto 1px` outline in
+a near-black colour — was rendering directly on top of a near-black button fill: technically
+present in computed style, invisible in the actual screenshot. A keyboard user had no reliable
+way to see what was focused on any dark-filled control, which is most of the primary actions in
+the app (`--v2-brand` pills are `#0c0c0d`).
+
+Fixed with one rule covering every `button`, `a`, and `[role="button"]` inside `.v2`: a solid
+2.5px outline in the same accent orange (`#ff4a1f`) already used for text selection and the
+input focus-visible fix (`#input-focus-visible` precedent — consistent "this is focused" colour
+language across controls, not a colour picked per component), offset 2px outward so it reads
+against any fill — brand-orange, near-black, ghost/white, or a plain nav link — rather than
+being swallowed by the button's own colour the way the native default was. `!important` for the
+same reason the input fix needed it: several buttons set their own `outline: none` inline.
+
+Verified live: tabbing to the New Crew button now shows a clearly visible orange ring in the
+actual screenshot (previously invisible), confirmed via both computed style
+(`outline: rgb(255, 74, 31) solid 2px`) and a real screenshot.

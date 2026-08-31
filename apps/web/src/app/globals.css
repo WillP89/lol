@@ -562,6 +562,24 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   box-shadow: 0 0 0 3px rgba(255, 74, 31, 0.32), var(--v2-shadow-sm) !important;
 }
 
+/* Same gap, buttons/links: verified live (tab to the Crews page's "+" New Crew button) that the
+   browser's default focus ring — `outline: auto 1px`, a near-black hairline — was rendering at
+   1px against a near-black button fill: technically present, invisible in practice. A keyboard
+   user had no reliable way to see what was focused on any dark-filled control. One consistent
+   ring, offset outward so it reads against any fill (brand-orange pill, near-black pill, ghost/
+   white pill, or a plain-text nav link) rather than a colour picked per button variant.
+   `!important` for the same reason as the input rule above — some buttons set their own
+   `outline: none` inline to kill the invisible default, which would otherwise beat this. */
+.v2 button:focus-visible, .v2 a:focus-visible, .v2 [role="button"]:focus-visible {
+  outline: 2.5px solid #ff4a1f !important;
+  outline-offset: 2px !important;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .v2 button:focus-visible, .v2 a:focus-visible, .v2 [role="button"]:focus-visible {
+    transition: outline-offset 0.1s ease;
+  }
+}
+
 /* LocationSearch's results dropdown — plain inline-styled buttons before had zero hover
    feedback at all, reading as unresponsive/broken rather than a real picker. */
 .v2-location-result {
