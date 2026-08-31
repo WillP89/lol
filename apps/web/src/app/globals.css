@@ -941,6 +941,16 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   z-index: 500;
 }
 
+/* Real gap found on inspection: every text input across the app sets `outline: none` (inline,
+   to kill the browser's default focus ring so it doesn't clash with the pill/rounded-corner
+   look) but nothing replaced it — a keyboard user tabbing through a form got zero visual
+   feedback of which field was focused. `!important` is needed because inline styles otherwise
+   beat a stylesheet rule; there's nothing else this could clobber since no input sets its own
+   focus-time box-shadow. */
+.v2 input:focus-visible, .v2 textarea:focus-visible {
+  box-shadow: 0 0 0 3px rgba(255, 61, 90, 0.32), var(--v2-shadow-sm) !important;
+}
+
 /* LocationSearch's results dropdown — plain inline-styled buttons before had zero hover
    feedback at all, reading as unresponsive/broken rather than a real picker. */
 .v2-location-result {
