@@ -17,7 +17,16 @@ interface ProfileUser {
     categoryAffinity: Record<string, number>;
     budgetMaxMinor: number;
     energyPreference: 'LOW' | 'MEDIUM' | 'HIGH';
+    travelRadiusMeters: number;
   } | null;
+  // The real, actually-written home location — onboarding posts here (POST /users/me/profile),
+  // and match.ts/explore.ts already read from here for recommendations and discovery. Real bug
+  // found via a fresh pilot test (not assumed): this page used to read `locationPrefs` instead
+  // (a parallel, entirely separate LocationPreference table that onboarding never writes to at
+  // all), so a user who'd set "Stafford" during onboarding saw "Not set" here — the location
+  // was never lost, the page was just reading from a table nothing populates. See
+  // docs/DECISIONS.md#location-persistence.
+  profile: { homeCity: string | null } | null;
   locationPrefs: { kind: string; label: string }[];
 }
 
@@ -102,7 +111,7 @@ export default function ProfilePage() {
     );
   }
 
-  const home = user.locationPrefs.find((p) => p.kind === 'HOME');
+  const homeCity = user.profile?.homeCity ?? null;
   const favs = user.locationPrefs.filter((p) => p.kind === 'FAVOURITE');
   const liked = user.tasteProfile
     ? Object.entries(user.tasteProfile.categoryAffinity)
@@ -136,7 +145,7 @@ export default function ProfilePage() {
           <div className="v2-card" style={{ padding: '18px 20px', marginBottom: 14 }}>
             <div className="v2-eyebrow">Areas</div>
             <p style={{ margin: '6px 0 0', fontSize: 14.5 }}>
-              {home?.label ?? 'Not set'}
+              {homeCity ?? 'Not set'}
               {favs.length > 0 && ` · also likes ${favs.map((f) => f.label).join(', ')}`}
             </p>
 

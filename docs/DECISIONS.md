@@ -1189,3 +1189,38 @@ passing (`social-v2.test.ts`'s lock assertion corrected from `BOOKED` to `LOCKED
 from `plot_dev`) needed the new migration applied by hand in this sandbox since `vitest` doesn't
 run the deploy script; Render's own `migrate-and-start.sh` handles this automatically in
 production on every deploy.
+
+#### location-persistence — a real pilot-blocking bug, root-caused and fixed
+
+User report: selected Stafford in onboarding, Profile later showed "Not set." Traced end to end
+rather than assumed: **two entirely separate, disconnected location systems existed in the
+codebase.** Onboarding posts `homeCity`/`homeLat`/`homeLng` to `POST /users/me/profile`, which
+writes the `Profile` model — the row `match.ts` (recommendations) and `explore.ts` (discovery
+city resolution) already read from correctly. But the Profile *page* was reading from
+`user.locationPrefs` — rows in an entirely separate `LocationPreference` table that a dedicated
+`setLocationPreferences()`/`POST /users/me/location-prefs` pair exists for, but that onboarding
+never calls at all. The location was never lost; the display page was reading a table nothing
+populates. Fixed by having Profile read `user.profile.homeCity` (already present in `/users/me`'s
+response, just unused). Verified end to end: fresh signup, Stafford selected, Profile page shows
+"Stafford", not "Not set".
+
+`LocationPreference` (kind: HOME/WORK/FAVOURITE/CITY) remains real, unused infrastructure — a
+reasonable foundation for a future "favourite areas beyond home" feature, not wired to anything
+today. Not removed; just not the bug.
+
+#### input-zoom — the real cause of "had to zoom out to view the full screen"
+
+Traced to its actual mechanism rather than assumed a layout bug: checked for horizontal overflow
+across all 7 required viewports (390×844 through 1728×1117) × 6 major screens — zero overflow
+found anywhere. The real cause: every text input across the app set an inline `font-size` of
+14.5–15.5px. iOS Safari auto-zooms the entire page the instant ANY input under 16px receives
+focus, and does not reliably revert on blur — the user is left stuck zoomed in until they
+manually pinch back out. Opening chat (which auto-focuses or invites typing into the composer)
+is exactly when this fires.
+
+Fixed with one global rule (`.v2 input, .v2 textarea, .v2 select { font-size: 16px !important }`
+below 720px, `!important` needed since every input sets its size inline) rather than patching
+each of the ~10 affected inputs individually — systemic bug, systemic fix. Desktop keeps the
+existing tighter density above 720px, where no browser does this. Verified by measuring computed
+font-size on every input across the new-Crew sheet, the chat composer, the poll builder, and the
+manual-plan builder at 390px width: all now report exactly 16px.

@@ -113,14 +113,18 @@ function OnboardingWizard() {
             later, unrelated sibling) paint on top and steal its clicks. */}
         <div className="fade-up" key={step}>
         {step === 0 && (
-          <input
+          <>
+            <h1 className="v2-display" style={{ fontSize: 27, marginBottom: 8 }}>What should we call you?</h1>
+            <p className="v2-muted" style={{ marginBottom: 22 }}>Your Crew will see this name.</p>
+            <input
               autoFocus
               style={{ width: '100%', padding: '15px 18px', borderRadius: 16, border: 'none', outline: 'none', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)', fontSize: 15.5, fontFamily: 'inherit', color: 'var(--v2-ink)', marginBottom: 22 }}
-              placeholder="Will"
+              placeholder="Your name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={80}
             />
+          </>
         )}
 
         {step === 1 && (

@@ -515,6 +515,24 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   z-index: 500;
 }
 
+/* Real, reported pilot bug traced to its actual cause, not assumed: "had to zoom out to view
+   the full screen when opening chat" — the message composer (and every other text input in the
+   app) sets an inline `fontSize` of 14.5-15.5px. iOS Safari auto-zooms the whole page in the
+   moment ANY input below 16px receives focus, and does not reliably zoom back out again on
+   blur — the user is left stuck zoomed in until they manually pinch back out. Not a layout
+   overflow (checked: zero horizontal overflow at any tested viewport, 390px through 1728px) —
+   a font-size threshold. `!important` needed for the same reason as the focus-ring rule below:
+   every input sets its size inline, which otherwise beats any stylesheet rule. Desktop (no
+   browser does this) keeps the tighter existing density above 720px. */
+.v2 input, .v2 textarea, .v2 select {
+  font-size: 16px !important;
+}
+@media (min-width: 720px) {
+  .v2 input, .v2 textarea, .v2 select {
+    font-size: 14.5px !important;
+  }
+}
+
 /* Real gap found on inspection: every text input across the app sets `outline: none` (inline,
    to kill the browser's default focus ring so it doesn't clash with the pill/rounded-corner
    look) but nothing replaced it — a keyboard user tabbing through a form got zero visual
