@@ -577,3 +577,13 @@ everywhere — this was presentation only. Added two small new v2 primitives alo
 didn't exist yet: `.v2-chip` (Profile's static "Into" tags) and `.v2-pulse-flames`/
 `.v2-pulse-flame` (the Plan Card "how many are in" strip). No page in the app is still on the
 old dark system.
+
+## #migrate-p1002-lock-retry
+
+One more real, transient failure surfaced right after the P3009 fix: `P1002`, Prisma timing out
+(10s) waiting to acquire Postgres's migration advisory lock. Root cause, confirmed by the
+timing: two commits landed close together, triggering two near-simultaneous Render deploys —
+the second one's `migrate deploy` hit the lock while the first's was still mid-check and holding
+it. Nothing wrong with the schema or database; this just needed a wait-and-retry, not a resolve
+or rollback, so it's now handled with a 5s sleep and another attempt rather than falling through
+to the "not a known-recoverable case, exit" branch that treated it as fatal.

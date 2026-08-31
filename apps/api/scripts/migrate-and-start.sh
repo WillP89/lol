@@ -28,6 +28,11 @@
 #    objects genuinely already exist, THAT'S what safely resolves it, on actual evidence rather
 #    than an assumption baked in here.
 #
+# 4. P1002 ("timed out acquiring the migration advisory lock") — purely transient, confirmed via
+#    a real deploy: a second, near-simultaneous Render deploy (a follow-up push landing seconds
+#    after the first) was already mid-migration-check and holding Postgres's advisory lock.
+#    Nothing wrong with the schema — just wait for the lock to free up and retry.
+#
 # Every `prisma` call is wrapped in `timeout` — confirmed via a real deploy that a stalled
 # handshake against Neon's pooled connection can hang a `prisma migrate resolve` call
 # indefinitely with zero output, which silently hung the whole container until Render killed the
@@ -112,6 +117,17 @@ while [ "$attempt" -lt "$max_attempts" ]; do
       resolve_applied "$FAILED"
       continue
     fi
+  fi
+
+  if echo "$OUTPUT" | grep -q "P1002"; then
+    # Purely transient: Prisma timed out (10s) waiting to acquire Postgres's migration advisory
+    # lock, meaning some *other* process — confirmed live: a second, near-simultaneous Render
+    # deploy from a follow-up push — was already mid-migration-check and holding it. Nothing
+    # about the schema or database is actually wrong here; the fix is just to wait for the lock
+    # to free up and try again, not to resolve/rollback anything.
+    echo "== P1002: migration advisory lock is held by another process (likely an overlapping deploy) — waiting 5s and retrying. =="
+    sleep 5
+    continue
   fi
 
   if echo "$OUTPUT" | grep -q "P3009"; then
