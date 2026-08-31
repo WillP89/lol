@@ -1,69 +1,74 @@
 # Going live: transactional email (magic links, notifications)
 
-**Implemented** — `apps/api/src/lib/email.ts` sends via SMTP (preferred) or Postmark's REST API
-(fallback), called from `services/auth.ts#requestMagicLink`. Neither path has been exercised
-against a live account from the environment this was written in (no outbound network to
-`smtp.gmail.com`/`api.postmarkapp.com` from that sandbox) — verify against the deployed
-service's logs once real credentials are configured.
+**Implemented** — `apps/api/src/lib/email.ts` tries, in order: Resend (HTTP API) → SMTP → Postmark
+(HTTP API), called from `services/auth.ts#requestMagicLink`. None has been exercised against a
+live account from the environment this was written in (no outbound network to
+`api.resend.com`/`smtp.gmail.com`/`api.postmarkapp.com` from that sandbox) — verify against the
+deployed service's logs once real credentials are configured.
 
-Gating is on `SMTP_HOST`+`SMTP_USER`+`SMTP_PASS` or `POSTMARK_API_KEY` being set, not
-`NODE_ENV` — SMTP is checked first. Neither configured → the magic-link API response returns
-the raw link directly (any environment) so the web app can show a "Continue →" button and the
-whole auth flow stays testable without a provider. `NODE_ENV === 'test'` always skips a real
-send regardless of what's configured, so the automated test suite never calls out to either.
+**SMTP is confirmed NOT to work on Render specifically** — a real send attempt there hung and
+then timed out (`Connection timeout`, ~8s, the signature of a blocked outbound port rather than
+a credentials problem — a wrong password fails in under a second). Render blocks outbound SMTP
+ports as an anti-spam-abuse measure, a common policy on shared PaaS hosting. It's kept in the
+code for whichever host doesn't block it; **Resend is what actually has a chance of working on
+Render**, because it's a regular HTTPS call (port 443), not a raw SMTP socket — that class of
+outbound connection is essentially never blocked.
 
-If a real send throws (bad credentials, provider outage, unverified sender), `requestMagicLink`
-logs the error and falls back to returning the raw link rather than leaving the user with
-nothing — a deliberate pilot-scale tradeoff (this response only ever reaches the person who
-requested it), not an oversight.
+Gating is on any of `RESEND_API_KEY` / (`SMTP_HOST`+`SMTP_USER`+`SMTP_PASS`) /
+`POSTMARK_API_KEY` being set, not `NODE_ENV`. None configured → the magic-link API response
+returns the raw link directly (any environment) so the web app can show a "Continue →" button
+and the whole auth flow stays testable without a provider. `NODE_ENV === 'test'` always skips a
+real send regardless of what's configured, so the automated test suite never calls out to any
+of them.
 
-## Setup — SMTP through a mailbox you already have (recommended: no domain, no account approval)
-Sends real email through any mailbox you can already log into — Gmail specifically, no
-business/work email, no third-party signup or review process. This is the path that's actually
-been reachable without a work email/domain.
+If a real send throws (bad credentials, provider outage, unverified sender, a blocked SMTP
+port), `requestMagicLink` logs the error and falls back to returning the raw link rather than
+leaving the user with nothing — a deliberate pilot-scale tradeoff (this response only ever
+reaches the person who requested it), not an oversight. This is also why sign-in kept working
+even while SMTP was silently broken on Render — once the request stopped *hanging* (see the
+timeout note below), this fallback could actually run.
 
-1. On the Google account you want to send from: turn on **2-Step Verification**
-   (myaccount.google.com/security) — required to generate an App Password.
-2. **myaccount.google.com/apppasswords** → create one (name it "Plot") → copy the 16-character
-   password it shows you once.
-3. Set on the API service (Render):
-   - `SMTP_HOST=smtp.gmail.com`
-   - `SMTP_PORT=465`
-   - `SMTP_USER=<the Gmail address>`
-   - `SMTP_PASS=<the 16-character App Password, no spaces>`
-   - `EMAIL_FROM=<the same Gmail address>` — Gmail rejects/overrides a From that isn't the
-     authenticated account (or one of its configured Send As aliases), so this has to match
-     `SMTP_USER`.
+## Setup — Resend (recommended on Render specifically: HTTP, not blocked)
+1. Sign up at [resend.com](https://resend.com) with any email, including personal Gmail.
+2. **API Keys** → create one → `RESEND_API_KEY`.
+3. Set `EMAIL_FROM` to `onboarding@resend.dev` — Resend's own shared sending domain, no
+   verification needed.
 
-Real limitation: personal Gmail caps outgoing mail around 500/day — nowhere near a concern for
-a friends-and-family beta, worth knowing if Plot ever needs to send at real volume, at which
-point moving to Workspace (2,000/day) or a dedicated ESP is the next step. Any other SMTP-
-capable mailbox (Outlook/Office 365, a hosting provider's mailbox, etc.) works the same way —
-swap `SMTP_HOST`/`SMTP_PORT` for that provider's values.
+**UNVERIFIED CAVEAT** — genuinely don't know this part works yet, same honesty bar as the
+Eventbrite adapter: some HTTP email APIs restrict their free/no-verification shared sender to
+only deliver to the account owner's own signup address until a real domain is verified.
+Whether that applies to Resend's `onboarding@resend.dev` isn't confirmed from here. **Test it
+in this order before relying on it**:
+1. Send a magic link to the same email you signed up to Resend with — should work regardless.
+2. Send one to a *different* address (a friend's, or a second personal address you own).
+3. If step 2 silently doesn't arrive (or gets rejected), that's the restriction — a verified
+   domain (a few minutes of DNS records, same idea as Postmark's) unlocks sending to anyone,
+   or a different provider is needed. Tell me what you see either way.
 
-## Setup — Postmark (better once there's a real domain to verify)
-Two paths depending on whether a domain is available:
+## Setup — SMTP through a mailbox you already have (works on hosts that don't block SMTP ports)
+1. On the Google account to send from: turn on **2-Step Verification**
+   (myaccount.google.com/security).
+2. **myaccount.google.com/apppasswords** → create one ("Plot") → copy the 16-character password.
+3. Set: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_USER=<the Gmail address>`,
+   `SMTP_PASS=<the App Password>`, `EMAIL_FROM=<the same Gmail address>`.
 
-**Domain verification** (best for a real launch): sign up at
-[postmarkapp.com](https://postmarkapp.com), create a Server, add and verify a sending domain
-(SPF + DKIM DNS records — budget for DNS propagation, up to a few hours), grab the Server API
-token → `POSTMARK_API_KEY`, set `EMAIL_FROM` to an address on that domain.
+Confirmed working *as code* (correct credentials, correct protocol) but confirmed **not
+reachable from Render** — the outbound connection itself is blocked there. Worth keeping
+configured if Plot ever runs somewhere else that doesn't block SMTP ports.
 
-**Sender Signature** (verifies one mailbox instead of a domain — no DNS needed): Sender
-Signatures → Add Sender Signature → the address to send from → click the confirmation link
-Postmark emails to it → grab the Server API token → set `EMAIL_FROM` to that exact address.
-**In practice this has not been enough on its own** — Postmark's account approval/review
-process has rejected or stalled a personal-Gmail-only signup even after the Sender Signature
-itself verified; it seems to expect a business use case to actually lift an account to
-production sending. If Postmark is worth revisiting later (better deliverability reputation at
-volume than raw SMTP), expect to need a real domain or an explanation of the use case to their
-support team — SMTP above is what actually worked without either.
+## Setup — Postmark (better once there's a real domain to verify, for real volume)
+**Domain verification**: sign up at [postmarkapp.com](https://postmarkapp.com), create a
+Server, add and verify a sending domain (SPF + DKIM DNS records), grab the Server API token →
+`POSTMARK_API_KEY`, set `EMAIL_FROM` to an address on that domain.
 
-## Why SMTP over Postmark, for now
-Postmark is the better choice once Plot has a real domain and volume — but it's implemented
-to sit behind an account-approval process that a purely personal Gmail signup didn't clear,
-and that made it the actual blocker to sending anything at all. SMTP through Gmail needs
-nothing beyond an existing Google account and a two-minute App Password, and every magic link
-this session's testing generated by "sending" for real would go out through it once
-configured. Swapping to a different SMTP host, or back to Postmark once a domain exists, is a
-config change, not a rearchitecture.
+**Sender Signature** (verifies one mailbox, no DNS): Sender Signatures → Add Sender Signature →
+the address to send from → click the confirmation link Postmark emails to it → grab the Server
+API token → set `EMAIL_FROM` to that exact address. **In practice this has not been enough on
+its own** — Postmark's account-approval process rejected/stalled a personal-Gmail-only signup
+even after the Sender Signature itself verified successfully.
+
+## Why this order
+Resend first because it's the one path that's both (a) not blocked by Render's SMTP policy and
+(b) doesn't route through Postmark's account-approval process that a personal-Gmail-only signup
+didn't clear. SMTP stays as a fallback for a host that doesn't block it. Postmark stays for
+once a real domain exists and higher-volume deliverability reputation actually matters.

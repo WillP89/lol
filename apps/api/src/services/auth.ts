@@ -86,7 +86,7 @@ export async function requestMagicLink(
   const safeNext = sanitiseNext(next);
   const url = `${config.WEB_APP_URL}/auth/callback?token=${rawToken}${safeNext ? `&next=${encodeURIComponent(safeNext)}` : ''}`;
 
-  const emailReady = providerReadiness.smtpEmail || providerReadiness.postmarkEmail;
+  const emailReady = providerReadiness.resendEmail || providerReadiness.smtpEmail || providerReadiness.postmarkEmail;
   if (emailReady && config.NODE_ENV !== 'test') {
     try {
       await sendMagicLinkEmail(normalisedEmail, url);
