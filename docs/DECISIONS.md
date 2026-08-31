@@ -1082,3 +1082,52 @@ cycle; Robin locks it in; Sam's Home (never revisited the Crew) shows "Next up";
 reflects it; Robin does a genuine hard refresh and the locked state, confirmation copy, and
 reaction all persist exactly as before. Zero page errors across all three sessions. Screenshots
 captured at every step, not just asserted from the final state.
+
+#### plot-scroll-reveal-and-landing-rebuild — the actual gap behind "no movement as I scroll"
+
+Direct user feedback after the batch above: "the theme still looks the same too, not
+interactiveness, no movement as you scroll, nothing." Investigated rather than assumed — the
+root cause was concrete and specific, not a vague "needs more polish":
+
+**The landing page (`/`) was exactly one 100vh screen with nothing below the fold** — Talk/
+Decide/Go was squeezed into the initial viewport alongside the hero. There was, literally,
+nothing to scroll on the page most visitors (and the person judging "is this interactive?")
+actually look at first. Every animation built in the sessions before this one fires in RESPONSE
+to an action (a vote, a reaction, a lock) — none of them fire in response to scrolling itself,
+so a long page rendered everything fully visible from first paint regardless.
+
+**Fixed with two distinct things, not a re-theme** (palette/typography untouched, per explicit
+earlier instruction not to re-open that):
+1. `lib/useScrollReveal.ts` — a real scroll-triggered reveal primitive (IntersectionObserver +
+   a MutationObserver so it stays correct even when content — Explore's grid — loads async
+   after mount). Elements carrying `.v2-reveal` start lowered/transparent and animate in as they
+   scroll into view; anything already in the initial viewport shows immediately, no flash.
+   Deliberately not a wrapper component (toggles a class on the existing element) so it never
+   disturbs a CSS Grid/Flex layout. Wired into the landing page, Explore's result grid, and the
+   Plans list.
+2. **The landing page itself gained real content below the fold**: a "How it actually works"
+   section (Talk/Decide/Go as its own considered section, not three cramped columns), and —
+   more importantly — a live, self-playing mock of the actual EventCard life-cycle component
+   (the real visual states: "shared → converging → locked", the exact same states built in the
+   shared-idea-lifecycle pass) so a signed-out visitor can SEE the interaction system this
+   session built, not just read a tagline claiming it exists. Split into `LandingClient.tsx` (a
+   client component for the hooks) rendered by `page.tsx` (kept a server component specifically
+   so the signed-in redirect stays server-side, no client-side flash).
+
+**Real bug caught before shipping, not after**: the first version checked
+`document.cookie.includes('plot_session')` client-side to decide whether to redirect an already-
+signed-in visitor — `plot_session` is `httpOnly` (routes/auth.ts, correctly, for security), so
+that check would have ALWAYS returned false and broken the redirect for every signed-in user.
+Caught by tracing the cookie's actual `Set-Cookie` flags before shipping, not discovered later —
+fixed by keeping the redirect in the server component and moving only the client-hook-dependent
+JSX into the child.
+
+**Verified, not assumed**: page scrollHeight went from exactly 900px (= viewport, non-
+scrollable) to 2207px; confirmed via script that reveal elements start unrevealed below the
+fold and become revealed on scroll; screenshotted the self-playing lifecycle demo mid-cycle in
+its "converging" and "locked" (green, checkmark) states directly on the public page. Also
+confirmed via a debug pass that Explore's reveal initially looked broken in a test script (5/8
+elements revealed) — traced to the test script scrolling `window` while Explore uses its own
+inner scroll container (`.v2-explore-col`); scrolling the actual container correctly revealed
+8/8. Not a product bug — real user scrolling (mouse wheel/trackpad over that pane) scrolls the
+real container, which IntersectionObserver already tracks correctly.

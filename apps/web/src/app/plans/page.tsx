@@ -6,6 +6,7 @@ import { api, ApiError } from '@/lib/api';
 import { TabBarV2 } from '@/components/TabBarV2';
 import { v2Art } from '@/lib/v2Art';
 import { formatPriceFrom } from '@/lib/formatPrice';
+import { useScrollReveal } from '@/lib/useScrollReveal';
 
 interface UpcomingPlan {
   id: string;
@@ -56,6 +57,7 @@ function timeBucket(iso: string | null): TimeBucket {
  * services/crew.ts#listUpcomingPlansForUser), brought onto the same v2 primitives as Home/Crews.
  */
 export default function PlansPage() {
+  useScrollReveal();
   const [plans, setPlans] = useState<UpcomingPlan[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,10 +124,10 @@ export default function PlansPage() {
                             <Link
                               key={plan.id}
                               href={`/plans/${plan.publicSlug}`}
-                              className="v2-card fade-up v2-stagger"
+                              className="v2-card v2-reveal"
                               style={{
                                 display: 'flex', gap: 12, alignItems: 'stretch', padding: 10,
-                                ['--stagger-i' as string]: i,
+                                ['--reveal-i' as string]: i % 4,
                                 boxShadow: tonight ? '0 0 0 1.5px var(--v2-pop), var(--v2-shadow-sm)' : undefined,
                               }}
                             >

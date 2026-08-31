@@ -121,6 +121,22 @@ body {
    arrives as a considered sequence instead of every row popping in at once. */
 .v2-stagger { animation-delay: calc(var(--stagger-i, 0) * 45ms); }
 
+/* Scroll-triggered reveal (see lib/useScrollReveal.ts) — a genuinely different primitive from
+   .fade-up/.v2-stagger above: those fire once on mount, so a long page's whole grid was fully
+   visible from first paint with nothing left to animate as you actually scrolled to it. This
+   starts an element lowered + transparent and the hook flips it to `.v2-revealed` the moment it
+   scrolls into view, with the same --reveal-i stagger convention as --stagger-i. */
+.v2-reveal {
+  opacity: 0;
+  transform: translateY(22px);
+  transition: opacity 0.55s cubic-bezier(.2,.8,.2,1), transform 0.55s cubic-bezier(.2,.8,.2,1);
+  transition-delay: calc(var(--reveal-i, 0) * 55ms);
+}
+.v2-reveal.v2-revealed { opacity: 1; transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+  .v2-reveal { opacity: 1; transform: none; transition: none; }
+}
+
 /* The "Lock it in" moment — the one place a little delight is earned (brief: "we've stopped
    talking about it, this is happening"). A handful of brand-coloured dots bursting outward from
    the tapped button and fading, ~700ms, not confetti-everywhere. */

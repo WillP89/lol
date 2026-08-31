@@ -10,6 +10,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { LocationSearch } from '@/components/LocationSearch';
 import { v2Art } from '@/lib/v2Art';
 import { formatPriceRange } from '@/lib/formatPrice';
+import { useScrollReveal } from '@/lib/useScrollReveal';
 import type { ExploreExperience } from './ExploreMap';
 
 // Leaflet touches `window` at module load — client-side only.
@@ -43,6 +44,7 @@ function Card({
   onClick,
   onHoverChange,
   id,
+  revealIndex,
 }: {
   exp: ExploreExperience;
   size: 'hero' | 'grid';
@@ -50,6 +52,7 @@ function Card({
   onClick: () => void;
   onHoverChange?: (hovering: boolean) => void;
   id?: string;
+  revealIndex?: number;
 }) {
   const price = formatPrice(exp);
   return (
@@ -58,10 +61,11 @@ function Card({
       onClick={onClick}
       onMouseEnter={() => onHoverChange?.(true)}
       onMouseLeave={() => onHoverChange?.(false)}
-      className="fade-up v2-hoverable"
+      className="v2-reveal v2-hoverable"
       style={{
         display: 'block',
         width: '100%',
+        ['--reveal-i' as string]: revealIndex ?? 0,
         gridColumn: size === 'hero' ? '1 / -1' : undefined,
         position: 'relative',
         height: size === 'hero' ? 280 : 200,
@@ -94,6 +98,7 @@ function Card({
 }
 
 export default function ExplorePage() {
+  useScrollReveal();
   const router = useRouter();
   const [experiences, setExperiences] = useState<ExploreExperience[] | null>(null);
   const [dataSource, setDataSource] = useState<'live' | 'mock' | null>(null);
@@ -285,7 +290,7 @@ export default function ExplorePage() {
             id={`v2-exp-${hero.id}`}
           />
         )}
-        {rest.map((exp) => (
+        {rest.map((exp, i) => (
           <Card
             key={exp.id}
             exp={exp}
@@ -294,6 +299,10 @@ export default function ExplorePage() {
             onClick={() => openDetail(exp)}
             onHoverChange={(h) => setHoveredId(h ? exp.id : null)}
             id={`v2-exp-${exp.id}`}
+            // Capped, not a running total — each pair of grid cards staggers against its
+            // immediate neighbour, but a card 20 rows down the grid doesn't inherit a multi-
+            // second transition-delay it never needed just because of its position in the list.
+            revealIndex={i % 4}
           />
         ))}
       </div>
