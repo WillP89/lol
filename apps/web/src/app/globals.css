@@ -141,6 +141,73 @@ body {
   .v2-lock-dot { display: none; }
 }
 
+/* ==========================================================================
+   MOTION SYSTEM — a small, coherent set of durations, not a library of one-off
+   transitions. Every animation here answers one of: where did this come
+   from, where did it go, what just changed, what can I interact with.
+
+   MICRO   ~120-180ms  — button press, reaction pick, toggle, small feedback
+   STANDARD ~180-280ms — sheets, cards opening, poll bars, nav state
+   TRANSITION ~250-400ms — a shared item entering chat, plan confirmation
+
+   All three respect prefers-reduced-motion (guarded per keyframe below).
+   ========================================================================== */
+
+/* MICRO — a new avatar/count/chip mounting in response to a vote/reaction. Runs once, on
+   mount, because a newly-appearing voter is a genuinely new DOM node (keyed by id) — no
+   animation library needed to trigger it. */
+@keyframes v2PopIn {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.v2-pop-in { animation: v2PopIn 0.28s cubic-bezier(.34,1.4,.64,1) both; }
+
+/* MICRO — a tapped reaction/vote/toggle compresses then releases, the web equivalent of a
+   haptic tick. Apply on the element that was actually pressed. */
+@keyframes v2Tap {
+  0% { transform: scale(1); }
+  40% { transform: scale(0.88); }
+  100% { transform: scale(1); }
+}
+.v2-tap-feedback:active { animation: v2Tap 0.18s ease-out; }
+
+/* STANDARD — a poll's leading option gently emphasising itself as consensus firms up, not a
+   static bar. Also used for the "confirmed" state a poll/event card lands in right after
+   Lock It In. */
+@keyframes v2Settle {
+  0% { transform: scale(0.98); }
+  100% { transform: scale(1); }
+}
+.v2-settle { animation: v2Settle 0.22s ease-out; }
+
+/* TRANSITION — a message/shared object entering the conversation from below, the same
+   direction it was "sent" from — answers "where did this come from". */
+@keyframes v2Arrive {
+  0% { opacity: 0; transform: translateY(10px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.v2-arrive { animation: v2Arrive 0.3s cubic-bezier(.2,.8,.2,1) both; }
+
+/* TRANSITION — the exact "we are actually doing this" moment: a poll/event card resolving
+   into its confirmed state. A brief scale+settle on the whole card, not a page reload. */
+@keyframes v2Confirm {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.03); }
+  100% { transform: scale(1); }
+}
+.v2-confirm-transition { animation: v2Confirm 0.4s cubic-bezier(.2,.8,.2,1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .v2-pop-in, .v2-tap-feedback:active, .v2-settle, .v2-arrive, .v2-confirm-transition {
+    animation: none !important;
+  }
+}
+
+/* A pending/optimistic message (sent locally, not yet confirmed by the server) — quietly
+   distinct, not a loud spinner, matching "delivered state should not dominate". */
+.v2-pending { opacity: 0.55; }
+
 /* Archivo at black (900) weight with tight tracking for every heading and hero moment — the
    confident, statement-making display type Partiful's own system uses (a bold custom grotesque
    for headlines, up to ~112px, tight tracking), not a serif. */

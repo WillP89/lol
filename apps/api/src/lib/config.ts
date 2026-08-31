@@ -45,10 +45,11 @@ const EnvSchema = z.object({
   SMTP_PORT: z.coerce.number().default(465),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
-  // Must be on a domain verified in Postmark (SPF/DKIM) if sending via Postmark; if sending
-  // via SMTP, most providers (Gmail included) require this to match SMTP_USER. See
-  // docs/providers/email.md.
-  EMAIL_FROM: z.string().email().default('hello@plot.invalid'),
+  // Must be on a domain verified with whichever provider is sending (Resend/Postmark — SPF+DKIM);
+  // if sending via SMTP, most providers (Gmail included) require this to match SMTP_USER.
+  // plotmaker.co.uk is verified in Resend (SPF/DKIM/MX all green — see docs/providers/email.md),
+  // so this default is a real, deliverable sender once RESEND_API_KEY is also set.
+  EMAIL_FROM: z.string().email().default('hello@plotmaker.co.uk'),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

@@ -32,6 +32,7 @@ interface Poll {
   options: string[];
   kind: 'GENERAL' | 'AVAILABILITY';
   counts: Record<string, number>;
+  votersByOption: Record<string, string[]>;
   totalVotes: number;
   myVote: string | null;
 }
@@ -58,6 +59,8 @@ interface ExploreExperienceLite {
 }
 
 const REACTION_CHOICES = ['👍', '❤️', '😂', '🎉'];
+
+type MemberLite = { user: { id: string; displayName: string | null; email: string } };
 
 interface PlanCardData {
   plan: {
@@ -127,13 +130,23 @@ const LOCKABLE_STATUSES = new Set(['SHARED', 'GATHERING_INTEREST', 'LIKELY', 'RE
  * shared event reads as "the same product," not a different, plainer feature bolted on. A
  * still-open Plan gets its own one-tap "Lock it in" right here — the payoff moment shouldn't
  * require navigating away from the conversation it happened in. */
-function EventCard({ data, onLock, locking }: { data: PlanCardData; onLock: (planId: string) => void; locking: boolean }) {
+function EventCard({ data, onLock, locking, justLocked }: { data: PlanCardData; onLock: (planId: string) => void; locking: boolean; justLocked: boolean }) {
   const exp = data.plan.experience;
   const lockable = LOCKABLE_STATUSES.has(data.plan.status);
+  const locked = data.plan.status === 'BOOKED' || justLocked;
   return (
-    <div className="fade-up v2-hoverable" style={{ width: 260, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)' }}>
+    <div className={`v2-hoverable${justLocked ? ' v2-confirm-transition' : ' fade-up'}`} style={{ width: 260, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)' }}>
       <Link href={`/plans/${data.plan.publicSlug}`} style={{ display: 'block' }}>
-        <div style={{ height: 120, background: v2Art(exp?.imageUrl, exp?.category) }} />
+        <div style={{ height: 120, background: v2Art(exp?.imageUrl, exp?.category), position: 'relative' }}>
+          {/* The definitive-state overlay — date/venue moving from "proposed" to "confirmed" is
+              the actual payoff of Lock It In, so it happens right on the card people were
+              already looking at, not only in a separate confetti layer. */}
+          {locked && (
+            <div className="v2-pop-in" style={{ position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 5, background: 'var(--v2-green)', color: '#fff', fontSize: 11, fontWeight: 800, padding: '5px 10px', borderRadius: 100 }}>
+              <span>✓</span><span>Confirmed</span>
+            </div>
+          )}
+        </div>
         <div style={{ padding: '12px 14px 8px' }}>
           <div className="v2-display" style={{ fontSize: 15, marginBottom: 4 }}>{data.plan.title}</div>
           {exp && (
@@ -143,17 +156,18 @@ function EventCard({ data, onLock, locking }: { data: PlanCardData; onLock: (pla
             </div>
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, fontWeight: 800, color: data.plan.status === 'BOOKED' ? 'var(--v2-green)' : 'var(--v2-ink-muted)', background: data.plan.status === 'BOOKED' ? 'rgba(27,122,77,0.12)' : 'var(--v2-bg-deep)', padding: '4px 10px', borderRadius: 100 }}>
-              {data.plan.status === 'BOOKED' ? '🔒 Locked in' : `${data.pulse.inCount}/${data.pulse.totalMembers} in`}
+            <span style={{ fontSize: 11, fontWeight: 800, color: locked ? 'var(--v2-green)' : 'var(--v2-ink-muted)', background: locked ? 'rgba(27,122,77,0.12)' : 'var(--v2-bg-deep)', padding: '4px 10px', borderRadius: 100 }}>
+              {locked ? '🔒 Locked in' : `${data.pulse.inCount}/${data.pulse.totalMembers} in`}
             </span>
             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--v2-brand)' }}>View →</span>
           </div>
         </div>
       </Link>
-      {lockable && (
+      {lockable && !justLocked && (
         <button
           onClick={() => onLock(data.plan.id)}
           disabled={locking}
+          className="v2-tap-feedback"
           style={{ display: 'block', width: '100%', padding: '10px 0', border: 'none', borderTop: '1px solid var(--v2-line)', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand)' }}
         >
           {locking ? 'Locking in…' : '🔒 Lock it in'}
@@ -163,17 +177,73 @@ function EventCard({ data, onLock, locking }: { data: PlanCardData; onLock: (pla
   );
 }
 
+/** Small overlapping avatar chips for who picked a given option — this is the actual point of
+ * exposing `votersByOption`: seeing the group visibly forming around a choice, not just a
+ * number climbing. New voters mount as genuinely new keyed DOM nodes, so `.v2-pop-in` fires on
+ * them automatically with zero animation-library wiring. */
+function OptionVoters({ voterIds, members }: { voterIds: string[]; members: MemberLite[] }) {
+  if (voterIds.length === 0) return null;
+  const shown = voterIds.slice(0, 4);
+  return (
+    <div className="stack" style={{ marginTop: 4 }}>
+      {shown.map((id) => {
+        const m = members.find((x) => x.user.id === id)?.user;
+        if (!m) return null;
+        return (
+          <div
+            key={id}
+            className="v2-pop-in"
+            style={{
+              width: 18, height: 18, borderRadius: '50%', marginLeft: -5, fontSize: 7.5, fontWeight: 800, color: '#fff',
+              background: avatarColor(m.displayName ?? m.email), display: 'flex', alignItems: 'center', justifyContent: 'center',
+              border: '1.5px solid var(--v2-surface)',
+            }}
+          >
+            {initials(m.displayName, m.email)}
+          </div>
+        );
+      })}
+      {voterIds.length > 4 && (
+        <div style={{ width: 18, height: 18, borderRadius: '50%', marginLeft: -5, fontSize: 7, fontWeight: 800, color: 'var(--v2-ink-muted)', background: 'var(--v2-bg-deep)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--v2-surface)' }}>
+          +{voterIds.length - 4}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** A poll (or availability check-in, `kind: AVAILABILITY`) as a native conversational object —
- * tap an option, see the tally move live, no separate results screen. Once anyone's voted, the
- * leading option gets its own one-tap "Lock it in" that turns the decision into a real Plan. */
-function PollCard({ poll, onVote, voting, onLockOption, locking }: {
+ * tap an option, see the tally move live (optimistically — see `votePollOption`), watch the
+ * group actually form around a choice via `OptionVoters`, not just a bare percentage. Once
+ * anyone's voted, the leading option gets its own one-tap "Lock it in" that turns the decision
+ * into a real Plan. `justLocked` renders the same card in its confirmed state for a beat before
+ * the real "locked in" system message replaces it — the state TRANSFORMATION is the point, not
+ * only the confetti burst alongside it. */
+function PollCard({ poll, onVote, members, onLockOption, locking, justLocked }: {
   poll: Poll;
   onVote: (option: string) => void;
-  voting: boolean;
+  members: MemberLite[];
   onLockOption: (option: string) => void;
   locking: boolean;
+  justLocked: string | null;
 }) {
   const leading = poll.totalVotes > 0 ? poll.options.reduce((a, b) => (poll.counts[b] > poll.counts[a] ? b : a)) : null;
+
+  if (justLocked) {
+    // The confirmed state — other options gone, the winner expands into a definitive-looking
+    // banner. This is what "we are actually doing this" should look like in the same card the
+    // group was just deciding in, not a silent swap for a plain-text message.
+    return (
+      <div className="v2-confirm-transition" style={{ width: 260, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-green)', boxShadow: 'var(--v2-shadow-sm)', padding: '16px 16px' }}>
+        <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.75)', marginBottom: 6 }}>Locked in</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="v2-pop-in" style={{ fontSize: 20 }}>✓</span>
+          <span style={{ fontWeight: 800, fontSize: 16, color: '#fff' }}>{justLocked}</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fade-up" style={{ width: 260, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)', padding: '14px 14px 10px' }}>
       <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--v2-pop)', marginBottom: 6 }}>
@@ -185,17 +255,25 @@ function PollCard({ poll, onVote, voting, onLockOption, locking }: {
           const count = poll.counts[option] ?? 0;
           const pct = poll.totalVotes > 0 ? Math.round((count / poll.totalVotes) * 100) : 0;
           const mine = poll.myVote === option;
+          const isLeading = option === leading && poll.totalVotes > 0;
           return (
             <button
               key={option}
               onClick={() => onVote(option)}
-              disabled={voting}
-              style={{ position: 'relative', textAlign: 'left', border: 'none', borderRadius: 10, overflow: 'hidden', cursor: 'pointer', padding: '9px 12px', background: 'var(--v2-bg-deep)' }}
+              className="v2-tap-feedback"
+              style={{
+                position: 'relative', textAlign: 'left', border: 'none', borderRadius: 10, overflow: 'hidden', cursor: 'pointer', padding: '9px 12px',
+                background: 'var(--v2-bg-deep)',
+                boxShadow: isLeading ? 'inset 0 0 0 1.5px var(--v2-green)' : 'none',
+              }}
             >
-              <div style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: mine ? 'rgba(255,47,126,0.18)' : 'rgba(12,12,13,0.06)', transition: 'width 0.3s ease' }} />
-              <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: mine ? 800 : 600 }}>
-                <span>{mine ? '✓ ' : ''}{option}</span>
-                {poll.totalVotes > 0 && <span className="v2-muted">{count}</span>}
+              <div className="v2-settle" key={pct} style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: mine ? 'rgba(255,47,126,0.18)' : 'rgba(12,12,13,0.06)', transition: 'width 0.35s cubic-bezier(.2,.8,.2,1)' }} />
+              <div style={{ position: 'relative' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: mine ? 800 : 600 }}>
+                  <span>{mine ? '✓ ' : ''}{option}</span>
+                  {poll.totalVotes > 0 && <span className="v2-muted">{count}</span>}
+                </div>
+                <OptionVoters voterIds={poll.votersByOption[option] ?? []} members={members} />
               </div>
             </button>
           );
@@ -205,6 +283,7 @@ function PollCard({ poll, onVote, voting, onLockOption, locking }: {
         <button
           onClick={() => onLockOption(leading)}
           disabled={locking}
+          className="v2-tap-feedback"
           style={{ display: 'block', width: '100%', padding: '9px 0', border: 'none', borderTop: '1px solid var(--v2-line)', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand)' }}
         >
           {locking ? 'Locking in…' : `🔒 Lock in "${leading}"`}
@@ -231,9 +310,12 @@ function ReactionRow({
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4, justifyContent: align === 'flex-end' ? 'flex-end' : 'flex-start' }}>
       {reactions.map((r) => (
         <button
-          key={r.emoji}
+          // Keying on count too forces a fresh DOM node whenever the tally changes — which is
+          // exactly what makes .v2-pop-in (a mount-triggered animation) replay on every tap,
+          // yours or someone else's, without any animation-library state tracking.
+          key={`${r.emoji}-${r.count}`}
           onClick={() => onPick(r.emoji)}
-          className="v2-chip-toggle"
+          className="v2-chip-toggle v2-tap-feedback v2-pop-in"
           style={{
             display: 'flex', alignItems: 'center', gap: 3, fontSize: 11.5, padding: '2px 8px', borderRadius: 100, border: 'none', cursor: 'pointer',
             background: r.reactedByMe ? 'rgba(255,47,126,0.14)' : 'var(--v2-bg-deep)',
@@ -245,12 +327,12 @@ function ReactionRow({
       ))}
       {pickerOpen ? (
         REACTION_CHOICES.map((emoji) => (
-          <button key={emoji} onClick={() => onPick(emoji)} className="v2-chip-toggle" style={{ fontSize: 15, padding: '2px 6px', borderRadius: 100, border: 'none', background: 'var(--v2-bg-deep)', cursor: 'pointer' }}>
+          <button key={emoji} onClick={() => onPick(emoji)} className="v2-chip-toggle v2-tap-feedback" style={{ fontSize: 15, padding: '2px 6px', borderRadius: 100, border: 'none', background: 'var(--v2-bg-deep)', cursor: 'pointer' }}>
             {emoji}
           </button>
         ))
       ) : (
-        <button onClick={onTogglePicker} aria-label="Add reaction" style={{ fontSize: 11, padding: '2px 7px', borderRadius: 100, border: 'none', background: 'transparent', color: 'var(--v2-ink-dim)', cursor: 'pointer' }}>+</button>
+        <button onClick={onTogglePicker} aria-label="Add reaction" className="v2-tap-feedback" style={{ fontSize: 11, padding: '2px 7px', borderRadius: 100, border: 'none', background: 'transparent', color: 'var(--v2-ink-dim)', cursor: 'pointer' }}>+</button>
       )}
     </div>
   );
@@ -313,7 +395,10 @@ export default function CrewPage() {
   const [me, setMe] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
+  // Optimistic-send bookkeeping — see `send`/`retrySend`. A message is in exactly one of these
+  // (or neither, once confirmed): pending while the request is in flight, failed if it errored.
+  const [pendingMessageIds, setPendingMessageIds] = useState<Set<string>>(new Set());
+  const [failedMessageIds, setFailedMessageIds] = useState<Set<string>>(new Set());
   const [suggesting, setSuggesting] = useState(false);
   const [planCards, setPlanCards] = useState<Record<string, PlanCardData | 'loading' | 'error'>>({});
   const [pickerFor, setPickerFor] = useState<string | null>(null);
@@ -337,8 +422,12 @@ export default function CrewPage() {
   const [manualVenue, setManualVenue] = useState('');
   const [manualWhen, setManualWhen] = useState('');
   const [postingManual, setPostingManual] = useState(false);
-  const [votingMessageId, setVotingMessageId] = useState<string | null>(null);
   const [lockingPlanId, setLockingPlanId] = useState<string | null>(null);
+  // The "we are actually doing this" transition state — see lockPlanById/lockPollOption. Set
+  // optimistically the instant Lock It In is tapped, so the card itself flips to its confirmed
+  // state before the network round trip, not only after.
+  const [justLockedPlanIds, setJustLockedPlanIds] = useState<Set<string>>(new Set());
+  const [justLockedByMessage, setJustLockedByMessage] = useState<Record<string, string>>({});
   // Desktop only — the persistent Crews rail beside the active conversation (see globals.css's
   // .v2-crew-split comment for why this exists instead of just widening the message column).
   const [crewList, setCrewList] = useState<CrewListItem[] | null>(null);
@@ -400,17 +489,62 @@ export default function CrewPage() {
     }
   }, [messages]);
 
+  // Smart scroll — real bug this replaces: unconditionally forcing scroll-to-bottom on every
+  // `messages` change drags you back down mid-scroll-up-to-read-history the moment anyone
+  // (including you, sending) touches the thread. Only auto-scroll when you were already at the
+  // bottom (or on first load); otherwise surface a restrained "new messages" pill instead of
+  // moving the viewport out from under you.
+  const nearBottomRef = useRef(true);
+  const hasScrolledOnceRef = useRef(false);
+  const [newMessagesPill, setNewMessagesPill] = useState(false);
+
+  function handleListScroll() {
+    const el = listRef.current;
+    if (!el) return;
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottomRef.current) setNewMessagesPill(false);
+  }
+  function scrollToBottom(smooth: boolean) {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    nearBottomRef.current = true;
+    setNewMessagesPill(false);
+  }
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+    if (!messages) return;
+    if (!hasScrolledOnceRef.current) {
+      hasScrolledOnceRef.current = true;
+      scrollToBottom(false);
+      return;
+    }
+    if (nearBottomRef.current) scrollToBottom(true);
+    else setNewMessagesPill(true);
   }, [messages]);
 
   async function react(messageId: string, emoji: string) {
     setPickerFor(null);
+    // Optimistic — mirrors the backend's own toggle-and-replace semantics (tap the same emoji
+    // again to remove it, a different one to switch) so the tap reads as instant regardless of
+    // round-trip time. Reconciled with the real aggregate on response; reverted via a refetch
+    // if the request itself fails.
+    setMessages((prev) => prev?.map((m) => {
+      if (m.id !== messageId) return m;
+      const mine = m.reactions.find((r) => r.reactedByMe);
+      let next = m.reactions.map((r) => ({ ...r }));
+      if (mine) {
+        next = next.map((r) => (r.emoji === mine.emoji ? { ...r, count: r.count - 1, reactedByMe: false } : r)).filter((r) => r.count > 0);
+      }
+      if (!mine || mine.emoji !== emoji) {
+        const target = next.find((r) => r.emoji === emoji);
+        if (target) { target.count += 1; target.reactedByMe = true; }
+        else next.push({ emoji, count: 1, reactedByMe: true });
+      }
+      return { ...m, reactions: next };
+    }) ?? prev);
     try {
       const res = await api.post<{ reactions: Reaction[] }>(`/crews/${crewId}/messages/${messageId}/react`, { emoji });
       setMessages((prev) => prev?.map((m) => (m.id === messageId ? { ...m, reactions: res.reactions } : m)) ?? prev);
     } catch {
-      // next poll reconciles it
+      await poll(); // the optimistic guess was wrong — a real refetch corrects it
     }
   }
 
@@ -461,14 +595,31 @@ export default function CrewPage() {
   }
 
   async function votePollOption(messageId: string, option: string) {
-    setVotingMessageId(messageId);
+    if (!me) return;
+    // Optimistic — the bar, the count and your own avatar sliding under the option all move the
+    // instant you tap, not after a round trip. Re-voting moves your avatar from the old option
+    // to the new one, same as the backend's replace-not-accumulate semantics.
+    setMessages((prev) => prev?.map((m) => {
+      if (m.id !== messageId || !m.poll) return m;
+      const p = m.poll;
+      const prevVote = p.myVote;
+      if (prevVote === option) return m;
+      const counts = { ...p.counts };
+      const votersByOption = Object.fromEntries(Object.entries(p.votersByOption).map(([k, v]) => [k, [...v]]));
+      if (prevVote) {
+        counts[prevVote] = Math.max(0, (counts[prevVote] ?? 0) - 1);
+        votersByOption[prevVote] = (votersByOption[prevVote] ?? []).filter((id) => id !== me);
+      }
+      counts[option] = (counts[option] ?? 0) + 1;
+      votersByOption[option] = [...(votersByOption[option] ?? []), me];
+      return { ...m, poll: { ...p, counts, votersByOption, myVote: option, totalVotes: prevVote ? p.totalVotes : p.totalVotes + 1 } };
+    }) ?? prev);
     try {
       const res = await api.post<{ poll: Poll }>(`/crews/${crewId}/messages/${messageId}/poll-vote`, { option });
       setMessages((prev) => prev?.map((m) => (m.id === messageId ? { ...m, poll: res.poll } : m)) ?? prev);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Vote did not go through.');
-    } finally {
-      setVotingMessageId(null);
+      await poll(); // revert the optimistic guess
     }
   }
 
@@ -527,12 +678,17 @@ export default function CrewPage() {
 
   async function lockPlanById(planId: string) {
     setLockingPlanId(planId);
+    // The state TRANSFORMATION happens right here, optimistically, before the network call even
+    // resolves — the EventCard flips into its confirmed state immediately. The confetti is one
+    // restrained flourish alongside that; it was never the experience on its own.
+    setJustLockedPlanIds((prev) => new Set(prev).add(planId));
+    celebrate();
     try {
       await api.post(`/plans/${planId}/lock`);
-      celebrate();
       await poll();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not lock that in.');
+      setJustLockedPlanIds((prev) => { const n = new Set(prev); n.delete(planId); return n; });
     } finally {
       setLockingPlanId(null);
     }
@@ -543,16 +699,20 @@ export default function CrewPage() {
    * plan without a separate "now go make a Plan" step. */
   async function lockPollOption(messageId: string, question: string, option: string) {
     setLockingPlanId(messageId);
+    // Same optimistic transform as lockPlanById — the poll card itself flips to "Locked in —
+    // <option>" the instant you tap, not after the manual-plan-then-lock round trip completes.
+    setJustLockedByMessage((prev) => ({ ...prev, [messageId]: option }));
+    celebrate();
     try {
       const res = await api.post<{ plan: { id: string; publicSlug: string } }>(`/crews/${crewId}/plans/manual`, { title: `${question} — ${option}` });
       await api.post(`/plans/${res.plan.id}/lock`);
-      celebrate();
       // The brief's own words: "we've stopped talking about it, this is happening" deserves a
-      // beat to actually be seen — navigating away instantly would cut the celebration off
+      // beat to actually be seen — navigating away instantly would cut the transition off
       // before it plays, so the redirect waits just long enough for it to land.
-      setTimeout(() => router.push(`/plans/${res.plan.publicSlug}`), 550);
+      setTimeout(() => router.push(`/plans/${res.plan.publicSlug}`), 700);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not lock that in.');
+      setJustLockedByMessage((prev) => { const n = { ...prev }; delete n[messageId]; return n; });
       setLockingPlanId(null);
     }
   }
@@ -560,18 +720,52 @@ export default function CrewPage() {
   async function send(e: React.FormEvent) {
     e.preventDefault();
     const body = draft.trim();
-    if (!body || sending) return;
-    setSending(true);
+    if (!body || !me) return;
     setDraft('');
+    // Truly optimistic — the bubble appears immediately (quietly dimmed via `.v2-pending`, not
+    // a loud spinner), before the network round trip, so sending never has a beat where the
+    // input clears but nothing else visibly happened. Reconciled with the real message (real id,
+    // real timestamp) on success; kept in place with a retry affordance on failure rather than
+    // silently vanishing.
+    const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const optimistic: ChatMessage = {
+      id: tempId,
+      body,
+      createdAt: new Date().toISOString(),
+      author: { id: me, displayName: null, email: '' },
+      reactions: [],
+      poll: null,
+    };
+    setMessages((prev) => [...(prev ?? []), optimistic]);
+    setPendingMessageIds((prev) => new Set(prev).add(tempId));
+    setFailedMessageIds((prev) => { const n = new Set(prev); n.delete(tempId); return n; });
     try {
       const res = await api.post<{ message: ChatMessage }>(`/crews/${crewId}/messages`, { body });
       lastIdRef.current = res.message.id;
-      setMessages((prev) => [...(prev ?? []), res.message]);
+      setMessages((prev) => prev?.map((m) => (m.id === tempId ? res.message : m)) ?? prev);
+      setPendingMessageIds((prev) => { const n = new Set(prev); n.delete(tempId); return n; });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Message did not send.');
-      setDraft(body);
-    } finally {
-      setSending(false);
+      setPendingMessageIds((prev) => { const n = new Set(prev); n.delete(tempId); return n; });
+      setFailedMessageIds((prev) => new Set(prev).add(tempId));
+    }
+  }
+
+  /** Retry a message that failed to send — same optimistic id, same position in the thread, so
+   * retrying doesn't reorder or duplicate anything, just tries the same POST again. */
+  async function retrySend(tempId: string) {
+    const msg = messages?.find((m) => m.id === tempId);
+    if (!msg) return;
+    setFailedMessageIds((prev) => { const n = new Set(prev); n.delete(tempId); return n; });
+    setPendingMessageIds((prev) => new Set(prev).add(tempId));
+    try {
+      const res = await api.post<{ message: ChatMessage }>(`/crews/${crewId}/messages`, { body: msg.body });
+      lastIdRef.current = res.message.id;
+      setMessages((prev) => prev?.map((m) => (m.id === tempId ? res.message : m)) ?? prev);
+      setPendingMessageIds((prev) => { const n = new Set(prev); n.delete(tempId); return n; });
+    } catch {
+      setPendingMessageIds((prev) => { const n = new Set(prev); n.delete(tempId); return n; });
+      setFailedMessageIds((prev) => new Set(prev).add(tempId));
     }
   }
 
@@ -681,8 +875,20 @@ export default function CrewPage() {
           </Link>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', height: context ? 'calc(100dvh - 132px)' : 'calc(100dvh - 82px)', padding: '4px 20px calc(env(safe-area-inset-bottom, 0px) + 14px)' }}>
-          <div ref={listRef} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', height: context ? 'calc(100dvh - 132px)' : 'calc(100dvh - 82px)', padding: '4px 20px calc(env(safe-area-inset-bottom, 0px) + 14px)', position: 'relative' }}>
+          {/* Restrained "new messages" affordance — only shown while you've scrolled up to read
+              history and something new has arrived below; tapping it is the one thing that
+              moves the viewport for you in that state. */}
+          {newMessagesPill && (
+            <button
+              onClick={() => scrollToBottom(true)}
+              className="v2-pop-in v2-tap-feedback"
+              style={{ position: 'absolute', bottom: 74, left: '50%', transform: 'translateX(-50%)', zIndex: 5, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 100, border: 'none', background: 'var(--v2-ink)', color: '#fff', fontSize: 12.5, fontWeight: 700, boxShadow: 'var(--v2-shadow-lg)', cursor: 'pointer' }}
+            >
+              New messages ↓
+            </button>
+          )}
+          <div ref={listRef} onScroll={handleListScroll} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 10 }}>
             {solo && (
               <div style={{ textAlign: 'center', margin: 'auto', maxWidth: 260 }}>
                 <div className="v2-display" style={{ fontSize: 20, marginBottom: 8 }}>It&rsquo;s just you here so far.</div>
@@ -710,9 +916,15 @@ export default function CrewPage() {
               const cardData = planMatch ? planCards[planMatch[2]] : undefined;
               const prev = i > 0 ? messages[i - 1] : null;
               const grouped = prev !== null && prev.author.id === m.author.id;
+              const pending = pendingMessageIds.has(m.id);
+              const failed = failedMessageIds.has(m.id);
 
               return (
-                <div key={m.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexDirection: mine ? 'row-reverse' : 'row', marginTop: grouped ? -4 : 8 }}>
+                <div
+                  key={m.id}
+                  className="v2-arrive"
+                  style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexDirection: mine ? 'row-reverse' : 'row', marginTop: grouped ? -4 : 8 }}
+                >
                   {!mine && (
                     <div style={{ width: 24, height: 24, borderRadius: '50%', flexShrink: 0, visibility: grouped ? 'hidden' : 'visible', fontSize: 9.5, fontWeight: 800, color: '#fff', background: avatarColor(m.author.displayName ?? m.author.email), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {initials(m.author.displayName, m.author.email)}
@@ -723,18 +935,19 @@ export default function CrewPage() {
                     {m.poll ? (
                       <PollCard
                         poll={m.poll}
-                        voting={votingMessageId === m.id}
+                        members={crew.members}
                         onVote={(option) => votePollOption(m.id, option)}
                         locking={lockingPlanId === m.id}
                         onLockOption={(option) => lockPollOption(m.id, m.poll!.question, option)}
+                        justLocked={justLockedByMessage[m.id] ?? null}
                       />
                     ) : planMatch && cardData && cardData !== 'loading' && cardData !== 'error' ? (
-                      <EventCard data={cardData} onLock={lockPlanById} locking={lockingPlanId === cardData.plan.id} />
+                      <EventCard data={cardData} onLock={lockPlanById} locking={lockingPlanId === cardData.plan.id} justLocked={justLockedPlanIds.has(cardData.plan.id)} />
                     ) : planMatch && cardData === 'loading' ? (
                       <div style={{ width: 260, height: 120, borderRadius: 16, background: 'var(--v2-bg-deep)' }} />
                     ) : (
                       <div
-                        className="fade-up"
+                        className={pending ? 'v2-pending' : undefined}
                         style={{
                           padding: '10px 15px', wordBreak: 'break-word', fontSize: 14.5, lineHeight: 1.4,
                           background: mine ? 'var(--v2-brand)' : 'var(--v2-surface)',
@@ -746,8 +959,14 @@ export default function CrewPage() {
                         {m.body}
                       </div>
                     )}
-                    {!planMatch && !m.poll && <ReactionRow reactions={m.reactions} pickerOpen={pickerFor === m.id} onTogglePicker={() => setPickerFor(m.id)} onPick={(emoji) => react(m.id, emoji)} align={mine ? 'flex-end' : 'flex-start'} />}
-                    <div className="v2-dim" style={{ fontSize: 9.5, marginTop: 3 }}>{formatTime(m.createdAt)}</div>
+                    {!planMatch && !m.poll && !failed && <ReactionRow reactions={m.reactions} pickerOpen={pickerFor === m.id} onTogglePicker={() => setPickerFor(m.id)} onPick={(emoji) => react(m.id, emoji)} align={mine ? 'flex-end' : 'flex-start'} />}
+                    {failed ? (
+                      <button onClick={() => retrySend(m.id)} className="v2-tap-feedback" style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3, border: 'none', background: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--v2-error)', padding: 0 }}>
+                        Didn&rsquo;t send — retry
+                      </button>
+                    ) : (
+                      <div className="v2-dim" style={{ fontSize: 9.5, marginTop: 3 }}>{pending ? 'Sending…' : formatTime(m.createdAt)}</div>
+                    )}
                   </div>
                 </div>
               );
@@ -774,16 +993,18 @@ export default function CrewPage() {
                 placeholder={`Message ${crew.name}…`}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                disabled={sending}
                 maxLength={2000}
               />
+              {/* Never disabled while a send is in flight — sending is optimistic, so there is
+                  nothing to wait for; the next message can go straight out. */}
               <button
                 type="submit"
-                disabled={sending || !draft.trim()}
+                disabled={!draft.trim()}
                 aria-label="Send"
-                style={{ flexShrink: 0, width: 44, height: 44, borderRadius: '50%', border: 'none', background: 'var(--v2-brand)', color: '#fff', fontSize: 17, cursor: 'pointer', opacity: sending || !draft.trim() ? 0.5 : 1 }}
+                className="v2-tap-feedback"
+                style={{ flexShrink: 0, width: 44, height: 44, borderRadius: '50%', border: 'none', background: 'var(--v2-brand)', color: '#fff', fontSize: 17, cursor: 'pointer', opacity: !draft.trim() ? 0.5 : 1 }}
               >
-                {sending ? '…' : '↑'}
+                ↑
               </button>
             </form>
           )}

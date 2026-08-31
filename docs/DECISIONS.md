@@ -923,3 +923,59 @@ booking.ts) is fully implemented and already wired from the Plan Card — it ope
 provider's checkout once a real event (with a real booking URL) exists, which likewise needs a
 live provider key to ever be non-mock. This is an external blocker, not unfinished work; document
 it and continue.
+
+#### plot-interaction-uplift — real motion, real optimism, real state transitions
+
+The visual reset (above) was the shell; this pass is the part the user actually feels while
+using it — reactions, poll voting, Lock It In, and chat message arrival all rewritten to be
+genuinely optimistic (state updates before the network round-trip, not after), plus a real
+three-tier CSS motion system (`globals.css` — pop-in, tap-feedback, settle, arrive,
+confirm-transition, all `prefers-reduced-motion`-guarded) so every animation has an origin/
+destination reason rather than being decoration.
+
+- **Reactions** (`ReactionRow`): tapping an emoji updates the chip's count immediately, keyed on
+  `${emoji}-${count}` so React remounts and replays the pop-in on every change — proven with a
+  network-delay test (route intercepted to add 1.5s latency): the ❤️ chip was on-screen and
+  counted within 80ms, an order of magnitude before the real request could have resolved. Revert-
+  on-error goes through the existing `poll()` refetch.
+- **Poll/availability voting** (`PollCard`/`OptionVoters`): voting moves your own avatar chip
+  under the option and slides the fill bar (`.v2-settle`) instantly; the backend now returns
+  `votersByOption: Record<string, string[]>` from `summarisePoll()` (chat.ts) — a reshape of
+  vote rows already being fetched, not a new query — so the client can show the actual group
+  converging on an option (small avatar stack), not just a bare count. The leading option gets
+  an inset highlight the moment it takes the lead.
+- **Lock It In** (`PollCard`/`EventCard` `justLocked`): redesigned as a real state transition, not
+  confetti-on-top-of-the-same-card. The instant Lock It In is tapped, the card itself flips
+  (`.v2-confirm-transition`) to a distinct green "Locked in" confirmation card with a pop-in
+  checkmark — set optimistically before the network call, reverted only on a real failure.
+  Verified via screenshot at both the instant-transition frame and the settled state.
+- **Chat arrival**: `send()` rewritten fully optimistic — a temp message renders immediately
+  (`pendingMessageIds`), reconciles to the real id on success, and shows a "Didn't send — retry"
+  affordance (`retrySend`) on failure rather than silently vanishing.
+- **Smart scroll** (the one requirement most likely to have been faked without a real multi-
+  message test): the message list only auto-scrolls on a new message if the viewer was already
+  near the bottom (`nearBottomRef`, tracked via `onScroll`); otherwise a restrained "New
+  messages ↓" pill appears instead of yanking the viewport. Proven, not assumed: seeded 25
+  messages into a crew, scrolled a second real browser context to the very top of history,
+  sent a new message from the first user, and confirmed via `scrollTop` (stayed at 0, not
+  auto-scrolled) plus a screenshot showing the pill floating above an unmoved viewport;
+  clicking the pill then scrolled to the bottom. A shorter, non-overflowing conversation
+  correctly does the opposite (auto-scrolls, no pill) — same code path, just nothing to
+  preserve scroll position against.
+
+**Real bug found and root-caused during verification, not by inspection**: the very first attempt
+to exercise the poll flow end-to-end threw a full React error boundary ("Something went wrong")
+on posting a poll. Traced via `page.on('pageerror')` to `PollCard` reading
+`poll.votersByOption[option]` where `votersByOption` was `undefined` — not a code defect (the
+field is unconditionally set in `summarisePoll()`), but a stale `tsx watch` process that had been
+running since long before the `chat.ts` edit and hadn't picked up the new field. A clean restart
+of the API dev process resolved it immediately, confirmed by re-running the identical repro with
+zero errors. Documented here because it's exactly the kind of failure "prove it, don't assume it"
+verification is for — a static code read would have called this fine.
+
+**Also in this pass**: wired the now-verified `plotmaker.co.uk` Resend domain into real
+transactional email — updated `EMAIL_FROM`'s default and `docs/providers/email.md` to reflect
+verified-domain status (removing the earlier "might only deliver to the account's own address"
+caveat, which only applies to Resend's *unverified* shared sender). The one remaining step
+(setting `RESEND_API_KEY` + `EMAIL_FROM` in Render's dashboard) is outside this sandbox's reach
+and documented as such — everything on the code side is done and typechecked.

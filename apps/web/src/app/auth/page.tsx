@@ -62,7 +62,7 @@ function AuthForm() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
-              <button className="v2-btn v2-btn-brand" disabled={loading || !email} type="submit" style={{ padding: '16px 22px', fontSize: 15.5 }}>
+              <button className="v2-btn v2-btn-brand v2-tap-feedback" disabled={loading || !email} type="submit" style={{ padding: '16px 22px', fontSize: 15.5 }}>
                 {loading ? 'Sending…' : 'Send my link'}
               </button>
               {error && <div style={{ color: 'var(--v2-error)', fontSize: 13 }}>{error}</div>}
@@ -70,7 +70,7 @@ function AuthForm() {
           </div>
         ) : (
           <div className="v2-card fade-up" style={{ textAlign: 'center', padding: '32px 26px' }}>
-            <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(27,122,77,0.12)', color: 'var(--v2-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 22 }}>
+            <div className="v2-pop-in" style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(27,122,77,0.12)', color: 'var(--v2-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 22 }}>
               ✓
             </div>
             <p className="v2-display" style={{ fontSize: 18, marginBottom: 8 }}>Check your email</p>
@@ -80,12 +80,12 @@ function AuthForm() {
             {sent.devMagicLinkUrl ? (
               <>
                 <p className="v2-dim" style={{ fontSize: 12, marginBottom: 12 }}>No email provider is configured yet — here&rsquo;s the link directly:</p>
-                <a className="v2-btn v2-btn-brand" href={sent.devMagicLinkUrl} style={{ marginBottom: 12 }}>
+                <a className="v2-btn v2-btn-brand v2-tap-feedback" href={sent.devMagicLinkUrl} style={{ marginBottom: 12 }}>
                   Continue →
                 </a>
               </>
             ) : null}
-            <button onClick={resend} className="v2-btn v2-btn-ghost" style={{ fontSize: 13 }}>
+            <button onClick={resend} className="v2-btn v2-btn-ghost v2-tap-feedback" style={{ fontSize: 13 }}>
               {resent ? '✓ Sent again' : "Didn't get it? Resend"}
             </button>
           </div>

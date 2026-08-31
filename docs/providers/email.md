@@ -1,10 +1,19 @@
 # Going live: transactional email (magic links, notifications)
 
+**Status: `plotmaker.co.uk` is verified in Resend** (DKIM + the `send` subdomain's MX/SPF records
+all green — confirmed via the Resend dashboard). That removes the one real restriction on the
+free/shared sender (`onboarding@resend.dev` can only deliver to the account owner's own address);
+a verified domain can send to anyone. **The only thing left to go live is setting
+`RESEND_API_KEY` and `EMAIL_FROM=hello@plotmaker.co.uk` in Render's environment variables for the
+API service** — this sandbox has no Render dashboard access, so that one step has to happen
+outside this session. Once it's set, `requestMagicLink` sends a real email automatically (see the
+gating logic below) and the web app's "Continue →" dev-link fallback stops appearing on its own —
+no code change needed on top of this.
+
 **Implemented** — `apps/api/src/lib/email.ts` tries, in order: Resend (HTTP API) → SMTP → Postmark
-(HTTP API), called from `services/auth.ts#requestMagicLink`. None has been exercised against a
-live account from the environment this was written in (no outbound network to
-`api.resend.com`/`smtp.gmail.com`/`api.postmarkapp.com` from that sandbox) — verify against the
-deployed service's logs once real credentials are configured.
+(HTTP API), called from `services/auth.ts#requestMagicLink`. Not exercised against a live send
+from *this* sandbox (no outbound network to `api.resend.com` from here) — verify against the
+deployed service's logs once `RESEND_API_KEY` is set on Render.
 
 **SMTP is confirmed NOT to work on Render specifically** — a real send attempt there hung and
 then timed out (`Connection timeout`, ~8s, the signature of a blocked outbound port rather than
@@ -28,22 +37,28 @@ reaches the person who requested it), not an oversight. This is also why sign-in
 even while SMTP was silently broken on Render — once the request stopped *hanging* (see the
 timeout note below), this fallback could actually run.
 
-## Setup — Resend (recommended on Render specifically: HTTP, not blocked)
-1. Sign up at [resend.com](https://resend.com) with any email, including personal Gmail.
-2. **API Keys** → create one → `RESEND_API_KEY`.
-3. Set `EMAIL_FROM` to `onboarding@resend.dev` — Resend's own shared sending domain, no
-   verification needed.
+## Setup — Resend (recommended on Render specifically: HTTP, not blocked) — DONE except one step
+1. ~~Sign up at [resend.com](https://resend.com)~~ — done.
+2. ~~Add and verify `plotmaker.co.uk`~~ — done: DKIM verified, `send.plotmaker.co.uk`'s MX + SPF
+   (`v=spf1 include:amazonses.com ~all`) both verified. Domain status: **Verified**.
+3. **Remaining:** in Resend → **API Keys**, create one, then in Render → the API service →
+   **Environment**, set:
+   - `RESEND_API_KEY` = that key
+   - `EMAIL_FROM` = `hello@plotmaker.co.uk` (this is now the code default too — see
+     `apps/api/src/lib/config.ts` — but Render's env var wins if set, so set it explicitly for
+     clarity).
 
-**UNVERIFIED CAVEAT** — genuinely don't know this part works yet, same honesty bar as the
-Eventbrite adapter: some HTTP email APIs restrict their free/no-verification shared sender to
-only deliver to the account owner's own signup address until a real domain is verified.
-Whether that applies to Resend's `onboarding@resend.dev` isn't confirmed from here. **Test it
-in this order before relying on it**:
-1. Send a magic link to the same email you signed up to Resend with — should work regardless.
-2. Send one to a *different* address (a friend's, or a second personal address you own).
-3. If step 2 silently doesn't arrive (or gets rejected), that's the restriction — a verified
-   domain (a few minutes of DNS records, same idea as Postmark's) unlocks sending to anyone,
-   or a different provider is needed. Tell me what you see either way.
+   No code deploy is required for this step — it's a Render dashboard env var, and
+   `providerReadiness.resendEmail` (`lib/config.ts`) flips on as soon as `RESEND_API_KEY` is
+   present, at next process start.
+
+Because the domain is verified (not the shared `onboarding@resend.dev` sender), the restriction
+that limits free/unverified senders to only the account owner's own address does **not** apply
+here — this can send to *any* real recipient, which is what unblocks the actual multi-person
+"invite a real friend" journey. Verify by watching Render's API logs on first real send: a
+success looks like no `'Resend send failed'` error log and the web app's "Check your email"
+screen no longer showing a "Continue →" dev-link (that only renders when `devMagicLinkUrl` comes
+back, which only happens when no provider is configured or a real send just threw).
 
 ## Setup — SMTP through a mailbox you already have (works on hosts that don't block SMTP ports)
 1. On the Google account to send from: turn on **2-Step Verification**

@@ -78,9 +78,17 @@ function summarisePoll(poll: RawPoll | null, viewerId: string) {
   if (!poll) return null;
   const options = poll.options as string[];
   const counts = Object.fromEntries(options.map((o) => [o, 0])) as Record<string, number>;
+  // Who voted for what, not just how many — the client uses this to show the actual group
+  // forming around an option (small avatar chips beside it), not just a bare number. The vote
+  // rows were already being fetched for `counts`/`myVote`; this reshapes the same data instead
+  // of a second query.
+  const votersByOption: Record<string, string[]> = Object.fromEntries(options.map((o) => [o, []]));
   let myVote: string | null = null;
   for (const v of poll.votes) {
-    if (counts[v.option] !== undefined) counts[v.option] += 1;
+    if (counts[v.option] !== undefined) {
+      counts[v.option] += 1;
+      votersByOption[v.option].push(v.userId);
+    }
     if (v.userId === viewerId) myVote = v.option;
   }
   return {
@@ -89,6 +97,7 @@ function summarisePoll(poll: RawPoll | null, viewerId: string) {
     options,
     kind: poll.kind,
     counts,
+    votersByOption,
     totalVotes: poll.votes.length,
     myVote,
   };
