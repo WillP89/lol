@@ -1056,3 +1056,13 @@ a normal Crew's ring.
 **Explicit non-goal, to avoid inventing a fake signal**: a genuine "3 unread messages" state
 would need a persisted per-user last-read timestamp per Crew, which doesn't exist yet — not
 built here rather than faked with an arbitrary badge. A real next step, not done in this pass.
+
+**Plans now grouped by real temporal urgency** (`apps/web/src/app/plans/page.tsx`) — a plan
+tonight used to render in the exact same row style as one six weeks out. `timeBucket()` buckets
+by `startsAt` alone (Tonight → Tomorrow → This weekend → Upcoming → Date TBC, real date math, no
+new server field), and Tonight specifically gets a visibly different treatment: a pink card
+outline, a filled pink date badge instead of the neutral one, and a one-tap "📍 Directions" link
+straight to Google Maps for the venue — a contextual action that only appears for a same-day
+plan, not cluttering every row regardless of urgency. Verified end-to-end: logged a manual plan
+for 3 hours from now, locked it, confirmed it lands under "🔥 Tonight" with the Directions
+shortcut visible, via screenshot.
