@@ -68,6 +68,8 @@ interface PlanCardData {
     title: string;
     publicSlug: string;
     status: string;
+    proposedByUserId: string;
+    votes: { userId: string; vote: string }[];
     experience: {
       name: string;
       category: string;
@@ -78,7 +80,11 @@ interface PlanCardData {
       venue: { name: string } | null;
     } | null;
   };
-  pulse: { inCount: number; totalMembers: number };
+  // The backend already computes the full state-machine pulse (services/plan.ts) — status
+  // (SHARED → GATHERING_INTEREST → LIKELY → READY → BOOKED), maybe/out breakdown, the lot. The
+  // card used to only destructure inCount/totalMembers off this and throw the rest away, which
+  // is why it read as a flat counter instead of an idea with a life cycle.
+  pulse: { inCount: number; maybeCount: number; outCount: number; totalMembers: number; level: number; status: string };
 }
 
 interface Plan {
@@ -125,17 +131,44 @@ const PLAN_ANNOUNCEMENT = /^📍 Sent "(.+)" to the Crew — \/plans\/([a-zA-Z0-
 
 const LOCKABLE_STATUSES = new Set(['SHARED', 'GATHERING_INTEREST', 'LIKELY', 'READY']);
 
-/** The rich event-share card — replaces a wall of text with something that looks like the
- * actual event. `v2Art` gives it the same category-tinted composition as Explore/Home so a
- * shared event reads as "the same product," not a different, plainer feature bolted on. A
- * still-open Plan gets its own one-tap "Lock it in" right here — the payoff moment shouldn't
- * require navigating away from the conversation it happened in. */
-function EventCard({ data, onLock, locking, justLocked }: { data: PlanCardData; onLock: (planId: string) => void; locking: boolean; justLocked: boolean }) {
+/** A status → what-to-say map for the shared-idea life cycle (services/plan.ts#derivePulseStatus).
+ * The point: the SAME card should not read identically at every stage — "Robin shared this" is a
+ * different moment from "3 in · likely happening" is a different moment from "Confirmed". */
+function planStageCopy(status: string, pulse: PlanCardData['pulse'], proposerName: string): string {
+  if (status === 'BOOKED') return 'Confirmed';
+  if (status === 'READY') return `Ready — ${pulse.inCount}/${pulse.totalMembers} in`;
+  if (status === 'LIKELY') return `Likely happening · ${pulse.inCount} in`;
+  if (status === 'GATHERING_INTEREST') return `${pulse.inCount} in so far`;
+  return `${proposerName} shared this — who's in?`;
+}
+
+/** The rich event-share card — the "shared idea" object, with an actual life cycle rather than a
+ * flat counter: who suggested it, who's visibly converging on it (avatars, not just a number),
+ * and a real vote surface right here in the conversation (previously voting IN required leaving
+ * the thread entirely for the separate public Plan Card page — a real continuity gap, not a
+ * styling one). `v2Art` gives it the same category-tinted composition as Explore/Home. A still-
+ * open Plan gets its own one-tap "Lock it in" right here — the payoff moment shouldn't require
+ * navigating away from the conversation it happened in. */
+function EventCard({
+  data, members, me, onLock, locking, justLocked, onVote,
+}: {
+  data: PlanCardData;
+  members: MemberLite[];
+  me: string | null;
+  onLock: (planId: string) => void;
+  locking: boolean;
+  justLocked: boolean;
+  onVote: (planId: string, vote: 'in' | 'maybe' | 'out') => void;
+}) {
   const exp = data.plan.experience;
   const lockable = LOCKABLE_STATUSES.has(data.plan.status);
   const locked = data.plan.status === 'BOOKED' || justLocked;
+  const proposer = members.find((m) => m.user.id === data.plan.proposedByUserId)?.user;
+  const proposerName = proposer ? displayNameOf(proposer.displayName, proposer.email).split(' ')[0] : 'Someone';
+  const inVoterIds = data.plan.votes.filter((v) => v.vote === 'IN').map((v) => v.userId);
+  const myVote = data.plan.votes.find((v) => v.userId === me)?.vote ?? null;
   return (
-    <div className={`v2-hoverable${justLocked ? ' v2-confirm-transition' : ' fade-up'}`} style={{ width: 260, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)' }}>
+    <div className={`v2-hoverable${justLocked ? ' v2-confirm-transition' : ' fade-up'}`} style={{ width: 264, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)' }}>
       <Link href={`/plans/${data.plan.publicSlug}`} style={{ display: 'block' }}>
         <div style={{ height: 120, background: v2Art(exp?.imageUrl, exp?.category), position: 'relative' }}>
           {/* The definitive-state overlay — date/venue moving from "proposed" to "confirmed" is
@@ -155,14 +188,36 @@ function EventCard({ data, onLock, locking, justLocked }: { data: PlanCardData; 
               {formatPriceFrom(exp.priceMinMinor) && ` · ${formatPriceFrom(exp.priceMinMinor)}`}
             </div>
           )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, fontWeight: 800, color: locked ? 'var(--v2-green)' : 'var(--v2-ink-muted)', background: locked ? 'rgba(27,122,77,0.12)' : 'var(--v2-bg-deep)', padding: '4px 10px', borderRadius: 100 }}>
-              {locked ? '🔒 Locked in' : `${data.pulse.inCount}/${data.pulse.totalMembers} in`}
+          {/* The actual life-cycle line — different words at each stage, not the same "X/Y in"
+              counter throughout — plus the avatars of who's actually in, converging visibly. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: locked ? 'var(--v2-green)' : 'var(--v2-ink)' }}>
+              {locked ? '🔒 Locked in' : planStageCopy(data.plan.status, data.pulse, proposerName)}
             </span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--v2-brand)' }}>View →</span>
           </div>
+          <OptionVoters voterIds={inVoterIds} members={members} />
         </div>
       </Link>
+      {/* Voting happens right here — no detour to a separate page to say "I'm in". Hidden once
+          locked: the decision is made, voting on it further is meaningless. */}
+      {!locked && (
+        <div style={{ display: 'flex', borderTop: '1px solid var(--v2-line)' }}>
+          {([['in', "I'm in"], ['maybe', 'Maybe'], ['out', "Can't make it"]] as const).map(([v, label]) => (
+            <button
+              key={v}
+              onClick={() => onVote(data.plan.id, v)}
+              className="v2-tap-feedback"
+              style={{
+                flex: 1, padding: '9px 4px', border: 'none', borderRight: v !== 'out' ? '1px solid var(--v2-line)' : 'none',
+                background: myVote === v ? 'var(--v2-bg-deep)' : 'none', cursor: 'pointer', fontSize: 11.5,
+                fontWeight: myVote === v ? 800 : 600, color: myVote === v ? 'var(--v2-ink)' : 'var(--v2-ink-muted)',
+              }}
+            >
+              {myVote === v ? '✓ ' : ''}{label}
+            </button>
+          ))}
+        </div>
+      )}
       {lockable && !justLocked && (
         <button
           onClick={() => onLock(data.plan.id)}
@@ -488,6 +543,49 @@ export default function CrewPage() {
       api.get<PlanCardData>(`/plans/public/${slug}`).then((data) => setPlanCards((prev) => ({ ...prev, [slug]: data }))).catch(() => setPlanCards((prev) => ({ ...prev, [slug]: 'error' })));
     }
   }, [messages]);
+
+  // A shared idea is only "alive" if the group can actually watch it converge without reloading
+  // — someone else voting IN, or the pulse crossing into LIKELY/READY, should appear on its own.
+  // Only re-polls cards that can still change (skips BOOKED — a locked plan's own vote/pulse
+  // never moves again, so refetching it forever would be pure waste).
+  const planCardsRef = useRef(planCards);
+  planCardsRef.current = planCards;
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const current = planCardsRef.current;
+      for (const [slug, entry] of Object.entries(current)) {
+        if (entry === 'loading' || entry === 'error' || entry.plan.status === 'BOOKED') continue;
+        api.get<PlanCardData>(`/plans/public/${slug}`).then((data) => setPlanCards((prev) => ({ ...prev, [slug]: data }))).catch(() => {});
+      }
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
+
+  /** Voting IN/MAYBE/OUT right from the conversation — optimistic, same pattern as reactions/
+   * poll voting: the card updates before the network call resolves, reverts on a real failure. */
+  async function votePlanCard(planId: string, vote: 'in' | 'maybe' | 'out') {
+    if (!me) return;
+    const entry = Object.entries(planCards).find(([, v]) => v !== 'loading' && v !== 'error' && v.plan.id === planId);
+    if (!entry) return;
+    const [slug, data] = entry as [string, PlanCardData];
+    const prevVotes = data.plan.votes;
+    const nextVotes = [...prevVotes.filter((v) => v.userId !== me), { userId: me, vote: vote.toUpperCase() }];
+    const inCount = nextVotes.filter((v) => v.vote === 'IN').length;
+    const maybeCount = nextVotes.filter((v) => v.vote === 'MAYBE').length;
+    const outCount = nextVotes.filter((v) => v.vote === 'OUT').length;
+    const level = data.pulse.totalMembers > 0 ? inCount / data.pulse.totalMembers : 0;
+    const status = data.plan.status === 'BOOKED' ? 'BOOKED' : level >= 0.6 ? 'READY' : level >= 0.5 ? 'LIKELY' : level > 0 ? 'GATHERING_INTEREST' : 'SHARED';
+    setPlanCards((prev) => ({
+      ...prev,
+      [slug]: { plan: { ...data.plan, votes: nextVotes, status }, pulse: { ...data.pulse, inCount, maybeCount, outCount, level, status } },
+    }));
+    try {
+      await api.post(`/plans/public/${slug}/vote`, { vote });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Vote did not go through.');
+      setPlanCards((prev) => ({ ...prev, [slug]: data })); // revert
+    }
+  }
 
   // Smart scroll — real bug this replaces: unconditionally forcing scroll-to-bottom on every
   // `messages` change drags you back down mid-scroll-up-to-read-history the moment anyone
@@ -942,7 +1040,15 @@ export default function CrewPage() {
                         justLocked={justLockedByMessage[m.id] ?? null}
                       />
                     ) : planMatch && cardData && cardData !== 'loading' && cardData !== 'error' ? (
-                      <EventCard data={cardData} onLock={lockPlanById} locking={lockingPlanId === cardData.plan.id} justLocked={justLockedPlanIds.has(cardData.plan.id)} />
+                      <EventCard
+                        data={cardData}
+                        members={crew.members}
+                        me={me}
+                        onLock={lockPlanById}
+                        locking={lockingPlanId === cardData.plan.id}
+                        justLocked={justLockedPlanIds.has(cardData.plan.id)}
+                        onVote={votePlanCard}
+                      />
                     ) : planMatch && cardData === 'loading' ? (
                       <div style={{ width: 260, height: 120, borderRadius: 16, background: 'var(--v2-bg-deep)' }} />
                     ) : (

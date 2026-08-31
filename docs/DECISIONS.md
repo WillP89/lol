@@ -979,3 +979,53 @@ verified-domain status (removing the earlier "might only deliver to the account'
 caveat, which only applies to Resend's *unverified* shared sender). The one remaining step
 (setting `RESEND_API_KEY` + `EMAIL_FROM` in Render's dashboard) is outside this sandbox's reach
 and documented as such — everything on the code side is done and typechecked.
+
+#### plot-shared-idea-lifecycle — a corrected course after over-rotating on microinteractions
+
+Immediately after the interaction-uplift pass above, a first attempt at "make it more
+interactive" wrongly translated into a global CSS pass — every `.v2-btn`/`.v2-card`/
+`.v2-hoverable` in the app given the same press-animation and focus ring, applied indiscriminately
+by CSS class rather than by what each surface actually needed. Correctly called out and reverted
+in full (`git checkout -- globals.css`) before it was committed. The lesson, worth keeping: this
+product's "interactive" complaint was never about missing hover states — it was about the UI not
+visibly responding to what other people in the Crew are doing. Component-level polish (button
+press animation, focus rings) is real work, but it's the *last* item on this priority list, not
+the first move, and never a substitute for it.
+
+**What "product-level interaction" actually meant here**, built and proven with a real 3-browser-
+context test (`Robin` shares → `Sam` and `Cam`, in separate sessions, vote and see the result
+without reloading → `Robin` locks it in → `Sam`'s Home reflects it without ever having been on
+the Crew page when it happened):
+
+- **The shared-idea object (`EventCard`) redesigned with an actual life cycle**, not a flat "3/5
+  in" counter. The backend (`services/plan.ts#computePlanPulse`/`derivePulseStatus`) already
+  computed a full state machine — SHARED → GATHERING_INTEREST → LIKELY → READY → BOOKED, with
+  maybe/out breakdown — and the public Plan Card endpoint (`/plans/public/:slug`) already
+  returned all of it; the *frontend* card was the only thing throwing it away, destructuring
+  only `{inCount, totalMembers}`. Now: "Robin shared this — who's in?" → "2 in so far" →
+  "Likely happening · 3 in" → "Ready — 3/5 in" → "🔒 Locked in", each stage genuinely different
+  copy, not the same template with a number changed.
+- **Voting happens in the conversation, not on a separate page.** This was a real continuity
+  gap, not a cosmetic one: there was previously no way to vote IN/MAYBE/OUT on a shared idea
+  without leaving the Crew thread entirely for the standalone public `/plans/:slug` page — the
+  exact "website, not a product" failure mode called out. Three inline buttons now sit on the
+  card itself, optimistic same as reactions/polls.
+- **Avatars converge on the card** (`OptionVoters`, reused from the poll work) — who's actually
+  in, not just a count, on both the in-progress and the locked state.
+- **Cross-screen propagation is real, not implied**: `EventCard`'s data now refreshes on the
+  existing 3s poll cycle (skipping `BOOKED` cards, which can't change further) — voting from a
+  second session shows up on the first session's already-open card without a reload. Home's
+  fetch-once-on-mount was the same class of gap — added an 8s background refresh
+  (`apps/web/src/app/home/page.tsx`) so a crewmate's vote or a newly-locked plan appears while
+  you're sitting on Home, not only on next visit.
+
+**Verified, not asserted**: the 3-session test above captured a screenshot at each stage
+(idea shared → a voter's own "I'm in" state → convergence visible on the *original* session with
+no reload → locked confirmation with converged avatars → the second voter's Home showing "Next
+up" afterward) — `docs/screenshots` equivalents live in the session transcript, not committed to
+the repo, but the sequence is what a real "does Plot feel alive" check requires: the idea
+progressing through actual state, not a single interaction proven in isolation.
+
+**Known gap surfaced by this same test, not yet addressed**: "Suggest something" posted three
+full-size Plan Cards into the conversation at once — visually heavy for what should be a
+lightweight, considered suggestion. Composer/Suggest-Something flow polish is still open work.

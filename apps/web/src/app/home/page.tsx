@@ -92,23 +92,38 @@ export default function HomePage() {
   const [me, setMe] = useState<{ displayName: string | null; email: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // A one-off fetch on mount would mean a crewmate's vote, message, or newly-locked plan never
+  // shows up unless you manually reload — Home would look "alive" on first paint and go stale
+  // the moment you actually sit on it. Same lightweight-poll pattern as the Crew page: refetch
+  // Crews (vote counts, latest message, "Needs you") and Upcoming (a plan someone else just
+  // locked) on an interval, quietly, without disturbing scroll position or re-triggering the
+  // entrance animations (state only updates the parts of the tree whose data actually changed).
   useEffect(() => {
-    api
-      .get<{ crews: CrewSummary[] }>('/crews')
-      .then((res) => setCrews(res.crews))
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'Could not load your Crews.'));
-    api
-      .get<{ plans: UpcomingPlan[] }>('/plans/upcoming')
-      .then((res) => setUpcoming(res.plans))
-      .catch(() => {});
+    let cancelled = false;
+    function loadCrews() {
+      api
+        .get<{ crews: CrewSummary[] }>('/crews')
+        .then((res) => { if (!cancelled) setCrews(res.crews); })
+        .catch((err) => { if (!cancelled) setError(err instanceof ApiError ? err.message : 'Could not load your Crews.'); });
+    }
+    function loadUpcoming() {
+      api
+        .get<{ plans: UpcomingPlan[] }>('/plans/upcoming')
+        .then((res) => { if (!cancelled) setUpcoming(res.plans); })
+        .catch(() => {});
+    }
+    loadCrews();
+    loadUpcoming();
     api
       .get<{ experiences: Experience[] }>('/explore/experiences') // no hardcoded city — resolves to this viewer's own home city server-side
-      .then((res) => setIdeas(res.experiences.slice(0, 6)))
+      .then((res) => { if (!cancelled) setIdeas(res.experiences.slice(0, 6)); })
       .catch(() => {});
     api
       .get<{ user: { displayName: string | null; email: string } }>('/users/me')
-      .then((res) => setMe(res.user))
+      .then((res) => { if (!cancelled) setMe(res.user); })
       .catch(() => {});
+    const interval = setInterval(() => { loadCrews(); loadUpcoming(); }, 8000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
   const nextPlan = upcoming?.find((p) => p.startsAt && new Date(p.startsAt).getTime() > Date.now()) ?? upcoming?.[0] ?? null;
