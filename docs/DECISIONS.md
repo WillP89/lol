@@ -587,3 +587,24 @@ the second one's `migrate deploy` hit the lock while the first's was still mid-c
 it. Nothing wrong with the schema or database; this just needed a wait-and-retry, not a resolve
 or rollback, so it's now handled with a 5s sleep and another attempt rather than falling through
 to the "not a known-recoverable case, exit" branch that treated it as fatal.
+
+## #explore-map-key-and-overlap-fix
+
+Three real bugs on Explore, all confirmed via a live screenshot rather than assumed:
+
+1. **The map showed "API KEY REQUIRED" tiled across every tile instead of a map.** CARTO's
+   basemap CDN (`basemaps.cartocdn.com`) now requires an account/API key we don't have — without
+   one it serves a plain placeholder graphic per tile. Switched both map components to
+   OpenStreetMap's own standard tile server, genuinely free and keyless. Tradeoff: OSM's usage
+   policy asks production apps not to hotlink it at real scale — a real future consideration
+   once there's meaningful traffic, not a pilot-scale one.
+2. **The compact map-marker preview card and the full "Share to Crew" detail sheet rendered
+   simultaneously, overlapping**, because `selectedId` (which the preview keys off) never
+   cleared when the full sheet opened (`openDetail` sets both `selected` and `selectedId`).
+   Hidden the compact preview whenever the full sheet has taken over.
+3. **Some event cards read as plain black rectangles** — real, often genuinely dark event
+   photography (gig/tour promo shots from the live provider) compounded with the card's own
+   bottom-scrim gradient. Tuned the gradient down (55%→100% instead of 42%→100%, lower peak
+   opacity) so more of the actual photo shows through. Not a full fix for an inherently
+   very-dark source photo — that's real provider content, not a code bug — but meaningfully
+   better for the common case.

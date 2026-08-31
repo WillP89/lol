@@ -64,12 +64,14 @@ export default function ExploreMap({
 }) {
   return (
     <MapContainer center={center} zoom={12} scrollWheelZoom style={{ height: '100%', width: '100%' }}>
-      {/* CARTO's dark basemap, not raw OpenStreetMap tiles — OSM's tile server isn't meant for
-          production hotlinking, and its default light style would clash with the app's theme. */}
+      {/* CARTO's basemap CDN now requires an API key we don't have — without one every tile
+          renders as a bare "API KEY REQUIRED" placeholder (confirmed via a live screenshot on
+          ExploreMapV2, the component actually rendered in the app; this file is currently dead
+          code, but fixed too rather than left as a trap for whoever next wires it back in). */}
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-        subdomains="abcd"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        subdomains="abc"
         maxZoom={19}
       />
       <FlyToSelected experiences={experiences} selectedId={selectedId} />

@@ -71,7 +71,11 @@ function Card({
         background: v2Art(exp.imageUrl, exp.category),
       }}
     >
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(21,11,44,0) 42%, rgba(21,11,44,0.82) 100%)' }} />
+      {/* Just enough of a scrim for white text to stay legible over a bright photo — tuned down
+          from an earlier version (0% at 42%, 0.82 at 100%) that compounded with genuinely dark
+          real event photography (gig/tour promo shots, common from a live provider) into what
+          read as a plain black card rather than a photo with a caption on it. */}
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(21,11,44,0) 55%, rgba(21,11,44,0.62) 100%)' }} />
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: size === 'hero' ? '20px 22px' : '14px 16px' }}>
         <div className="v2-display" style={{ fontSize: size === 'hero' ? 24 : 16, color: '#fff', lineHeight: 1.15, marginBottom: 6 }}>
           {exp.name}
@@ -244,7 +248,11 @@ export default function ExplorePage() {
     return (
       <div style={{ position: 'relative', height: '100%', width: '100%' }}>
         <ExploreMapV2 experiences={searched} center={center} selectedId={selectedId} onMarkerClick={(exp) => setSelectedId(exp.id)} />
-        {previewExp && (
+        {/* Real bug, confirmed via a live screenshot: `selectedId` stays set once the full
+            detail sheet opens (openDetail sets both), so this compact preview kept rendering
+            underneath the sheet — two cards for the same event stacked on top of each other.
+            Hide it whenever the full sheet has taken over. */}
+        {previewExp && !selected && (
           <div className="v2-explore-preview fade-up">
             <div style={{ height: 130, background: v2Art(previewExp.imageUrl, previewExp.category) }} />
             <div style={{ padding: '12px 14px' }}>

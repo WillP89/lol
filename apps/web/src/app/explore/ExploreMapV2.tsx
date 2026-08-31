@@ -6,9 +6,17 @@ import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import type { ExploreExperience } from './ExploreMap';
 
-// V2's map language: a light basemap (CARTO Positron) to match the new paper-bright system —
-// the old dark CARTO tiles belonged to the banned dark UI. Coral pins, not gold — the new
-// brand colour, not the old one.
+// V2's map language: a light basemap to match the new paper-bright system — the old dark CARTO
+// tiles belonged to the banned dark UI. Coral pins, not gold — the new brand colour, not the
+// old one.
+//
+// Real bug, confirmed via a live screenshot: CARTO's basemap CDN (basemaps.cartocdn.com) now
+// requires an account/API key for its tiles — without one, every tile renders as a plain "API
+// KEY REQUIRED" placeholder graphic instead of an actual map, which is exactly what shipped
+// here. Switched to OpenStreetMap's own standard tile server, which is genuinely free and
+// keyless (no account, no key) — the tradeoff is OSM's usage policy asks production apps not to
+// hotlink it at real scale, which is a real future consideration once Plot has meaningful
+// traffic, not a pilot-scale one.
 function pinIcon(selected: boolean) {
   const size = selected ? 26 : 16;
   return L.divIcon({
@@ -46,9 +54,9 @@ export default function ExploreMapV2({
   return (
     <MapContainer center={center} zoom={12} scrollWheelZoom style={{ height: '100%', width: '100%' }}>
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-        subdomains="abcd"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        subdomains="abc"
         maxZoom={19}
       />
       <FlyToSelected experiences={experiences} selectedId={selectedId} />
