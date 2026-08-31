@@ -454,7 +454,6 @@ export default function CrewPage() {
   // (or neither, once confirmed): pending while the request is in flight, failed if it errored.
   const [pendingMessageIds, setPendingMessageIds] = useState<Set<string>>(new Set());
   const [failedMessageIds, setFailedMessageIds] = useState<Set<string>>(new Set());
-  const [suggesting, setSuggesting] = useState(false);
   const [planCards, setPlanCards] = useState<Record<string, PlanCardData | 'loading' | 'error'>>({});
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -467,7 +466,12 @@ export default function CrewPage() {
   // The composer's "+" action sheet — one entry point into every way of adding something to
   // the conversation beyond plain text (see docs/DECISIONS.md#decision-objects).
   const [actionOpen, setActionOpen] = useState(false);
-  const [actionView, setActionView] = useState<'menu' | 'poll' | 'availability' | 'share' | 'manual'>('menu');
+  const [actionView, setActionView] = useState<'menu' | 'poll' | 'availability' | 'share' | 'suggest' | 'manual'>('menu');
+  // "Suggest something" — a curated shortlist (2-3, matched to the Crew's own taste), not a
+  // blind auto-post of several full cards into permanent chat history. Tap one, it's shared,
+  // the picker closes — the rest are just not sent, same as browsing "Share a place" and
+  // picking one. See docs/DECISIONS.md.
+  const [suggestOptions, setSuggestOptions] = useState<ExploreExperienceLite[] | 'loading' | 'error' | null>(null);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
   const [postingPoll, setPostingPoll] = useState(false);
@@ -646,20 +650,6 @@ export default function CrewPage() {
     }
   }
 
-  async function suggestSomething() {
-    setSuggesting(true);
-    setError(null);
-    try {
-      await api.post(`/crews/${crewId}/suggest-to-chat`);
-      await poll();
-      closeActionSheet();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not find anything right now — try again.');
-    } finally {
-      setSuggesting(false);
-    }
-  }
-
   function closeActionSheet() {
     setActionOpen(false);
     setActionView('menu');
@@ -667,8 +657,15 @@ export default function CrewPage() {
     setPollOptions(['', '']);
   }
 
-  function openAction(view: 'poll' | 'availability' | 'share' | 'manual') {
+  function openAction(view: 'poll' | 'availability' | 'share' | 'suggest' | 'manual') {
     setActionView(view);
+    if (view === 'suggest' && suggestOptions === null) {
+      setSuggestOptions('loading');
+      api
+        .post<{ options: { experience: ExploreExperienceLite }[] }>(`/crews/${crewId}/find-us-something`)
+        .then((res) => setSuggestOptions(res.options.slice(0, 3).map((o) => o.experience)))
+        .catch(() => setSuggestOptions('error'));
+    }
     if (view === 'availability') {
       // A ready-made "when works?" poll — the brief's own words: "do not make users open
       // calendars manually just to answer." Next three weekend nights, not a bare date picker.
@@ -1126,7 +1123,7 @@ export default function CrewPage() {
             <div className="v2-eyebrow" style={{ marginBottom: 14 }}>Add to {crew.name}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {[
-                { icon: '✨', label: 'Suggest something', desc: suggesting ? 'Finding something…' : 'Plot picks from what everyone likes', action: suggestSomething, disabled: suggesting },
+                { icon: '✨', label: 'Suggest something', desc: 'Plot picks a few — tap the one you want', action: () => openAction('suggest'), disabled: false },
                 { icon: '📍', label: 'Share a place', desc: 'Browse and send something specific', action: () => openAction('share'), disabled: false },
                 { icon: '🗳️', label: 'Poll the group', desc: 'Ask a question, watch it settle', action: () => openAction('poll'), disabled: false },
                 { icon: '📅', label: 'Check availability', desc: "When's everyone actually free", action: () => openAction('availability'), disabled: false },
@@ -1179,6 +1176,45 @@ export default function CrewPage() {
             <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={postPoll} disabled={postingPoll || !pollQuestion.trim() || pollOptions.filter((o) => o.trim()).length < 2}>
               {postingPoll ? 'Posting…' : 'Send'}
             </button>
+          </div>
+        )}
+
+        {/* A curated shortlist, not an auto-post of several full cards straight into permanent
+            chat history — that was the old "Suggest something" behaviour and it was too heavy
+            for what should be a fast, considered moment. Plot narrows to 2-3 matches; tapping one
+            sends only that one (via the same shareExperience as "Share a place") and the rest
+            are simply never sent, same as browsing and picking. */}
+        {actionView === 'suggest' && (
+          <div>
+            <button onClick={() => setActionView('menu')} className="v2-muted" style={{ background: 'none', border: 'none', fontSize: 13, marginBottom: 10, cursor: 'pointer', padding: 0 }}>← Back</button>
+            <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Plot&rsquo;s picks for this Crew</div>
+            {suggestOptions === 'loading' && <p className="v2-muted">Finding something…</p>}
+            {suggestOptions === 'error' && <p className="v2-muted">Couldn&rsquo;t find anything right now — try again shortly.</p>}
+            {Array.isArray(suggestOptions) && suggestOptions.length === 0 && <p className="v2-muted">Nothing matches yet — try &ldquo;Share a place&rdquo; to browse everything.</p>}
+            {Array.isArray(suggestOptions) && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {suggestOptions.map((exp) => (
+                  <button
+                    key={exp.id}
+                    onClick={() => shareExperience(exp.id)}
+                    disabled={sharingId !== null}
+                    className="v2-hoverable"
+                    style={{ display: 'block', textAlign: 'left', border: 'none', background: 'var(--v2-bg-deep)', borderRadius: 14, padding: 0, overflow: 'hidden', cursor: 'pointer' }}
+                  >
+                    <div style={{ height: 84, background: v2Art(exp.imageUrl, exp.category) }} />
+                    <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
+                        <div className="v2-muted" style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {exp.venue.name} · {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--v2-brand)', flexShrink: 0 }}>{sharingId === exp.id ? '…' : 'Send'}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

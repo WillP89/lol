@@ -1029,3 +1029,30 @@ progressing through actual state, not a single interaction proven in isolation.
 **Known gap surfaced by this same test, not yet addressed**: "Suggest something" posted three
 full-size Plan Cards into the conversation at once — visually heavy for what should be a
 lightweight, considered suggestion. Composer/Suggest-Something flow polish is still open work.
+
+#### plot-suggest-something-and-crew-state — two more product-level (not CSS) fixes
+
+**"Suggest something" redesigned as a real picker, not an auto-post.** It used to call
+`/crews/:id/suggest-to-chat`, which posts every matched option straight into permanent chat
+history in one go — three full-size Plan Cards landing at once, unpickable, un-undoable. Now it
+calls the existing `/crews/:id/find-us-something` (already returned matches without posting
+anything — this endpoint already existed for the standalone Find Us Something screen, just
+wasn't reused here), shows up to 3 as tappable tiles inside the action sheet, and tapping one
+sends only that one via the same `shareExperience()` "Share a place" already uses — the other
+two are simply never sent, the same as browsing and picking. Verified: exactly 1 Plan Card
+appears in chat after picking 1 of 3 offered tiles, not 3.
+
+**Crew previews on Home now show actual state, not just the last message.** Every Crew read
+identically before — a name, avatars, and either the last message or "Say hi", regardless of
+whether that Crew was mid-decision or dormant. `crewStatusLine()` (`apps/web/src/app/home/
+page.tsx`) now prioritises: a plan waiting on your vote → an upcoming locked plan → an
+in-progress plan's live tally → the last message → "Say hi" — real signal Plot already computes
+server-side (`activePlan.iVoted`, `upcomingPlan`, `activePlan.inCount`), not new tracking. A
+Crew that needs you gets a visibly different ring (the signature pink, with a small "!" badge)
+on its avatar in both the mobile "Your people" row and the desktop rail, not only smaller text
+underneath — verified via screenshot showing the pink ring + "Vote needed" label distinct from
+a normal Crew's ring.
+
+**Explicit non-goal, to avoid inventing a fake signal**: a genuine "3 unread messages" state
+would need a persisted per-user last-read timestamp per Crew, which doesn't exist yet — not
+built here rather than faked with an arbitrary badge. A real next step, not done in this pass.

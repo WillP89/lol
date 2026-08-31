@@ -70,6 +70,29 @@ function timeAgo(iso: string): string {
   const days = Math.floor(hours / 24);
   return `${days}d`;
 }
+/**
+ * One Crew's current state, in priority order — a Crew waiting on your vote is not the same
+ * moment as a Crew that just went quiet, and they shouldn't read identically. Real signal Plot
+ * already has (a vote pending, a plan locked, an upcoming plan, the last thing said) rather than
+ * unread-message tracking, which doesn't exist as a persisted "last seen" concept yet — see
+ * docs/DECISIONS.md for that as a known gap, not something faked here with a random dot.
+ */
+function crewStatusLine(crew: CrewSummary): { text: string; urgent: boolean } {
+  if (crew.activePlan && !crew.activePlan.iVoted) {
+    return { text: `Vote needed · ${crew.activePlan.title}`, urgent: true };
+  }
+  if (crew.upcomingPlan) {
+    return { text: `📅 ${crew.upcomingPlan.title}`, urgent: false };
+  }
+  if (crew.activePlan) {
+    return { text: `🗳️ ${crew.activePlan.inCount}/${crew.activePlan.totalMembers} in · ${crew.activePlan.title}`, urgent: false };
+  }
+  if (crew.latestMessage) {
+    return { text: messagePreview(crew.latestMessage.body), urgent: false };
+  }
+  return { text: 'Say hi', urgent: false };
+}
+
 function greeting(): string {
   const hour = new Date().getHours();
   if (hour < 5) return 'Late night';
@@ -210,52 +233,60 @@ export default function HomePage() {
                 <Link href="/crews" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>See all</Link>
               </div>
               <div style={{ display: 'flex', gap: 18, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
-                {crews.slice(0, 6).map((crew, i) => (
+                {crews.slice(0, 6).map((crew, i) => {
+                  const status = crewStatusLine(crew);
+                  return (
                   <Link
                     key={crew.id}
                     href={`/crews/${crew.id}`}
                     className="fade-up v2-stagger"
                     style={{ flex: '0 0 auto', width: 76, textAlign: 'center', ['--stagger-i' as string]: i }}
                   >
-                    <div
-                      style={{
-                        width: 68,
-                        height: 68,
-                        borderRadius: '50%',
-                        margin: '0 auto 8px',
-                        padding: 3,
-                        background: `conic-gradient(${crewRing(crew.id)}, ${crewRing(crew.id)}cc, ${crewRing(crew.id)})`,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'var(--v2-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 3 }}>
-                        <div className="stack">
-                          {crew.members.slice(0, 3).map((m) => (
-                            <div
-                              key={m.user.id}
-                              style={{
-                                width: 20, height: 20, borderRadius: '50%', marginLeft: -6, fontSize: 8, fontWeight: 800, color: '#fff',
-                                background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--v2-surface)',
-                              }}
-                            >
-                              {initials(m.user.displayName, m.user.email)}
-                            </div>
-                          ))}
+                    <div style={{ position: 'relative', width: 68, margin: '0 auto 8px' }}>
+                      <div
+                        style={{
+                          width: 68,
+                          height: 68,
+                          borderRadius: '50%',
+                          padding: 3,
+                          // A Crew waiting on you gets its own ring colour (the signature pink,
+                          // not the Crew's usual identity hue) — a genuinely different visual
+                          // state at a glance, not just smaller caption text below.
+                          background: status.urgent ? `conic-gradient(var(--v2-pop), #ff8fb8, var(--v2-pop))` : `conic-gradient(${crewRing(crew.id)}, ${crewRing(crew.id)}cc, ${crewRing(crew.id)})`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'var(--v2-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 3 }}>
+                          <div className="stack">
+                            {crew.members.slice(0, 3).map((m) => (
+                              <div
+                                key={m.user.id}
+                                style={{
+                                  width: 20, height: 20, borderRadius: '50%', marginLeft: -6, fontSize: 8, fontWeight: 800, color: '#fff',
+                                  background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--v2-surface)',
+                                }}
+                              >
+                                {initials(m.user.displayName, m.user.email)}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
+                      {status.urgent && (
+                        <div className="v2-pop-in" style={{ position: 'absolute', top: -1, right: -1, width: 16, height: 16, borderRadius: '50%', background: 'var(--v2-pop)', border: '2px solid var(--v2-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: '#fff', fontWeight: 800 }}>
+                          !
+                        </div>
+                      )}
                     </div>
                     <div style={{ fontSize: 11.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crew.name}</div>
-                    {crew.latestMessage ? (
-                      <div className="v2-dim" style={{ fontSize: 10, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {messagePreview(crew.latestMessage.body)}
-                      </div>
-                    ) : (
-                      <div className="v2-dim" style={{ fontSize: 10, marginTop: 1 }}>Say hi</div>
-                    )}
+                    <div className={status.urgent ? undefined : 'v2-dim'} style={{ fontSize: 10, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: status.urgent ? 'var(--v2-pop)' : undefined, fontWeight: status.urgent ? 700 : 400 }}>
+                      {status.text}
+                    </div>
                   </Link>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -416,33 +447,35 @@ export default function HomePage() {
                 <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Your Crews</div>
                 <Link href="/crews?new=1" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 700 }}>+ New</Link>
               </div>
-              {crews.map((crew) => (
+              {crews.map((crew) => {
+                const status = crewStatusLine(crew);
+                return (
                 <Link key={crew.id} href={`/crews/${crew.id}`} className="v2-rail-crew-row">
-                  <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0, padding: 2, background: `conic-gradient(${crewRing(crew.id)}, ${crewRing(crew.id)}cc, ${crewRing(crew.id)})` }}>
-                    <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'var(--v2-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <div className="stack">
-                        {crew.members.slice(0, 2).map((m) => (
-                          <div key={m.user.id} style={{ width: 15, height: 15, borderRadius: '50%', marginLeft: -5, fontSize: 6.5, fontWeight: 800, color: '#fff', background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--v2-surface)' }}>
-                            {initials(m.user.displayName, m.user.email)}
-                          </div>
-                        ))}
+                  <div style={{ position: 'relative', width: 38, height: 38, flexShrink: 0 }}>
+                    <div style={{ width: 38, height: 38, borderRadius: '50%', padding: 2, background: status.urgent ? `conic-gradient(var(--v2-pop), #ff8fb8, var(--v2-pop))` : `conic-gradient(${crewRing(crew.id)}, ${crewRing(crew.id)}cc, ${crewRing(crew.id)})` }}>
+                      <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'var(--v2-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div className="stack">
+                          {crew.members.slice(0, 2).map((m) => (
+                            <div key={m.user.id} style={{ width: 15, height: 15, borderRadius: '50%', marginLeft: -5, fontSize: 6.5, fontWeight: 800, color: '#fff', background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--v2-surface)' }}>
+                              {initials(m.user.displayName, m.user.email)}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
+                    {status.urgent && (
+                      <div className="v2-pop-in" style={{ position: 'absolute', top: -2, right: -2, width: 12, height: 12, borderRadius: '50%', background: 'var(--v2-pop)', border: '1.5px solid var(--v2-surface)' }} />
+                    )}
                   </div>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crew.name}</div>
-                    <div className="v2-dim" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {crew.upcomingPlan
-                        ? `📅 ${crew.upcomingPlan.title}`
-                        : crew.activePlan
-                          ? `🗳️ ${crew.activePlan.title}`
-                          : crew.latestMessage
-                            ? messagePreview(crew.latestMessage.body)
-                            : 'Say hi'}
+                    <div className={status.urgent ? undefined : 'v2-dim'} style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: status.urgent ? 'var(--v2-pop)' : undefined, fontWeight: status.urgent ? 700 : 400 }}>
+                      {status.text}
                     </div>
                   </div>
                 </Link>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
