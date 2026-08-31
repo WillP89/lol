@@ -686,3 +686,28 @@ assumed. Session cookie is `httpOnly`, `secure` in production, `sameSite: lax`. 
 `dangerouslySetInnerHTML` anywhere in the web app. Known gap, not yet fixed: no rate limiting
 beyond magic-link requests (message send, poll vote, react, join-crew are all unlimited) —
 low-risk at pilot scale (a handful of real, known friends) but a real pre-launch item.
+
+## #mobile-overflow-and-signup-funnel-fix
+
+Two more real bugs, both found by actually testing rather than reading code:
+
+**Every form field in the app overflowed the viewport horizontally on a real phone width
+(390px)** — confirmed via Playwright measuring `document.documentElement.scrollWidth` against
+`clientWidth` across the onboarding/auth/chat/explore flow, not assumed. Root cause: despite the
+universal `* { box-sizing: border-box }` rule, a plain `<input>` with the browser's native
+`-webkit-appearance: auto` widget rendering doesn't fully respect an author `box-sizing`
+declaration in Chromium — the padding this app sets on every input (15px 18px etc.) was being
+added on top of `width: 100%` instead of absorbed into it, pushing every text field 20-60px past
+the right edge on a real phone. This is exactly the "mobile-first for real testing" failure mode
+the brief calls out, and would have hit literally every real friend on their first attempt to
+sign in. Fixed globally with `appearance: none` on `input`/`textarea`/`select`.
+
+**The signup analytics funnel was tracking the wrong thing.** `SignupStarted` only ever fired at
+the *end* of auth, and only for a *returning* user's login (`consumeMagicLink`'s
+`isFirstLogin ? SignupCompleted : SignupStarted`) — meaning it never fired at the actual moment
+someone starts signing up, and instead fired on every routine returning login, which would have
+made the funnel backwards and uninterpretable (far more "started" events than real new-signup
+attempts, and none of them near the real start of the flow). Fixed: `SignupStarted` now fires in
+`requestMagicLink`, the real "someone is starting an auth attempt" moment; `SignupCompleted`
+only fires on a genuine first-ever session, and a returning login is no longer force-tracked as
+a signup-funnel event at all.

@@ -72,6 +72,13 @@ export async function requestMagicLink(
     create: { email: normalisedEmail },
   });
 
+  // Real bug found via analytics audit: this used to only fire at the *end* of auth, and only
+  // for a returning user's login (see consumeMagicLink below) — meaning `SignupStarted` never
+  // fired at the moment someone actually starts, and instead fired on every routine returning
+  // login, corrupting the funnel. It belongs here: the moment anyone (new or returning) asks
+  // for a link, which is the real "started" moment for a passwordless flow.
+  await track('SignupStarted', { method: 'email' }, { userId: user.id });
+
   const rawToken = generateRawToken();
   await prisma.authToken.create({
     data: {
@@ -142,12 +149,13 @@ export async function consumeMagicLink(
 
   const created = await createSession(user.id, context);
 
+  // Only a genuine first-ever session completes "signup" — a returning user's login isn't a
+  // signup funnel event at all, so it's deliberately not tracked as one (see SignupStarted's
+  // own comment in requestMagicLink for the bug this replaced).
   const isFirstLogin = await isFirstEverSession(user.id, created.sessionId);
-  await track(
-    isFirstLogin ? 'SignupCompleted' : 'SignupStarted',
-    isFirstLogin ? { userId: user.id, method: 'email' } : { method: 'email' },
-    { userId: user.id },
-  );
+  if (isFirstLogin) {
+    await track('SignupCompleted', { userId: user.id, method: 'email' }, { userId: user.id });
+  }
 
   return { user: created.user, cookieValue: created.cookieValue, expiresAt: created.expiresAt };
 }

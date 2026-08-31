@@ -68,8 +68,19 @@ a {
 }
 
 button,
-input {
+input,
+textarea,
+select {
   font-family: inherit;
+  /* Real horizontal-overflow bug found via mobile testing (390px viewport): despite the
+     universal `* { box-sizing: border-box }` rule above, a plain `<input>` with native OS
+     widget rendering (`-webkit-appearance: auto`, the browser default) can compute its box
+     model as if content-box regardless of the declared property — the padding this app sets on
+     every input/textarea (15px 18px, etc.) was being added on TOP of width:100% instead of
+     absorbed into it, pushing every form field ~20-60px past the right edge of the viewport on
+     a real phone. Stripping native appearance makes CSS box-sizing actually take effect. */
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 ::selection {
