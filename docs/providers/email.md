@@ -17,15 +17,33 @@ the error and falls back to returning the raw link rather than leaving the user 
 a deliberate pilot-scale tradeoff (this response only ever reaches the person who requested
 it), not an oversight.
 
-## Setup
+## Setup — domain verification (best for a real launch)
 1. Sign up at [postmarkapp.com](https://postmarkapp.com), create a Server.
 2. Add and verify a sending domain (SPF + DKIM DNS records) — budget for DNS propagation, up
-   to a few hours.
+   to a few hours. Needs a domain you control the DNS for (a work/company domain, or a
+   personal one bought from any registrar).
 3. Grab the Server API token → `POSTMARK_API_KEY`.
 4. Set `EMAIL_FROM` to an address on that verified domain.
 
 Without a verified domain, Postmark's sandbox mode only delivers to pre-approved test
 addresses — enough to confirm the integration works, not enough for a real pilot.
+
+## Setup — Sender Signature (no domain needed, right for a personal beta)
+No domain to verify DNS on? A Sender Signature verifies a single mailbox instead — exactly
+enough to send real magic-link emails from a personal Gmail/Outlook/etc. address for a
+friends-and-family beta.
+1. Sign up at [postmarkapp.com](https://postmarkapp.com), create a Server.
+2. **Sender Signatures** → **Add Sender Signature** → enter the personal email you want Plot to
+   send from (e.g. `will@gmail.com`).
+3. Postmark emails that address a confirmation link — click it from that inbox.
+4. Grab the Server API token → `POSTMARK_API_KEY`.
+5. Set `EMAIL_FROM` to that exact verified address.
+
+One real limitation: a Sender Signature account starts in Postmark's trial/sandbox review —
+Postmark may cap volume or ask a couple of qualifying questions before lifting it to
+production sending. For a handful of friends signing up over a few days this is normally not
+a practical blocker, but if sends start failing, check the Server's "Sending" status in the
+Postmark dashboard first.
 
 ## Why Postmark over SES
 Postmark: fastest to set up, good deliverability reputation out of the box, paid from message

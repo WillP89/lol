@@ -17,8 +17,14 @@ import { config } from '../lib/config';
  */
 const hasAnyLiveCredential = Boolean(config.TICKETMASTER_API_KEY);
 
+// Ticketmaster replaces the mock TICKETED-events provider once a real key exists — it doesn't
+// cover restaurants/pubs at all, so the mock restaurant provider stays registered regardless.
+// Losing it here would have silently killed restaurant/pub discovery the moment a real
+// Ticketmaster key was configured, exactly the category of thing the beta explicitly wants
+// (food festivals, restaurants, pubs) — caught before this ever ran with a real key. See
+// docs/DECISIONS.md#real-events.
 export const providerRegistry: ProviderAdapter[] = hasAnyLiveCredential
-  ? [ticketmasterProvider]
+  ? [ticketmasterProvider, mockRestaurantProvider]
   : [mockTicketingProvider, mockRestaurantProvider];
 
 export const hasLiveProvider = providerRegistry.some((p) => p.isLive);
