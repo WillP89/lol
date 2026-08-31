@@ -54,7 +54,7 @@ function Card({
     <button
       id={id}
       onClick={onClick}
-      className="fade-up"
+      className="fade-up v2-hoverable"
       style={{
         display: 'block',
         width: '100%',

@@ -608,3 +608,25 @@ Three real bugs on Explore, all confirmed via a live screenshot rather than assu
    opacity) so more of the actual photo shows through. Not a full fix for an inherently
    very-dark source photo — that's real provider content, not a code bug — but meaningfully
    better for the common case.
+
+## #v2-interaction-polish
+
+A broad "make it feel slicker" pass across the shared v2 primitives, since fixing these once
+lifts every screen that uses them rather than one page at a time: `.v2-btn-ghost`/`.v2-btn-dark`
+had no hover state at all (only brand did), `.v2-btn` had no disabled styling (relied on each
+call site remembering its own `opacity` inline), and every card-shaped `<Link>`/`<button>`
+(Crews/Plans list rows, Home's "Needs you", the composer's action-sheet rows) sat completely
+flat on hover — no lift, no shadow change, nothing to signal "this is clickable" beyond the
+cursor. Added a real hover-lift (`translateY(-2px)` + a deeper shadow) gated behind
+`@media (hover: hover)` specifically so it only ever applies to devices that can actually hover
+— a `:hover` state sticking after a tap is what makes buttons read as unresponsive on touch,
+which is most of this app's real usage. `.v2-hoverable` extends the same lift to tile-shaped
+surfaces that can't use `.v2-card` directly because they carry their own photo background
+(Explore's cards, Home's hero/idea tiles, Crew chat's EventCard).
+
+Also fixed two concrete "feels broken" gaps found on inspection: `LocationSearch`'s results
+dropdown had zero hover feedback on its option buttons (pure inline styles, no way to express
+`:hover` without a class) — added one, plus a "Searching…" and a real "No UK towns or cities
+matched" state where there was previously just an empty gap. Onboarding's interest chips and
+Crew chat's reaction pills had no hover/press feedback either — same `.v2-chip-toggle` fix
+applied to both.

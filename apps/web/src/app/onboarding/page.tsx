@@ -146,6 +146,7 @@ function OnboardingWizard() {
                     key={label}
                     type="button"
                     onClick={() => toggleInterest(slug)}
+                    className={`v2-chip-toggle${selected ? ' selected' : ''}`}
                     style={{
                       padding: '10px 16px', borderRadius: 100, border: 'none', cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
                       background: selected ? 'var(--v2-brand)' : 'var(--v2-surface)',

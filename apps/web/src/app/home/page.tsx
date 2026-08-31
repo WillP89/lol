@@ -299,7 +299,7 @@ export default function HomePage() {
           {nextPlan && (
             <Link
               href={`/plans/${nextPlan.publicSlug}`}
-              className="fade-up"
+              className="fade-up v2-hoverable"
               style={{
                 display: 'block',
                 position: 'relative',
@@ -362,7 +362,7 @@ export default function HomePage() {
                     <Link
                       key={exp.id}
                       href="/explore"
-                      className="fade-up"
+                      className="fade-up v2-hoverable"
                       style={{ flex: '0 0 auto', width: 140, borderRadius: 'var(--v2-r-sm)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)' }}
                     >
                       <div style={{ height: 84, background: v2Art(exp.imageUrl, exp.category) }} />

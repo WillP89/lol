@@ -27,6 +27,7 @@ export function LocationSearch({
 }) {
   const [query, setQuery] = useState(initialValue);
   const [results, setResults] = useState<UkPlaceResult[]>([]);
+  const [searching, setSearching] = useState(false);
   const [open, setOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -34,18 +35,23 @@ export function LocationSearch({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (query.trim().length < 2) {
       setResults([]);
+      setSearching(false);
       return;
     }
+    setSearching(true);
     debounceRef.current = setTimeout(() => {
       api
         .get<{ results: UkPlaceResult[] }>(`/locations/search?q=${encodeURIComponent(query.trim())}`)
         .then((res) => setResults(res.results))
-        .catch(() => setResults([]));
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
     }, 200);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query]);
+
+  const showDropdown = open && query.trim().length >= 2;
 
   return (
     <div style={{ position: 'relative' }}>
@@ -59,25 +65,35 @@ export function LocationSearch({
         }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setOpen(false);
+        }}
       />
-      {open && results.length > 0 && (
+      {showDropdown && (searching || results.length > 0 || query.trim().length >= 2) && (
         <div style={{ position: 'absolute', left: 0, right: 0, top: 'calc(100% + 6px)', background: 'var(--v2-surface)', borderRadius: 16, boxShadow: 'var(--v2-shadow-lg)', overflow: 'hidden', zIndex: 50 }}>
-          {results.map((r) => (
-            <button
-              key={r.name}
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                setQuery(r.name);
-                setOpen(false);
-                onSelect(r);
-              }}
-              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '12px 16px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
-            >
-              <div style={{ fontWeight: 700, fontSize: 14 }}>{r.name}</div>
-              <div className="v2-muted" style={{ fontSize: 12 }}>{r.region}</div>
-            </button>
-          ))}
+          {searching ? (
+            <div className="v2-dim" style={{ padding: '14px 16px', fontSize: 13 }}>Searching…</div>
+          ) : results.length > 0 ? (
+            results.map((r) => (
+              <button
+                key={r.name}
+                type="button"
+                className="v2-location-result"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setQuery(r.name);
+                  setOpen(false);
+                  onSelect(r);
+                }}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '12px 16px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{r.name}</div>
+                <div className="v2-muted" style={{ fontSize: 12 }}>{r.region}</div>
+              </button>
+            ))
+          ) : (
+            <div className="v2-dim" style={{ padding: '14px 16px', fontSize: 13 }}>No UK towns or cities matched &ldquo;{query.trim()}&rdquo;.</div>
+          )}
         </div>
       )}
     </div>

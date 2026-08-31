@@ -739,16 +739,47 @@ input.field:focus {
   transition: transform 0.15s ease, filter 0.15s ease;
 }
 .v2-btn:active { transform: scale(0.96); }
+.v2-btn:disabled { opacity: 0.5; cursor: default; }
+.v2-btn:disabled:active { transform: none; }
 .v2-btn-brand { background: var(--v2-brand); color: var(--v2-brand-ink); box-shadow: 0 10px 24px -8px rgba(255, 61, 90, 0.5); }
-.v2-btn-brand:hover { filter: brightness(1.06); }
 .v2-btn-dark { background: var(--v2-plum); color: var(--v2-plum-ink); }
 .v2-btn-ghost { background: var(--v2-surface); color: var(--v2-ink); box-shadow: var(--v2-shadow-sm); }
+/* Only real pointer devices get a hover treatment — `:hover` sticking after a tap on touch is
+   what made buttons/cards read as unresponsive rather than tactile on mobile, which is most of
+   this app's actual usage. */
+@media (hover: hover) {
+  .v2-btn-brand:hover:not(:disabled) { filter: brightness(1.06); }
+  .v2-btn-dark:hover:not(:disabled) { filter: brightness(1.15); }
+  .v2-btn-ghost:hover:not(:disabled) { background: var(--v2-bg-deep); }
+}
 
 .v2-card {
   background: var(--v2-surface);
   border-radius: var(--v2-r-lg);
   box-shadow: var(--v2-shadow-sm);
 }
+/* A tap/click-through surface (a Link or button styled as a card — Crews/Plans list rows,
+   Home's "Needs you", the composer's action-sheet rows) gets a real hover lift on devices that
+   can hover; every other `.v2-card` (a static content block — Profile's info panels, the
+   "In the groups" activity feed) stays exactly as it was, since those were never clickable. */
+a.v2-card, button.v2-card {
+  display: block;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  cursor: pointer;
+}
+a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
+@media (hover: hover) {
+  a.v2-card:hover, button.v2-card:hover { transform: translateY(-2px); box-shadow: var(--v2-shadow-lg); }
+}
+
+/* Shared hover-lift for tile-shaped clickable surfaces that can't use `.v2-card` directly
+   (Explore's photo cards, the map's event-preview card) because they need their own background/
+   shadow, not the plain surface-card look. */
+@media (hover: hover) {
+  .v2-hoverable:hover { transform: translateY(-2px); box-shadow: var(--v2-shadow-lg); }
+}
+.v2-hoverable { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.v2-hoverable:active { transform: scale(0.98); }
 
 /* ---- Mobile: icon-only floating pill, no text labels (contrast the old bar's orange text
    labels) — a small dot under the active icon carries state instead. ---- */
@@ -908,6 +939,24 @@ input.field:focus {
   box-shadow: var(--v2-shadow-lg);
   overflow: hidden;
   z-index: 500;
+}
+
+/* LocationSearch's results dropdown — plain inline-styled buttons before had zero hover
+   feedback at all, reading as unresponsive/broken rather than a real picker. */
+.v2-location-result {
+  transition: background 0.1s ease;
+}
+.v2-location-result:hover, .v2-location-result:focus-visible {
+  background: var(--v2-bg-deep) !important;
+}
+
+/* Onboarding's interest chips — tap-to-toggle pills, previously zero hover/press feedback. */
+.v2-chip-toggle {
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.v2-chip-toggle:active { transform: scale(0.94); }
+@media (hover: hover) {
+  .v2-chip-toggle:not(.selected):hover { box-shadow: var(--v2-shadow-lg) !important; }
 }
 
 /* Static (non-interactive) tag pill — Profile's "Into" list. */

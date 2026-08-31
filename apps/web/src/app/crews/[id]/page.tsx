@@ -121,7 +121,7 @@ function EventCard({ data, onLock, locking }: { data: PlanCardData; onLock: (pla
   const exp = data.plan.experience;
   const lockable = LOCKABLE_STATUSES.has(data.plan.status);
   return (
-    <div className="fade-up" style={{ width: 260, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)' }}>
+    <div className="fade-up v2-hoverable" style={{ width: 260, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)' }}>
       <Link href={`/plans/${data.plan.publicSlug}`} style={{ display: 'block' }}>
         <div style={{ height: 120, background: v2Art(exp?.imageUrl, exp?.category) }} />
         <div style={{ padding: '12px 14px 8px' }}>
@@ -223,6 +223,7 @@ function ReactionRow({
         <button
           key={r.emoji}
           onClick={() => onPick(r.emoji)}
+          className="v2-chip-toggle"
           style={{
             display: 'flex', alignItems: 'center', gap: 3, fontSize: 11.5, padding: '2px 8px', borderRadius: 100, border: 'none', cursor: 'pointer',
             background: r.reactedByMe ? 'rgba(255,61,90,0.12)' : 'var(--v2-bg-deep)',
@@ -234,7 +235,7 @@ function ReactionRow({
       ))}
       {pickerOpen ? (
         REACTION_CHOICES.map((emoji) => (
-          <button key={emoji} onClick={() => onPick(emoji)} style={{ fontSize: 15, padding: '2px 6px', borderRadius: 100, border: 'none', background: 'var(--v2-bg-deep)', cursor: 'pointer' }}>
+          <button key={emoji} onClick={() => onPick(emoji)} className="v2-chip-toggle" style={{ fontSize: 15, padding: '2px 6px', borderRadius: 100, border: 'none', background: 'var(--v2-bg-deep)', cursor: 'pointer' }}>
             {emoji}
           </button>
         ))
