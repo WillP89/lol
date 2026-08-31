@@ -767,3 +767,92 @@ brand feel, not another primitive/spacing pass. Real, concrete changes, not a re
 
 Everything here respects `prefers-reduced-motion`. None of it touches product logic — this is
 presentation only, same data and behaviour as before.
+
+## #plot-design-reset
+
+Direct response to explicit, repeated rejection of the whole "v2" visual direction — "the front
+end is not what I want at all... it just feels super basic... no real vibe... just pages with
+colours" and, after a decoration-only pass, "visually its fucking shite... everything I've been
+stressing about all day is still fucking shite." The instruction was explicit: stop polishing the
+existing direction, replace it. This is that replacement, not another effects pass on top of it.
+
+**Root-caused and fixed the map/detail overlap, for real this time.** Two earlier fixes had
+already landed and both were re-reported as still broken. Root cause: `BottomSheet` is a mobile
+pattern — fixed, centred across the *entire* viewport width via `margin: 0 auto` — and it was
+being used unconditionally for Explore's event detail, including on the desktop split. Opening a
+detail on desktop floated a phone-width card dead-centre of the whole window, landing on the seam
+between the results column and the map pane regardless of either pane's actual width — no
+z-index or margin tweak could fix that, because the component itself doesn't know the split
+layout exists. Fixed by removing BottomSheet from the desktop code path entirely for this case: a
+detail view now renders inline inside the results column (with its own "← Back to results"),
+physically incapable of overlapping the map pane. Verified with a fresh Playwright run reproducing
+the exact reported scenario (click a marker → View details, at 1440×900) before and after —
+screenshots in the session record. `BottomSheet` itself also gained a proper desktop mode (a
+centred dialog, not a stretched sheet) for its other callers (Crew's "+" menu, Crew info, Crews'
+create flow, Profile's danger actions).
+
+**The "v2" visual system is gone, not iterated.** Removed outright: the dark-plum/coral palette,
+film grain, glass/backdrop-filter on every surface, perpetual ambient-gradient drift, and
+Bricolage Grotesque as the display face. None of these were wrong in isolation — the direction
+underneath them was the actual problem, so restyling them wasn't going to fix it.
+
+Replaced with:
+- **Palette** — warm porcelain ground, a true near-black warm ink (no purple, anywhere) for text
+  and dark surfaces (the desktop nav rail, "mine" chat bubbles, dark buttons), and ONE confident
+  brand colour — a warm flame-orange-red — used deliberately for actions and the one accent that
+  means "this matters," not smeared across gradients as a decorative wash. A muted amber and a
+  grounded green round out the system for price/rating and confirm states.
+- **Type** — Fraunces (a real display serif) for every heading and hero moment instead of another
+  geometric grotesque. This is the single biggest lever here: a serif display face paired with
+  Inter for UI text reads as editorial and considered rather than "SaaS dashboard," which is
+  exactly the "premium, high-cost development" register that was asked for and wasn't landing.
+- **Decoration is opt-in, not default.** No card, panel or button carries a gradient, blur or
+  animation unless a specific interaction earns it — the lock-in celebration, a sheet's open
+  transition. Quality now has to come from composition, type scale and spacing, not effects.
+- **Event/plan fallback art** — replaced the three-radial-blob "neon poster" treatment (the exact
+  thing that made Explore/Home read as Ticketmaster/Fever) with a single confident duotone wash
+  per category, ink-anchored. Still legible under text, no longer competing for attention.
+- **A real brand entrance** — the landing page now opens with a colour-blocked header, a large
+  serif headline with one word set in the brand colour, and a three-step "Talk → Decide → Go"
+  strip, instead of a gradient-blob hero. Auth/onboarding/404/error all carry the same italic
+  serif wordmark instead of a repeated square "P" badge (a few of these — onboarding, 404, error —
+  still use it as a placeholder in the very first frame before the icon renders; low priority,
+  noted as remaining work).
+
+**Home and Crew were largely correct in composition already** (people-first avatar row, "Needs
+you," a real activity feed, discovery demoted to a small strip at the bottom on Home; minimal
+chrome, grouped bubbles, native poll/plan objects, avatars only where they carry information on
+Crew) — the failure was almost entirely the visual language layered on top, not the information
+architecture. Both got the full token replacement plus one real structural fix each: Home's
+decorative animated glow/accent-rule removed outright (no more perpetual background animation);
+Crew's floating bottom nav pill was found — via the real two-user test below, not by inspection —
+to sit directly over the message composer on mobile (a full-width fixed sheet with no reserved
+clearance for a second fixed-bottom element). `TabBarV2` gained a `hideMobile` prop and Crew now
+hides the pill on mobile entirely, the same "full-screen conversation, back arrow gets you out"
+pattern WhatsApp/iMessage use — verified fixed via DOM inspection (`display: none` on
+`.v2-nav-bottom` on the Crew route) after the change.
+
+**Verified with a real two-independent-session friend test**, not one browser simulating two
+people: user A (desktop, 1440×900) created a Crew and got an invite link; user B (mobile,
+390×844, a completely separate browser context/cookie jar) followed it, joined, and the two
+sessions chatted for real — A's and B's messages both appear correctly attributed, in order, on
+both sides after independent polling. A posted a "When works?" availability poll (a native
+in-chat object, not a separate screen); B voted from their own session; A locked it in. The lock
+produced a real Plan that then appeared, from a fresh reload, in: Crew chat (a confirmation
+message), Home's "Next up" hero and "In the groups" activity feed, the Crews list's activity line,
+the Plans list, and the plan's own public share-card page — for *both* users independently.
+Screenshots for every step are in the session record.
+
+Multi-viewport coverage: 390×844, 430×932, 768×1024, 1440×900 and 1728×1117 for Entry, Auth, Home,
+Crew and Explore.
+
+**What's still weak / not done in this pass:**
+- Explore's *composition* (not just its colours) is still close to the original — a search bar +
+  2-col grid + map split. It works and no longer overlaps, but "a completely new visual
+  composition" for discovery+map together (the brief's own words) is a further pass, not this one.
+- Crews/Plans/Profile/onboarding/invite inherit the new tokens and read consistently, but none got
+  their own dedicated composition pass the way Home/Crew/Entry did.
+- The onboarding/404/error square "P" mark (not the wordmark) is unreplaced.
+- No further motion system beyond what already existed (lock-burst, sheet transitions, list
+  stagger) — deliberately not expanded, per "motion should be functional... avoid decorative
+  perpetual animation unless there is a very strong reason."

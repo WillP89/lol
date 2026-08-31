@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 
-const AVATAR_COLORS = ['#ff3d5a', '#5b3df0', '#1c7a52', '#ffb238', '#ff6fae'];
+const AVATAR_COLORS = ['#ff4a1f', '#0f766e', '#1b7a4d', '#b9832a', '#c2410c'];
 
 interface Preview {
   name: string;
@@ -68,15 +68,7 @@ export default function JoinCrewPage() {
 
   return (
     <div className="v2" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-      <div
-        aria-hidden
-        className="v2-ambient-glow"
-        style={{
-          position: 'fixed', inset: '-20%', zIndex: 0,
-          background: 'radial-gradient(50% 40% at 50% 0%, rgba(255,61,90,0.14), transparent 60%), radial-gradient(55% 45% at 50% 100%, rgba(91,61,240,0.12), transparent 62%)',
-        }}
-      />
-      <div className="v2-page" style={{ paddingTop: 0, paddingBottom: 0, textAlign: 'center', position: 'relative', zIndex: 1 }}>
+      <div className="v2-page" style={{ paddingTop: 0, paddingBottom: 0, textAlign: 'center' }}>
         {preview === null && (
           <div style={{ height: 200, borderRadius: 24, background: 'var(--v2-bg-deep)' }} />
         )}

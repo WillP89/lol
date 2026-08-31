@@ -22,7 +22,7 @@ interface ProfileUser {
 }
 
 // Same palette as Home V2's avatar colours — one shared identity system across the app.
-const AVATAR_COLORS = ['#ff3d5a', '#ffb238', '#1c7a52', '#5b3df0', '#ff6fae'];
+const AVATAR_COLORS = ['#ff4a1f', '#b9832a', '#1b7a4d', '#0f766e', '#c2410c'];
 function avatarColor(seed: string) {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % AVATAR_COLORS.length;
@@ -206,7 +206,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <BottomSheet open={dangerAction !== null} onClose={() => !busy && setDangerAction(null)} variant="light">
+      <BottomSheet open={dangerAction !== null} onClose={() => !busy && setDangerAction(null)}>
         {dangerAction && (
           <div>
             <div className="v2-eyebrow" style={{ marginBottom: 4 }}>{dangerAction === 'deactivate' ? 'Deactivate account?' : 'Delete account?'}</div>

@@ -46,9 +46,7 @@ function AuthForm() {
   return (
     <div className="v2" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <div className="v2-page" style={{ paddingTop: 0, paddingBottom: 0 }}>
-        <div style={{ width: 44, height: 44, borderRadius: 14, background: 'var(--v2-plum)', color: 'var(--v2-brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 28, fontFamily: 'Bricolage Grotesque, sans-serif', fontWeight: 800, fontSize: 19 }}>
-          P
-        </div>
+        <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontStyle: 'italic', fontWeight: 700, fontSize: 22, marginBottom: 32 }}>Plot</div>
 
         {!sent ? (
           <div className="fade-up">
@@ -72,7 +70,7 @@ function AuthForm() {
           </div>
         ) : (
           <div className="v2-card fade-up" style={{ textAlign: 'center', padding: '32px 26px' }}>
-            <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(28,122,82,0.12)', color: 'var(--v2-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 22 }}>
+            <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(27,122,77,0.12)', color: 'var(--v2-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 22 }}>
               ✓
             </div>
             <p className="v2-display" style={{ fontSize: 18, marginBottom: 8 }}>Check your email</p>

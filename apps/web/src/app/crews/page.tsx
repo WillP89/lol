@@ -19,7 +19,7 @@ interface CrewSummary {
 
 // Same palette as Home V2's avatar/ring colours — one shared identity system across the app,
 // not a different set of colours per screen for the same people and Crews.
-const AVATAR_COLORS = ['#ff3d5a', '#ffb238', '#1c7a52', '#5b3df0', '#ff6fae'];
+const AVATAR_COLORS = ['#ff4a1f', '#b9832a', '#1b7a4d', '#0f766e', '#c2410c'];
 
 function initials(displayName: string | null, email: string) {
   const source = displayName?.trim() || email;
@@ -66,7 +66,7 @@ function CrewActivityLine({ crew }: { crew: CrewSummary }) {
   }
   if (crew.activePlan) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#a06a00', fontWeight: 700 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#8a5f1f', fontWeight: 700 }}>
         <span>🗳️</span>
         <span>
           Deciding: {crew.activePlan.title} · {crew.activePlan.inCount}/{crew.activePlan.totalMembers} in
@@ -88,9 +88,8 @@ function CrewActivityLine({ crew }: { crew: CrewSummary }) {
 type CreateStep = 'name' | 'invite';
 
 /**
- * Crews V2 — the list screen brought in line with the rest of the app (see
- * docs/DECISIONS.md#v2-art-direction): same warm light ground, same card/eyebrow/button
- * vocabulary as Home, same TabBarV2. Same data/logic as before, only the presentation changed.
+ * Crews — the list screen, in the same product language as Home/Crew/Explore: same warm ground,
+ * card/eyebrow/button vocabulary and avatar identity system. See docs/DECISIONS.md#plot-design-reset.
  */
 export default function CrewsPage() {
   const router = useRouter();
@@ -265,7 +264,7 @@ export default function CrewsPage() {
         </div>
       </div>
 
-      <BottomSheet open={showCreate} onClose={() => !creating && setShowCreate(false)} variant="light">
+      <BottomSheet open={showCreate} onClose={() => !creating && setShowCreate(false)}>
         {step === 'name' ? (
           <form onSubmit={createCrew}>
             <div className="v2-eyebrow" style={{ marginBottom: 4 }}>New Crew</div>

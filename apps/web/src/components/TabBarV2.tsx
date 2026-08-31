@@ -64,7 +64,7 @@ const TABS = [
   },
 ];
 
-export function TabBarV2() {
+export function TabBarV2({ hideMobile = false }: { hideMobile?: boolean } = {}) {
   const pathname = usePathname();
   const [me, setMe] = useState<{ displayName: string | null; email: string } | null>(null);
   useEffect(() => {
@@ -76,7 +76,13 @@ export function TabBarV2() {
 
   return (
     <>
-      <nav className="v2-nav-bottom">
+      {/* `hideMobile` — Crew chat's own composer sits flush to the bottom of the mobile
+          viewport (the same full-screen-conversation layout WhatsApp/iMessage use); the
+          floating nav pill has nowhere to sit there without overlapping it. A back arrow at
+          the top of Crew already gets you out, so losing the tab bar for the duration of one
+          conversation costs nothing. Desktop is unaffected — the rail lives in its own fixed
+          column the composer never extends into. */}
+      <nav className="v2-nav-bottom" style={hideMobile ? { display: 'none' } : undefined}>
         {TABS.map((tab) => {
           const active = pathname.startsWith(tab.href);
           return (

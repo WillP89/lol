@@ -3,9 +3,10 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 /**
- * The entrance — a real product opening, not a login form (brief: "people decide whether they
- * trust an application within seconds"). One identity moment, one line of thesis, two clear
- * actions. See globals.css's V2 system + docs/DECISIONS.md#v2-art-direction.
+ * The entrance — a real product opening, not a login form (people decide whether they trust an
+ * application within seconds). One identity moment, one line of thesis, two clear actions, then
+ * a natural handoff into auth. Typography and colour-blocking carry this screen — no gradient
+ * wash, no glow, no motion beyond the entrance fade. See docs/DECISIONS.md#plot-design-reset.
  */
 export default function LandingPage() {
   if (cookies().get('plot_session')) {
@@ -14,34 +15,45 @@ export default function LandingPage() {
 
   return (
     <div className="v2" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: '40px 24px', position: 'relative', overflow: 'hidden' }}>
-        {/* Ambient colour, not a photo — the same category-art palette the rest of the product
-            uses, so the very first thing anyone sees already belongs to Plot's own language. */}
-        <div
-          aria-hidden
-          className="v2-ambient-glow"
-          style={{
-            position: 'absolute', inset: '-20%', zIndex: 0,
-            background:
-              'radial-gradient(46% 38% at 20% 15%, rgba(255,61,90,0.16), transparent 60%), radial-gradient(50% 42% at 85% 12%, rgba(91,61,240,0.14), transparent 62%), radial-gradient(55% 45% at 50% 100%, rgba(28,122,82,0.10), transparent 60%)',
-          }}
-        />
-        <div className="fade-up" style={{ position: 'relative', zIndex: 1, maxWidth: 380 }}>
-          <div style={{ width: 64, height: 64, borderRadius: 20, background: 'var(--v2-plum)', color: 'var(--v2-brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 26px', fontFamily: 'Bricolage Grotesque, sans-serif', fontWeight: 800, fontSize: 28, boxShadow: 'var(--v2-shadow-lg)' }}>
-            P
-          </div>
-          <h1 className="v2-display" style={{ fontSize: 'clamp(30px, 7vw, 40px)', lineHeight: 1.08, marginBottom: 14 }}>
-            Actually make<br />the plan.
+      {/* A solid ink band, not a photo or a gradient — colour-blocking is the one device this
+          screen uses to feel considered, and it costs nothing to render. */}
+      <div style={{ background: 'var(--v2-plum)', color: 'var(--v2-plum-ink)', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontStyle: 'italic', fontWeight: 700, fontSize: 20 }}>Plot</div>
+        <Link href="/auth" style={{ fontSize: 13, fontWeight: 700, color: 'rgba(246,241,232,0.7)' }}>Sign in</Link>
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '48px 28px 60px', maxWidth: 640, margin: '0 auto', width: '100%' }}>
+        <div className="fade-up">
+          <h1 style={{ fontFamily: 'Fraunces, Georgia, serif', fontWeight: 700, fontSize: 'clamp(38px, 8vw, 68px)', lineHeight: 0.98, letterSpacing: '-0.02em', marginBottom: 22 }}>
+            Actually<br />
+            <span style={{ fontStyle: 'italic', color: 'var(--v2-brand)' }}>make</span> the plan.
           </h1>
-          <p className="v2-muted" style={{ fontSize: 15.5, lineHeight: 1.55, marginBottom: 34 }}>
+          <p style={{ fontSize: 17, lineHeight: 1.55, color: 'var(--v2-ink-muted)', marginBottom: 36, maxWidth: 420 }}>
             Plot turns the group chat into something you&rsquo;re actually doing — for your Crew, not just for you.
           </p>
-          <Link href="/auth" className="v2-btn v2-btn-brand" style={{ width: '100%', marginBottom: 10, padding: '16px 22px', fontSize: 15.5 }}>
-            Get started
-          </Link>
-          <Link href="/auth" className="v2-muted" style={{ fontSize: 13.5, fontWeight: 700 }}>
-            Already on Plot? Sign in
-          </Link>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+            <Link href="/auth" className="v2-btn v2-btn-brand" style={{ padding: '16px 30px', fontSize: 15.5 }}>
+              Get started
+            </Link>
+            <Link href="/auth" style={{ fontSize: 14, fontWeight: 700, color: 'var(--v2-ink)' }}>
+              Already on Plot?
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: '0 28px 40px', maxWidth: 640, margin: '0 auto', width: '100%' }}>
+        <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', borderTop: '1px solid var(--v2-line)', paddingTop: 22 }}>
+          {[
+            ['Talk', 'Someone throws in an idea'],
+            ['Decide', 'The Crew votes, in or maybe'],
+            ['Go', 'Lock it in, it’s a plan'],
+          ].map(([title, desc]) => (
+            <div key={title} style={{ minWidth: 140 }}>
+              <div style={{ fontWeight: 800, fontSize: 13.5, marginBottom: 3 }}>{title}</div>
+              <div className="v2-muted" style={{ fontSize: 12.5, lineHeight: 1.4 }}>{desc}</div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

@@ -42,9 +42,9 @@ interface Experience {
   venue: { name: string };
 }
 
-const AVATAR_COLORS = ['#ff3d5a', '#ffb238', '#1c7a52', '#5b3df0', '#ff6fae'];
+const AVATAR_COLORS = ['#ff4a1f', '#b9832a', '#1b7a4d', '#0f766e', '#c2410c'];
 // One ring tint per Crew (hashed) — the identity marker for the Crew-bubble row below.
-const CREW_RINGS = ['#ff3d5a', '#5b3df0', '#1c7a52', '#ffb238', '#ff6fae'];
+const CREW_RINGS = ['#ff4a1f', '#0f766e', '#1b7a4d', '#b9832a', '#c2410c'];
 
 function initials(displayName: string | null, email: string) {
   return (displayName?.trim() || email).slice(0, 1).toUpperCase();
@@ -79,9 +79,11 @@ function greeting(): string {
 }
 
 /**
- * Home V2 — same data/logic as v1 (crews, upcoming plans, ideas, activity), an entirely
- * different presentation. See globals.css's "V2 DESIGN SYSTEM" block and
- * docs/DECISIONS.md#v2-art-direction for what changed and why.
+ * Home — crew/social-first by design: people (Your people), what needs a response (Needs you)
+ * and what your Crews are actually saying (In the groups) all come before anything you might do
+ * next. "Next up" (a plan already locked) and "For your Crews" (a small, restrained discovery
+ * strip) both sit below the fold deliberately — discovery feeds the social loop here, it doesn't
+ * lead the page. See docs/DECISIONS.md#plot-design-reset.
  */
 export default function HomePage() {
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
@@ -127,7 +129,6 @@ export default function HomePage() {
 
   return (
     <div className="v2">
-      <div aria-hidden className="v2-home-glow" />
       <div className="v2-shell-desktop">
         <div className="v2-home-split">
         <div className="v2-home-main">
@@ -136,9 +137,8 @@ export default function HomePage() {
               affordance (desktop already has one pinned to the nav rail). */}
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 26 }}>
             <div>
-              <span className="v2-home-accent" />
-              <h1 className="v2-display" style={{ fontSize: 40, lineHeight: 1.02, marginBottom: 6, letterSpacing: '-0.03em' }}>
-                {greeting()}{firstName && `, ${firstName}`}
+              <h1 className="v2-display" style={{ fontSize: 38, marginBottom: 6 }}>
+                {greeting()}{firstName && <><br /><span style={{ fontStyle: 'italic', color: 'var(--v2-brand)' }}>{firstName}</span></>}
               </h1>
               <p className="v2-muted" style={{ fontSize: 14.5 }}>Here&rsquo;s what your people are up to.</p>
             </div>
@@ -320,7 +320,7 @@ export default function HomePage() {
                 background: v2Art(nextPlan.imageUrl, nextPlan.category),
               }}
             >
-              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(21,11,44,0) 30%, rgba(21,11,44,0.55) 70%, rgba(21,11,44,0.88) 100%)' }} />
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(22,19,15,0) 30%, rgba(22,19,15,0.55) 70%, rgba(22,19,15,0.88) 100%)' }} />
               <div style={{ position: 'absolute', top: 20, left: 22 }}>
                 <span
                   style={{

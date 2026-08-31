@@ -75,7 +75,7 @@ function Card({
           from an earlier version (0% at 42%, 0.82 at 100%) that compounded with genuinely dark
           real event photography (gig/tour promo shots, common from a live provider) into what
           read as a plain black card rather than a photo with a caption on it. */}
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(21,11,44,0) 55%, rgba(21,11,44,0.62) 100%)' }} />
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(22,19,15,0) 55%, rgba(22,19,15,0.62) 100%)' }} />
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: size === 'hero' ? '20px 22px' : '14px 16px' }}>
         <div className="v2-display" style={{ fontSize: size === 'hero' ? 24 : 16, color: '#fff', lineHeight: 1.15, marginBottom: 6 }}>
           {exp.name}
@@ -179,6 +179,45 @@ export default function ExplorePage() {
 
   const previewExp = searched.find((e) => e.id === selectedId) ?? null;
 
+  // Shared between the mobile BottomSheet and the desktop inline panel below — same content,
+  // two different containers. Root-caused bug this replaces: BottomSheet is a mobile pattern
+  // (fixed, centred across the *entire* viewport width via `margin: 0 auto`) that was being
+  // used unconditionally, including on the desktop split — so opening a detail floated a
+  // phone-width card dead-centre of the whole 1600px window, landing on top of the seam
+  // between the results column and the map pane regardless of either pane's actual width. A
+  // desktop detail view now renders *inside* the results column instead (no BottomSheet
+  // involved at all there), so it physically cannot overlap the map. See
+  // docs/DECISIONS.md#explore-detail-desktop.
+  const detailContent = selected && !pickingCrew ? (
+    <div>
+      <div style={{ position: 'relative', margin: '-10px -20px 16px', height: 210, background: v2Art(selected.imageUrl, selected.category) }} />
+      <div className="v2-eyebrow" style={{ marginBottom: 4 }}>{selected.category.replace(/_/g, ' ')}</div>
+      <h2 className="v2-display" style={{ fontSize: 23, marginBottom: 6 }}>{selected.name}</h2>
+      <div className="v2-muted" style={{ fontSize: 13.5, marginBottom: 14 }}>
+        {selected.venue.name} · {formatWhen(selected.startsAt)}
+        {formatPrice(selected) && ` · ${formatPrice(selected)}`}
+      </div>
+      {selected.description && <p style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--v2-ink-muted)', marginBottom: 20 }}>{selected.description}</p>}
+      <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={() => setPickingCrew(true)}>
+        Share to Crew →
+      </button>
+    </div>
+  ) : selected && pickingCrew ? (
+    <div>
+      <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Send &ldquo;{selected.name}&rdquo; to…</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {crews === null && <p className="v2-muted">Loading your Crews…</p>}
+        {crews?.length === 0 && <p className="v2-muted">You&rsquo;re not in a Crew yet — <Link href="/crews">create one first</Link>.</p>}
+        {crews?.map((crew) => (
+          <button key={crew.id} className="v2-btn v2-btn-ghost" disabled={sending !== null} onClick={() => sendToCrew(crew.id)} style={{ justifyContent: 'flex-start' }}>
+            {sending === crew.id ? 'Sending…' : `💬 ${crew.name}`}
+          </button>
+        ))}
+        <button className="v2-btn v2-btn-ghost" onClick={() => setPickingCrew(false)} disabled={sending !== null}>← Back</button>
+      </div>
+    </div>
+  ) : null;
+
   const discovery = (
     <div>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
@@ -276,7 +315,23 @@ export default function ExplorePage() {
         {error && <div className="v2-page" style={{ paddingBottom: 0, color: 'var(--v2-brand)' }}>{error}</div>}
 
         <div className="v2-explore-split">
-          <div className="v2-explore-col">{discovery}</div>
+          <div className="v2-explore-col">
+            {/* Desktop detail view replaces the results column in place — never a floating
+                sheet — so it is physically impossible for it to sit on top of the map pane. */}
+            {isDesktop && selected ? (
+              <div className="fade-up">
+                <button
+                  onClick={closeSheet}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, border: 'none', background: 'none', color: 'var(--v2-ink-muted)', fontWeight: 700, fontSize: 13.5, padding: '4px 0 18px', cursor: 'pointer' }}
+                >
+                  ← Back to results
+                </button>
+                {detailContent}
+              </div>
+            ) : (
+              discovery
+            )}
+          </div>
           {/* Only mounted at all when isDesktop — matches renderMap()'s own doc comment: never
               let this coexist in the tree with the mobile overlay below. */}
           {isDesktop && <div className="v2-explore-map-pane">{renderMap()}</div>}
@@ -302,37 +357,12 @@ export default function ExplorePage() {
         )}
       </div>
 
-      <BottomSheet open={selected !== null} onClose={closeSheet} variant="light">
-        {selected && !pickingCrew && (
-          <div>
-            <div style={{ position: 'relative', margin: '-10px -20px 16px', height: 210, background: v2Art(selected.imageUrl, selected.category) }} />
-            <div className="v2-eyebrow" style={{ marginBottom: 4 }}>{selected.category.replace(/_/g, ' ')}</div>
-            <h2 className="v2-display" style={{ fontSize: 23, marginBottom: 6 }}>{selected.name}</h2>
-            <div className="v2-muted" style={{ fontSize: 13.5, marginBottom: 14 }}>
-              {selected.venue.name} · {formatWhen(selected.startsAt)}
-              {formatPrice(selected) && ` · ${formatPrice(selected)}`}
-            </div>
-            {selected.description && <p style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--v2-ink-muted)', marginBottom: 20 }}>{selected.description}</p>}
-            <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={() => setPickingCrew(true)}>
-              Share to Crew →
-            </button>
-          </div>
-        )}
-        {selected && pickingCrew && (
-          <div>
-            <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Send &ldquo;{selected.name}&rdquo; to…</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {crews === null && <p className="v2-muted">Loading your Crews…</p>}
-              {crews?.length === 0 && <p className="v2-muted">You&rsquo;re not in a Crew yet — <Link href="/crews">create one first</Link>.</p>}
-              {crews?.map((crew) => (
-                <button key={crew.id} className="v2-btn v2-btn-ghost" disabled={sending !== null} onClick={() => sendToCrew(crew.id)} style={{ justifyContent: 'flex-start' }}>
-                  {sending === crew.id ? 'Sending…' : `💬 ${crew.name}`}
-                </button>
-              ))}
-              <button className="v2-btn v2-btn-ghost" onClick={() => setPickingCrew(false)} disabled={sending !== null}>← Back</button>
-            </div>
-          </div>
-        )}
+      {/* Mobile only — the desktop equivalent renders inline in the results column above, never
+          as a floating sheet. Passing `open: false` on desktop (rather than not rendering the
+          component) keeps its close transition/scroll-lock cleanup consistent if the viewport
+          crosses the breakpoint while it's open. */}
+      <BottomSheet open={!isDesktop && selected !== null} onClose={closeSheet}>
+        {detailContent}
       </BottomSheet>
 
       <TabBarV2 />

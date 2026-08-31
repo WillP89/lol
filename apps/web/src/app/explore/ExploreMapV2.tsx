@@ -22,8 +22,8 @@ function pinIcon(selected: boolean) {
   return L.divIcon({
     className: '',
     html: selected
-      ? `<span style="display:block;width:${size}px;height:${size}px;border-radius:50%;background:#ff3d5a;box-shadow:0 0 0 7px rgba(255,61,90,.22),0 4px 14px rgba(26,21,16,.35);border:3px solid #fff;"></span>`
-      : `<span style="display:block;width:${size}px;height:${size}px;border-radius:50%;background:#ff3d5a;box-shadow:0 2px 8px rgba(26,21,16,.25);border:2.5px solid #fff;"></span>`,
+      ? `<span style="display:block;width:${size}px;height:${size}px;border-radius:50%;background:#ff4a1f;box-shadow:0 0 0 7px rgba(255,74,31,.22),0 4px 14px rgba(26,21,16,.35);border:3px solid #fff;"></span>`
+      : `<span style="display:block;width:${size}px;height:${size}px;border-radius:50%;background:#ff4a1f;box-shadow:0 2px 8px rgba(26,21,16,.25);border:2.5px solid #fff;"></span>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   });

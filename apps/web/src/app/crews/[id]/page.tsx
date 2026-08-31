@@ -104,7 +104,7 @@ interface DayAvailability {
 }
 
 const ACTIVE_DECISION_STATUSES = new Set(['SHARED', 'GATHERING_INTEREST', 'LIKELY', 'READY']);
-const AVATAR_COLORS = ['#ff3d5a', '#5b3df0', '#1c7a52', '#ffb238', '#ff6fae'];
+const AVATAR_COLORS = ['#ff4a1f', '#0f766e', '#1b7a4d', '#b9832a', '#c2410c'];
 function avatarColor(seed: string) {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % AVATAR_COLORS.length;
@@ -143,7 +143,7 @@ function EventCard({ data, onLock, locking }: { data: PlanCardData; onLock: (pla
             </div>
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, fontWeight: 800, color: data.plan.status === 'BOOKED' ? 'var(--v2-green)' : 'var(--v2-ink-muted)', background: data.plan.status === 'BOOKED' ? 'rgba(28,122,82,0.12)' : 'var(--v2-bg-deep)', padding: '4px 10px', borderRadius: 100 }}>
+            <span style={{ fontSize: 11, fontWeight: 800, color: data.plan.status === 'BOOKED' ? 'var(--v2-green)' : 'var(--v2-ink-muted)', background: data.plan.status === 'BOOKED' ? 'rgba(27,122,77,0.12)' : 'var(--v2-bg-deep)', padding: '4px 10px', borderRadius: 100 }}>
               {data.plan.status === 'BOOKED' ? '🔒 Locked in' : `${data.pulse.inCount}/${data.pulse.totalMembers} in`}
             </span>
             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--v2-brand)' }}>View →</span>
@@ -192,7 +192,7 @@ function PollCard({ poll, onVote, voting, onLockOption, locking }: {
               disabled={voting}
               style={{ position: 'relative', textAlign: 'left', border: 'none', borderRadius: 10, overflow: 'hidden', cursor: 'pointer', padding: '9px 12px', background: 'var(--v2-bg-deep)' }}
             >
-              <div style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: mine ? 'rgba(255,61,90,0.22)' : 'rgba(26,21,16,0.06)', transition: 'width 0.3s ease' }} />
+              <div style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: mine ? 'rgba(255,74,31,0.22)' : 'rgba(26,21,16,0.06)', transition: 'width 0.3s ease' }} />
               <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: mine ? 800 : 600 }}>
                 <span>{mine ? '✓ ' : ''}{option}</span>
                 {poll.totalVotes > 0 && <span className="v2-muted">{count}</span>}
@@ -236,7 +236,7 @@ function ReactionRow({
           className="v2-chip-toggle"
           style={{
             display: 'flex', alignItems: 'center', gap: 3, fontSize: 11.5, padding: '2px 8px', borderRadius: 100, border: 'none', cursor: 'pointer',
-            background: r.reactedByMe ? 'rgba(255,61,90,0.12)' : 'var(--v2-bg-deep)',
+            background: r.reactedByMe ? 'rgba(255,74,31,0.12)' : 'var(--v2-bg-deep)',
             color: r.reactedByMe ? 'var(--v2-brand)' : 'var(--v2-ink-muted)',
           }}
         >
@@ -294,11 +294,13 @@ function LockCelebration() {
 }
 
 /**
- * Crew/Chat V2 — same data/logic as the original (polling, reactions, plan-card parsing,
- * suggest-to-chat), an entirely different presentation. The brief's own words: "the interface
- * around chat should disappear as much as possible... the people and content create the visual
- * interest." No boxed panels, minimal chrome, one slim context strip, avatars only where they
- * carry information (the first message in a run). See docs/DECISIONS.md#v2-art-direction.
+ * Crew/Chat — the core experience: opening a Crew should feel like entering a private group of
+ * real people, not opening a software object. Conversation dominates; there is no boxed nav bar,
+ * no card chrome — a back arrow, an avatar cluster + name, a slim context strip when there's an
+ * active decision, then the thread itself, WhatsApp/iMessage-plain (grouped bubbles, avatars only
+ * where they carry information, reactions, real-time-feeling polling). Shared things (a poll, an
+ * event, a plan) render as native conversational objects inline, not a different, plainer feature
+ * bolted on. See docs/DECISIONS.md#plot-design-reset.
  */
 export default function CrewPage() {
   const { id: crewId } = useParams<{ id: string }>();
@@ -664,7 +666,7 @@ export default function CrewPage() {
             className="fade-up"
             style={{
               display: 'flex', alignItems: 'center', gap: 10, margin: '0 20px 8px', padding: '11px 16px', borderRadius: 100,
-              background: upcomingPlan ? 'rgba(28,122,82,0.1)' : 'rgba(255,178,56,0.16)',
+              background: upcomingPlan ? 'rgba(27,122,77,0.1)' : 'rgba(185,131,42,0.16)',
             }}
           >
             <span style={{ fontSize: 15 }}>{upcomingPlan ? '📅' : '🗳️'}</span>
@@ -672,7 +674,7 @@ export default function CrewPage() {
               <span style={{ fontSize: 13.5, fontWeight: 700 }}>{context.title}</span>
               {activePlan === context && <span className="v2-muted" style={{ fontSize: 12 }}> · {context.votes.filter((v) => v.vote === 'IN').length}/{context.members.length} in</span>}
             </div>
-            <span style={{ fontSize: 12, fontWeight: 800, color: upcomingPlan ? 'var(--v2-green)' : '#a06a00', flexShrink: 0 }}>{upcomingPlan ? 'View' : 'Vote'} →</span>
+            <span style={{ fontSize: 12, fontWeight: 800, color: upcomingPlan ? 'var(--v2-green)' : '#8a5f1f', flexShrink: 0 }}>{upcomingPlan ? 'View' : 'Vote'} →</span>
           </Link>
         )}
 
@@ -788,7 +790,7 @@ export default function CrewPage() {
 
       {/* THE COMPOSER'S "+" ACTION SHEET — every way of adding something to the conversation
           beyond plain text, one entry point. See docs/DECISIONS.md#decision-objects. */}
-      <BottomSheet open={actionOpen} onClose={closeActionSheet} variant="light">
+      <BottomSheet open={actionOpen} onClose={closeActionSheet}>
         {actionView === 'menu' && (
           <div>
             <div className="v2-eyebrow" style={{ marginBottom: 14 }}>Add to {crew.name}</div>
@@ -908,7 +910,7 @@ export default function CrewPage() {
         )}
       </BottomSheet>
 
-      <BottomSheet open={infoOpen} onClose={() => setInfoOpen(false)} variant="light">
+      <BottomSheet open={infoOpen} onClose={() => setInfoOpen(false)}>
         <div className="v2-eyebrow" style={{ marginBottom: 2 }}>{crew.name}</div>
         <p className="v2-muted" style={{ fontSize: 12.5, marginBottom: 16 }}>{crew.members.length} people</p>
 
@@ -928,7 +930,7 @@ export default function CrewPage() {
             <div className="v2-eyebrow" style={{ marginBottom: 6 }}>Group DNA · {crew.dna.confidence.toLowerCase()} confidence</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {crew.dna.topCategories.length ? (
-                crew.dna.topCategories.map((c) => <span key={c} style={{ fontSize: 12, fontWeight: 700, padding: '5px 12px', borderRadius: 100, background: 'rgba(255,178,56,0.16)', color: '#8a5a00' }}>{c}</span>)
+                crew.dna.topCategories.map((c) => <span key={c} style={{ fontSize: 12, fontWeight: 700, padding: '5px 12px', borderRadius: 100, background: 'rgba(185,131,42,0.16)', color: '#8a5f1f' }}>{c}</span>)
               ) : (
                 <span className="v2-muted" style={{ fontSize: 13 }}>Plot is still learning this Crew&rsquo;s taste.</span>
               )}
@@ -964,7 +966,7 @@ export default function CrewPage() {
       </BottomSheet>
 
       {celebrating && <LockCelebration />}
-      <TabBarV2 />
+      <TabBarV2 hideMobile />
     </div>
   );
 }
