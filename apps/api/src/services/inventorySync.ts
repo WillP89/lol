@@ -5,6 +5,7 @@ import { providerRegistry } from '../providers/registry';
 import type { ProviderAdapter } from '../providers/types';
 import { buildCanonicalKey } from './entityResolution';
 import { computeQualityScore } from './qualityScoring';
+import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 
 /**
  * Runs one provider end-to-end: fetch -> map -> dedup -> quality-score -> upsert. Every
@@ -122,7 +123,7 @@ export async function syncProvider(
   return { providerId: adapter.id, fetched: listings.length, upserted, failed };
 }
 
-export async function syncAllProviders(city = 'London'): Promise<Awaited<ReturnType<typeof syncProvider>>[]> {
+export async function syncAllProviders(city = UK_FALLBACK_CENTER.name): Promise<Awaited<ReturnType<typeof syncProvider>>[]> {
   const fromDate = new Date();
   const toDate = new Date();
   toDate.setDate(toDate.getDate() + 60);

@@ -53,6 +53,23 @@ const STAFFORDSHIRE_VENUES = [
   { name: 'Stafford County Showground', lat: 52.8355, lng: -2.1064, area: 'Stafford' },
 ];
 
+// Real Birmingham venues — added because Birmingham is both this app's own UK-central fallback
+// city (see UK_FALLBACK_CENTER, data/ukPlaces.ts) and the pilot's own "worth travelling to"
+// example from Stafford, yet had zero mock coverage: a real user resolving to Birmingham (the
+// fallback itself, or by choice) saw a genuinely empty catalogue whenever no live provider was
+// configured. Two of these (O2 Institute, Utilita Arena) are independently confirmed real by
+// live Ticketmaster results seen in production, not just general knowledge.
+const BIRMINGHAM_VENUES = [
+  { name: 'O2 Academy Birmingham', lat: 52.4746, lng: -1.8994, area: 'Bristol Street' },
+  { name: 'O2 Institute Birmingham', lat: 52.4759, lng: -1.8898, area: 'Digbeth' },
+  { name: 'The Sunflower Lounge', lat: 52.4772, lng: -1.8987, area: 'Smallbrook Queensway' },
+  { name: 'Birmingham Hippodrome', lat: 52.4762, lng: -1.8998, area: 'Hurst Street' },
+  { name: 'Symphony Hall', lat: 52.4779, lng: -1.9095, area: 'Broad Street' },
+  { name: 'The Glee Club Birmingham', lat: 52.4762, lng: -1.8935, area: 'Arcadian Centre' },
+  { name: 'Utilita Arena Birmingham', lat: 52.4783, lng: -1.9126, area: 'King Edward’s Road' },
+  { name: 'Resorts World Arena', lat: 52.4519, lng: -1.7274, area: 'NEC, Marston Green' },
+];
+
 // city -> venue set, matched case-insensitively. Any city not in here gets an honest empty
 // catalogue rather than London (or Staffordshire) data mislabelled under the wrong city — see
 // docs/DECISIONS.md#uk-wide-location.
@@ -62,6 +79,7 @@ const CITY_VENUES: Record<string, typeof LONDON_VENUES> = {
   'stoke-on-trent': STAFFORDSHIRE_VENUES,
   cannock: STAFFORDSHIRE_VENUES,
   stone: STAFFORDSHIRE_VENUES,
+  birmingham: BIRMINGHAM_VENUES,
 };
 
 function seededRandom(seed: number): () => number {

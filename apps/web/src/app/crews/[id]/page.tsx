@@ -302,7 +302,18 @@ export default function CrewPage() {
         return;
       }
       lastIdRef.current = res.messages[res.messages.length - 1].id;
-      setMessages((prev) => (prev ? [...prev, ...res.messages] : res.messages));
+      // Merge by id (not append) and re-sort by createdAt — real bug found via multi-session
+      // testing: two overlapping `poll()` calls (React StrictMode double-invoking this effect
+      // in dev; a slow response racing the next 3s interval tick in any environment) could each
+      // fetch the same message and both get appended, rendering it twice and, since insertion
+      // order no longer matched createdAt order once that happened, out of chronological order
+      // too. A Map keyed by id makes a duplicate fetch a no-op instead of a second bubble, and
+      // the final sort makes rendering correct regardless of what order responses land in.
+      setMessages((prev) => {
+        const byId = new Map((prev ?? []).map((m) => [m.id, m]));
+        for (const m of res.messages) byId.set(m.id, m);
+        return Array.from(byId.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      });
     } catch (err) {
       setMessages((prev) => prev ?? []);
       setError((prev) => prev ?? (err instanceof ApiError ? err.message : 'Could not load chat.'));

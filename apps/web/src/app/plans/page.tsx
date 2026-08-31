@@ -46,7 +46,7 @@ export default function PlansPage() {
   return (
     <div className="v2">
       <div className="v2-shell-desktop">
-        <div className="v2-page" style={{ paddingTop: 28 }}>
+        <div className="v2-page v2-page-wide" style={{ paddingTop: 28 }}>
           <div style={{ marginBottom: 26 }}>
             <h1 className="v2-display" style={{ fontSize: 30, lineHeight: 1.06, marginBottom: 4 }}>Plans</h1>
             <p className="v2-muted" style={{ fontSize: 14.5 }}>What&rsquo;s actually locked in.</p>

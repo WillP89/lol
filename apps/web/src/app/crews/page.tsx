@@ -191,7 +191,7 @@ export default function CrewsPage() {
   return (
     <div className="v2">
       <div className="v2-shell-desktop">
-        <div className="v2-page" style={{ paddingTop: 28 }}>
+        <div className="v2-page v2-page-wide" style={{ paddingTop: 28 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 26 }}>
             <div>
               <h1 className="v2-display" style={{ fontSize: 30, lineHeight: 1.06, marginBottom: 4 }}>Crews</h1>
@@ -218,7 +218,7 @@ export default function CrewsPage() {
           )}
 
           {crews && crews.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="v2-card-grid" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {crews.map((crew) => (
                 <Link key={crew.id} href={`/crews/${crew.id}`} className="v2-card fade-up" style={{ display: 'block', padding: '15px 18px' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>

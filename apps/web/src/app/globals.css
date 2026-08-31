@@ -969,6 +969,89 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   .v2-chip-toggle:not(.selected):hover { box-shadow: var(--v2-shadow-lg) !important; }
 }
 
+/* ---- Home V2's desktop composition ---- */
+/* A soft, alive backdrop behind the feed instead of flat cream — the same decorative-blob
+   treatment the invite-landing page already used, brought to the screen people open most
+   often. Fixed + behind everything, never intercepts clicks. */
+.v2-home-glow {
+  position: fixed;
+  inset: -10%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 32% at 8% 4%, rgba(255, 61, 90, 0.10), transparent 62%),
+    radial-gradient(42% 34% at 96% 18%, rgba(91, 61, 240, 0.09), transparent 60%),
+    radial-gradient(46% 38% at 50% 100%, rgba(255, 178, 56, 0.10), transparent 60%);
+}
+/* A coloured accent rule under the greeting — a small, cheap way to make the header read as a
+   considered moment instead of plain black text on cream, per the brief's "Partiful energy"
+   reference. */
+.v2-home-accent {
+  display: inline-block;
+  width: 34px;
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--v2-brand), var(--v2-gold));
+  margin-bottom: 10px;
+}
+
+.v2-home-split { display: block; position: relative; z-index: 1; }
+.v2-home-rail { display: none; }
+@media (min-width: 1080px) {
+  .v2-home-split {
+    display: flex;
+    align-items: flex-start;
+    gap: 40px;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 40px 40px 60px;
+  }
+  .v2-home-main { flex: 1; min-width: 0; }
+  /* .v2-page's own 560px cap is right for a single mobile-width reading column, but inside the
+     desktop split it just wasted the extra width this container exists to use — the actual
+     "tiny strip in a huge viewport" bug lived here, not in the outer container's own max-width. */
+  .v2-home-main .v2-page { max-width: none; padding-left: 0; padding-right: 0; padding-top: 0; }
+  .v2-home-rail {
+    display: block;
+    width: 320px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 40px;
+  }
+}
+
+/* The desktop Crews rail — a persistent, glanceable list beside the feed (Slack/Discord-shaped,
+   not a stretched mobile column with dead space next to it — the exact "tiny central strip"
+   failure mode the brief calls out). */
+.v2-rail-crew-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  transition: background 0.12s ease;
+}
+@media (hover: hover) {
+  .v2-rail-crew-row:hover { background: var(--v2-bg-deep); }
+}
+
+/* Content-type differentiation on the feed — "Needs you" gets a warm left accent so it reads as
+   a different kind of module from a plain activity row, not an identical white box repeated. */
+.v2-needs-you-card { border-left: 3px solid var(--v2-brand); }
+
+/* A wider desktop reading column for list-shaped pages (Crews, Plans, Profile) that aren't
+   Home's full split-rail composition — same "tiny strip in a huge viewport" problem, a smaller
+   fix: let the column breathe at 880px instead of the mobile-tuned 560px, and let card lists lay
+   out as a real multi-column grid instead of one long stretched-full-width column of rows. */
+@media (min-width: 900px) {
+  .v2-page-wide { max-width: 880px !important; }
+  .v2-card-grid {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
+  }
+}
+
 /* Static (non-interactive) tag pill — Profile's "Into" list. */
 .v2-chip {
   display: inline-flex;

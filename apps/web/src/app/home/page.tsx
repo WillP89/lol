@@ -127,13 +127,17 @@ export default function HomePage() {
 
   return (
     <div className="v2">
+      <div aria-hidden className="v2-home-glow" />
       <div className="v2-shell-desktop">
+        <div className="v2-home-split">
+        <div className="v2-home-main">
         <div className="v2-page" style={{ paddingTop: 28 }}>
           {/* Header — a real page element, not a slim top bar. The avatar here is a mobile-only
               affordance (desktop already has one pinned to the nav rail). */}
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 26 }}>
             <div>
-              <h1 className="v2-display" style={{ fontSize: 34, lineHeight: 1.06, marginBottom: 4 }}>
+              <span className="v2-home-accent" />
+              <h1 className="v2-display" style={{ fontSize: 40, lineHeight: 1.02, marginBottom: 6, letterSpacing: '-0.03em' }}>
                 {greeting()}{firstName && `, ${firstName}`}
               </h1>
               <p className="v2-muted" style={{ fontSize: 14.5 }}>Here&rsquo;s what your people are up to.</p>
@@ -245,7 +249,7 @@ export default function HomePage() {
                   <Link
                     key={c.id}
                     href={`/plans/${c.activePlan!.publicSlug}`}
-                    className="v2-card fade-up"
+                    className="v2-card v2-needs-you-card fade-up"
                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '15px 18px' }}
                   >
                     <div style={{ minWidth: 0 }}>
@@ -379,6 +383,49 @@ export default function HomePage() {
               </div>
             </div>
           )}
+        </div>
+        </div>
+
+        {/* DESKTOP CREWS RAIL — a persistent, glanceable list beside the feed (Slack/Discord-
+            shaped), not a stretched single column with a dead void next to it. Real content,
+            not decoration: every Crew, its own activity line, one tap into any of them. */}
+        {crews && crews.length > 0 && (
+          <div className="v2-home-rail">
+            <div className="v2-card" style={{ padding: '18px 16px' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Your Crews</div>
+                <Link href="/crews?new=1" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 700 }}>+ New</Link>
+              </div>
+              {crews.map((crew) => (
+                <Link key={crew.id} href={`/crews/${crew.id}`} className="v2-rail-crew-row">
+                  <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0, padding: 2, background: `conic-gradient(${crewRing(crew.id)}, ${crewRing(crew.id)}cc, ${crewRing(crew.id)})` }}>
+                    <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'var(--v2-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div className="stack">
+                        {crew.members.slice(0, 2).map((m) => (
+                          <div key={m.user.id} style={{ width: 15, height: 15, borderRadius: '50%', marginLeft: -5, fontSize: 6.5, fontWeight: 800, color: '#fff', background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--v2-surface)' }}>
+                            {initials(m.user.displayName, m.user.email)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crew.name}</div>
+                    <div className="v2-dim" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {crew.upcomingPlan
+                        ? `📅 ${crew.upcomingPlan.title}`
+                        : crew.activePlan
+                          ? `🗳️ ${crew.activePlan.title}`
+                          : crew.latestMessage
+                            ? messagePreview(crew.latestMessage.body)
+                            : 'Say hi'}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
         </div>
       </div>
       <TabBarV2 />

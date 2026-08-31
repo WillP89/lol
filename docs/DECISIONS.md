@@ -630,3 +630,59 @@ dropdown had zero hover feedback on its option buttons (pure inline styles, no w
 matched" state where there was previously just an empty gap. Onboarding's interest chips and
 Crew chat's reaction pills had no hover/press feedback either — same `.v2-chip-toggle` fix
 applied to both.
+
+## #autonomous-rebuild-batch-1
+
+First batch of the autonomous product rebuild (full brief in this session's own history —
+"PLOT — AUTONOMOUS MASTER BUILD"). Verified against a real multi-user local run (3 separate
+browser sessions: create Crew → invite → two people join → chat → reaction → availability poll
+→ both vote → lock it in → Plan appears in Crew/Home/Plans for every session independently →
+survives a full reload), not assumed from reading the code.
+
+**Real bugs found and fixed by that test, not by inspection:**
+- Invite landing showed "You're invited to Weekend Crew" with no attribution — added the Crew
+  creator's name ("Will invited you to..."), since the invite is crew-level (one shared link,
+  not a personalised per-invite token) so the creator is the only honest "who" available.
+- Crew chat's message list had no de-duplication: two overlapping `poll()` calls (React
+  StrictMode double-invoking the effect in dev; a slow response racing the next 3s tick in any
+  environment) rendered the same message twice and, once that happened, out of chronological
+  order — directly observed as a duplicated, "Locking in…" stuck on two copies of the same poll
+  card. Fixed by merging into a Map keyed by message id and re-sorting by `createdAt` on every
+  poll, so a duplicate fetch is now a no-op instead of a second bubble, regardless of cause.
+
+**Desktop composition rebuilt, not just widened** — the real bug behind "no character, huge dead
+space" wasn't `.v2-page`'s own 560px max-width (that's correct for a phone-width reading
+column), it was that the *same* 560px cap applied unchanged inside the desktop shell too, so a
+1600px window rendered a stretched mobile column with a void beside it. Home gets a real
+two-column composition (`.v2-home-split`): the feed at full available width plus a persistent,
+functional "Your Crews" rail (Slack/Discord-shaped, real content — every Crew with its own
+live activity line — not decoration) — `.v2-home-main .v2-page` override removes the inherited
+mobile cap so the feed actually uses the space. A soft decorative background wash
+(`.v2-home-glow`, the same radial-gradient-blob treatment the invite-landing page already used)
+and a bolder, accent-underlined greeting replace flat cream + plain black text. Crews/Plans/
+Profile get a lighter version (`.v2-page-wide`, 880px) plus a real multi-column grid for card
+lists (`.v2-card-grid`) instead of one long full-width stretched row.
+
+**Repo audit for the remaining London hardcoding** the brief asked for: found and fixed four
+spots the earlier `#uk-wide-location` pass had missed because they're admin/ops-only, not
+user-facing — `POST /admin/sync`'s and the manual-experience-entry endpoint's default city, and
+the Ticketmaster/Eventbrite health-check smoke-test city — all now use the same
+`UK_FALLBACK_CENTER` (Birmingham) constant every user-facing fallback already uses, instead of a
+separate, unaudited London default living in ops tooling.
+
+**Also found via that same audit**: Birmingham — this app's own UK-central fallback city, and
+one the brief names directly — had zero mock event or restaurant coverage; a user who landed
+there (by choice, or by the fallback itself) with no live provider configured saw a genuinely
+empty catalogue. Added real Birmingham venues to both mock providers (two of the event venues,
+O2 Institute and Utilita Arena, independently confirmed real by live Ticketmaster results seen
+in production, not just general knowledge).
+
+**Security spot-check** (not a full audit, but the brief's explicit "a user must never change a
+Crew UUID and read another private Crew" case specifically): every Crew-scoped route requires
+`requireUser` and checks real membership (`getCrewDetail`/`isCrewMember`, 404 not 403 on a
+non-member's poll/message lookups so membership in *another* Crew can't be used to probe
+existence) — confirmed by reading every route in `routes/crews.ts` and `routes/plans.ts`, not
+assumed. Session cookie is `httpOnly`, `secure` in production, `sameSite: lax`. No
+`dangerouslySetInnerHTML` anywhere in the web app. Known gap, not yet fixed: no rate limiting
+beyond magic-link requests (message send, poll vote, react, join-crew are all unlimited) —
+low-risk at pilot scale (a handful of real, known friends) but a real pre-launch item.

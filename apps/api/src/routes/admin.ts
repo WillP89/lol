@@ -6,6 +6,7 @@ import { config } from '../lib/config';
 import { syncAllProviders } from '../services/inventorySync';
 import { buildCanonicalKey } from '../services/entityResolution';
 import { computeQualityScore } from '../services/qualityScoring';
+import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 
 /**
  * Internal operator tooling (brief §29 admin console, §64 operating dashboard). Gated by a
@@ -27,9 +28,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/sync', async (request, reply) => {
-    const Schema = z.object({ city: z.string().default('London') });
+    // No hardcoded London default — an operator who forgets to specify a city gets the same
+    // genuinely UK-central fallback every other unset-city path in the app uses (see
+    // docs/DECISIONS.md#uk-wide-location), not a silent London bias in ops tooling nobody
+    // audits as often as user-facing code.
+    const Schema = z.object({ city: z.string().default(UK_FALLBACK_CENTER.name) });
     const parsed = Schema.safeParse(request.body ?? {});
-    const city = parsed.success ? parsed.data.city : 'London';
+    const city = parsed.success ? parsed.data.city : UK_FALLBACK_CENTER.name;
     const results = await syncAllProviders(city);
     return reply.send({ results });
   });
@@ -49,7 +54,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       'ART_CULTURE', 'SPORT', 'FITNESS', 'FESTIVAL', 'DAY_ACTIVITY', 'COMMUNITY',
     ]),
     venueName: z.string().min(1),
-    city: z.string().default('London'),
+    city: z.string().default(UK_FALLBACK_CENTER.name),
     latitude: z.number(),
     longitude: z.number(),
     startsAt: z.string(),

@@ -3,6 +3,7 @@ import type { ProviderAdapter, RawListing, CanonicalListingInput, FetchListingsP
 import { withRetry } from '../../lib/retry';
 import { config } from '../../lib/config';
 import { logger } from '../../lib/logger';
+import { UK_FALLBACK_CENTER } from '../../data/ukPlaces';
 
 /**
  * Real Eventbrite API v3 adapter — self-serve, free (developer.eventbrite.com), no partner
@@ -104,7 +105,10 @@ export const eventbriteProvider: ProviderAdapter = {
       return { status: 'DOWN', error: 'EVENTBRITE_API_KEY not configured', checkedAt: new Date() };
     }
     try {
-      await withRetry((signal) => fetchPage({ city: 'London', fromDate: new Date(), toDate: new Date() }, 0, signal), { attempts: 1 });
+      // Any real UK city works as a smoke test; a genuinely UK-central, high-event-density one
+      // (not London specifically — see docs/DECISIONS.md#uk-wide-location) avoids a false "DOWN"
+      // reading from a smaller town simply having zero events today.
+      await withRetry((signal) => fetchPage({ city: UK_FALLBACK_CENTER.name, fromDate: new Date(), toDate: new Date() }, 0, signal), { attempts: 1 });
       return { status: 'ACTIVE', checkedAt: new Date() };
     } catch (err) {
       return { status: 'DOWN', error: String(err), checkedAt: new Date() };

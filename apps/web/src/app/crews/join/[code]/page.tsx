@@ -10,6 +10,7 @@ interface Preview {
   name: string;
   memberCount: number;
   memberInitials: string[];
+  invitedByName: string | null;
 }
 
 /**
@@ -103,7 +104,9 @@ export default function JoinCrewPage() {
                 </div>
               ))}
             </div>
-            <div className="v2-eyebrow" style={{ marginBottom: 6 }}>You&rsquo;re invited to</div>
+            <div className="v2-eyebrow" style={{ marginBottom: 6 }}>
+              {preview.invitedByName ? `${preview.invitedByName} invited you to` : 'You’re invited to'}
+            </div>
             <h1 className="v2-display" style={{ fontSize: 30, marginBottom: 10 }}>{preview.name}</h1>
             <p className="v2-muted" style={{ marginBottom: 30 }}>
               {preview.memberCount} {preview.memberCount === 1 ? 'person is' : 'people are'} already here.

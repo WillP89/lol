@@ -38,12 +38,25 @@ const STAFFORDSHIRE_RESTAURANTS: Omit<MockRestaurantRaw, 'slotsAt'>[] = [
   { id: 'mock-rst-staffs-4', name: 'The Holly Bush Inn', cuisine: 'Gastropub', lat: 52.8480, lng: -2.1145, areaName: 'Salt', avgSpendMinor: 3400, atmosphere: ['casual', 'group_friendly'] },
 ];
 
+// Real Birmingham restaurants/pubs — added because Birmingham is this app's own UK-central
+// fallback city (UK_FALLBACK_CENTER, data/ukPlaces.ts) and had zero restaurant coverage even
+// though restaurants have no live provider at all (OpenTable is partner-gated — see
+// docs/providers/restaurants.md), so this mock set is the *only* restaurant coverage Birmingham
+// will ever have until a real restaurant provider exists.
+const BIRMINGHAM_RESTAURANTS: Omit<MockRestaurantRaw, 'slotsAt'>[] = [
+  { id: 'mock-rst-bham-1', name: "Adam's", cuisine: 'Modern British', lat: 52.4809, lng: -1.8968, areaName: 'Bennetts Hill', avgSpendMinor: 7500, atmosphere: ['smart_casual', 'date_friendly'] },
+  { id: 'mock-rst-bham-2', name: "Purnell's", cuisine: 'Modern British', lat: 52.4816, lng: -1.8975, areaName: 'Cornwall Street', avgSpendMinor: 8000, atmosphere: ['smart_casual', 'date_friendly'] },
+  { id: 'mock-rst-bham-3', name: 'The Wellington', cuisine: 'Pub', lat: 52.4802, lng: -1.8965, areaName: 'Bennetts Hill', avgSpendMinor: 2200, atmosphere: ['casual', 'group_friendly'] },
+  { id: 'mock-rst-bham-4', name: 'The Actress & Bishop', cuisine: 'Gastropub', lat: 52.4814, lng: -1.8944, areaName: 'Ludgate Hill', avgSpendMinor: 3000, atmosphere: ['casual', 'group_friendly'] },
+];
+
 const CITY_RESTAURANTS: Record<string, Omit<MockRestaurantRaw, 'slotsAt'>[]> = {
   london: LONDON_RESTAURANTS,
   stafford: STAFFORDSHIRE_RESTAURANTS,
   'stoke-on-trent': STAFFORDSHIRE_RESTAURANTS,
   cannock: STAFFORDSHIRE_RESTAURANTS,
   stone: STAFFORDSHIRE_RESTAURANTS,
+  birmingham: BIRMINGHAM_RESTAURANTS,
 };
 
 function generateSlots(daysAhead: number[]): string[] {

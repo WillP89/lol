@@ -49,6 +49,15 @@ export async function joinCrewByInviteCode(userId: string, inviteCode: string) {
  * member count, first-initial avatars) — never message content, never the full member list
  * with emails. See docs/DECISIONS.md#invite-preview.
  */
+/**
+ * The invite landing screen's "Will invited you to Weekend Crew" needs a real name to attribute
+ * to, not just the Crew's — a bare "You're invited to Weekend Crew" is a colder, less trustworthy
+ * moment than naming who it's from (brief: the invite is "one of Plot's most important growth
+ * surfaces"). `inviteCode` is crew-level (one shared link, not a personalised per-invite token —
+ * see Crew.inviteCode in schema.prisma), so there's no record of literally who tapped "share"
+ * for this specific link; the Crew's creator is the honest, always-real signal available instead
+ * of fabricating one.
+ */
 export async function getCrewPreviewByInviteCode(inviteCode: string) {
   const crew = await prisma.crew.findUnique({
     where: { inviteCode },
@@ -56,6 +65,7 @@ export async function getCrewPreviewByInviteCode(inviteCode: string) {
       id: true,
       name: true,
       archivedAt: true,
+      createdById: true,
       members: {
         where: { status: 'ACTIVE' },
         select: { user: { select: { displayName: true, email: true } } },
@@ -67,10 +77,16 @@ export async function getCrewPreviewByInviteCode(inviteCode: string) {
   });
   if (!crew || crew.archivedAt) return null;
 
+  const creator = await prisma.user.findUnique({
+    where: { id: crew.createdById },
+    select: { displayName: true, email: true },
+  });
+
   return {
     name: crew.name,
     memberCount: crew._count.members,
     memberInitials: crew.members.map((m) => (m.user.displayName?.trim() || m.user.email).charAt(0).toUpperCase()),
+    invitedByName: creator ? displayNameOf(creator.displayName, creator.email).split(' ')[0] : null,
   };
 }
 

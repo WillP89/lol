@@ -95,7 +95,7 @@ export default function ProfilePage() {
   if (!user) {
     return (
       <div className="v2">
-        <div className="v2-page" style={{ paddingTop: 28, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="v2-page v2-page-wide" style={{ paddingTop: 28, display: 'flex', flexDirection: 'column', gap: 12 }}>
           {error ? <div style={{ color: 'var(--v2-brand)' }}>{error}</div> : <div style={{ height: 120, borderRadius: 'var(--v2-r-lg)', background: 'var(--v2-bg-deep)' }} />}
         </div>
       </div>
@@ -114,7 +114,7 @@ export default function ProfilePage() {
   return (
     <div className="v2">
       <div className="v2-shell-desktop">
-        <div className="v2-page" style={{ paddingTop: 28 }}>
+        <div className="v2-page v2-page-wide" style={{ paddingTop: 28 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24 }}>
             <div
               style={{
