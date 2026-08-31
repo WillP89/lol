@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
-import { TabBar } from '@/components/TabBar';
+import { TabBarV2 } from '@/components/TabBarV2';
 import { BottomSheet } from '@/components/BottomSheet';
 import { messagePreview } from '@/lib/messagePreview';
 
@@ -17,7 +17,9 @@ interface CrewSummary {
   upcomingPlan: { id: string; title: string; publicSlug: string; startsAt: string | null; venueName: string | null } | null;
 }
 
-const AVATAR_COLORS = ['#ffab2e', '#ff6b4a', '#8fc9a3', '#c9a0dc', '#7fb3d5'];
+// Same palette as Home V2's avatar/ring colours — one shared identity system across the app,
+// not a different set of colours per screen for the same people and Crews.
+const AVATAR_COLORS = ['#ff3d5a', '#ffb238', '#1c7a52', '#5b3df0', '#ff6fae'];
 
 function initials(displayName: string | null, email: string) {
   const source = displayName?.trim() || email;
@@ -53,7 +55,7 @@ function CrewActivityLine({ crew }: { crew: CrewSummary }) {
       ? new Date(crew.upcomingPlan.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
       : null;
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--ink-moss)', fontWeight: 600 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--v2-green)', fontWeight: 700 }}>
         <span>📅</span>
         <span>
           {crew.upcomingPlan.title}
@@ -64,7 +66,7 @@ function CrewActivityLine({ crew }: { crew: CrewSummary }) {
   }
   if (crew.activePlan) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--ink-gold)', fontWeight: 600 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#a06a00', fontWeight: 700 }}>
         <span>🗳️</span>
         <span>
           Deciding: {crew.activePlan.title} · {crew.activePlan.inCount}/{crew.activePlan.totalMembers} in
@@ -74,17 +76,22 @@ function CrewActivityLine({ crew }: { crew: CrewSummary }) {
   }
   if (crew.latestMessage) {
     return (
-      <div className="muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        <span style={{ fontWeight: 600, color: 'var(--ink-text)' }}>{crew.latestMessage.authorName}: </span>
+      <div className="v2-muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ fontWeight: 700, color: 'var(--v2-ink)' }}>{crew.latestMessage.authorName}: </span>
         {messagePreview(crew.latestMessage.body)}
       </div>
     );
   }
-  return <div className="muted" style={{ fontSize: 12.5 }}>Someone has to start it — say hi.</div>;
+  return <div className="v2-dim" style={{ fontSize: 12.5 }}>Someone has to start it — say hi.</div>;
 }
 
 type CreateStep = 'name' | 'invite';
 
+/**
+ * Crews V2 — the list screen brought in line with the rest of the app (see
+ * docs/DECISIONS.md#v2-art-direction): same warm light ground, same card/eyebrow/button
+ * vocabulary as Home, same TabBarV2. Same data/logic as before, only the presentation changed.
+ */
 export default function CrewsPage() {
   const router = useRouter();
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
@@ -168,112 +175,130 @@ export default function CrewsPage() {
     if (newCrewId) router.push(`/crews/${newCrewId}`);
   }
 
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '13px 16px',
+    borderRadius: 14,
+    border: 'none',
+    outline: 'none',
+    background: 'var(--v2-bg-deep)',
+    fontSize: 14.5,
+    fontFamily: 'inherit',
+    color: 'var(--v2-ink)',
+    marginBottom: 10,
+  };
+
   return (
-    <>
-      <nav className="nav">
-        <div className="wordmark">
-          Plot<span>·</span>
-        </div>
-        <button
-          onClick={openCreate}
-          aria-label="New Crew"
-          style={{
-            background: 'var(--ink-gold)',
-            color: 'var(--ink-gold-ink)',
-            border: 'none',
-            width: 34,
-            height: 34,
-            borderRadius: '50%',
-            fontSize: 19,
-            fontWeight: 700,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 6px 16px -6px rgba(255, 171, 46, 0.6)',
-          }}
-        >
-          +
-        </button>
-      </nav>
-      <div className="page">
-        <div className="masthead">
-          <h1 style={{ fontSize: 22 }}>Crews</h1>
-          <p className="muted" style={{ marginBottom: 0 }}>Where your groups live.</p>
-        </div>
-
-        {crews === null && !error && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 14 }}>
-            {[1, 2].map((i) => (
-              <div key={i} className="card" style={{ height: 74, opacity: 0.5 }} />
-            ))}
-          </div>
-        )}
-
-        {crews?.map((crew) => (
-          <Link key={crew.id} href={`/crews/${crew.id}`} className="card fade-up" style={{ display: 'block', textDecoration: 'none' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
-              <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 17 }}>{crew.name}</div>
-              <div className="stack" style={{ flexShrink: 0 }}>
-                {crew.members.slice(0, 4).map((m, i) => (
-                  <div key={i} className="avatar" style={{ width: 24, height: 24, fontSize: 9.5, background: avatarColor(m.user.displayName ?? m.user.email) }}>
-                    {initials(m.user.displayName, m.user.email)}
-                  </div>
-                ))}
-              </div>
+    <div className="v2">
+      <div className="v2-shell-desktop">
+        <div className="v2-page" style={{ paddingTop: 28 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 26 }}>
+            <div>
+              <h1 className="v2-display" style={{ fontSize: 30, lineHeight: 1.06, marginBottom: 4 }}>Crews</h1>
+              <p className="v2-muted" style={{ fontSize: 14.5 }}>Where your groups live.</p>
             </div>
-            <CrewActivityLine crew={crew} />
-            {crew.latestMessage && (crew.upcomingPlan || crew.activePlan) && (
-              <div className="muted" style={{ fontSize: 10.5, marginTop: 4 }}>{timeAgo(crew.latestMessage.createdAt)} ago in chat</div>
-            )}
-          </Link>
-        ))}
-
-        {crews?.length === 0 && (
-          <div className="banner-card" style={{ textAlign: 'center', padding: '32px 20px' }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>👋</div>
-            <p style={{ marginBottom: 4, fontWeight: 700 }}>No Crews yet.</p>
-            <p className="muted" style={{ marginBottom: 14 }}>Start one, or ask a friend for their invite link.</p>
-            <button className="btn btn-primary" onClick={openCreate} style={{ width: 'auto', padding: '10px 20px' }}>
-              Start a Crew
+            <button
+              onClick={openCreate}
+              aria-label="New Crew"
+              className="v2-btn v2-btn-brand"
+              style={{ width: 44, height: 44, padding: 0, fontSize: 22, lineHeight: 1, flexShrink: 0 }}
+            >
+              +
             </button>
           </div>
-        )}
 
-        {error && <div className="error">{error}</div>}
+          {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
+
+          {crews === null && !error && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {[1, 2].map((i) => (
+                <div key={i} style={{ height: 78, borderRadius: 'var(--v2-r-lg)', background: 'var(--v2-bg-deep)' }} />
+              ))}
+            </div>
+          )}
+
+          {crews && crews.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {crews.map((crew) => (
+                <Link key={crew.id} href={`/crews/${crew.id}`} className="v2-card fade-up" style={{ display: 'block', padding: '15px 18px' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
+                    <div className="v2-display" style={{ fontSize: 16.5 }}>{crew.name}</div>
+                    <div className="stack" style={{ flexShrink: 0 }}>
+                      {crew.members.slice(0, 4).map((m, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            width: 24, height: 24, borderRadius: '50%', marginLeft: i === 0 ? 0 : -8, fontSize: 9.5, fontWeight: 800, color: '#fff',
+                            background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            border: '2px solid var(--v2-surface)',
+                          }}
+                        >
+                          {initials(m.user.displayName, m.user.email)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <CrewActivityLine crew={crew} />
+                  {crew.latestMessage && (crew.upcomingPlan || crew.activePlan) && (
+                    <div className="v2-dim" style={{ fontSize: 10.5, marginTop: 4 }}>{timeAgo(crew.latestMessage.createdAt)} ago in chat</div>
+                  )}
+                </Link>
+              ))}
+            </div>
+          )}
+
+          {crews?.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '56px 12px 32px' }}>
+              <div style={{ fontSize: 34, marginBottom: 10 }}>👋</div>
+              <h2 className="v2-display" style={{ fontSize: 26, marginBottom: 10, lineHeight: 1.15 }}>No Crews yet.</h2>
+              <p className="v2-muted" style={{ marginBottom: 22, lineHeight: 1.6, maxWidth: 280, marginInline: 'auto' }}>
+                Start one, or ask a friend for their invite link.
+              </p>
+              <button className="v2-btn v2-btn-brand" onClick={openCreate}>Start a Crew</button>
+            </div>
+          )}
+        </div>
       </div>
 
-      <BottomSheet open={showCreate} onClose={() => !creating && setShowCreate(false)}>
+      <BottomSheet open={showCreate} onClose={() => !creating && setShowCreate(false)} variant="light">
         {step === 'name' ? (
-          <form onSubmit={createCrew} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div className="eyebrow" style={{ marginBottom: 0 }}>New Crew</div>
-            <h2 style={{ fontSize: 19, marginBottom: 2 }}>What&rsquo;s the Crew called?</h2>
-            <input className="field" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. The Boys, Flat 4B" required maxLength={60} />
-            <button className="btn btn-primary" disabled={creating || !name.trim()} type="submit">
+          <form onSubmit={createCrew}>
+            <div className="v2-eyebrow" style={{ marginBottom: 4 }}>New Crew</div>
+            <h2 className="v2-display" style={{ fontSize: 20, marginBottom: 14 }}>What&rsquo;s the Crew called?</h2>
+            <input
+              style={inputStyle}
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. The Boys, Flat 4B"
+              required
+              maxLength={60}
+            />
+            <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} disabled={creating || !name.trim()} type="submit">
               {creating ? 'Creating…' : 'Continue'}
             </button>
           </form>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div className="eyebrow" style={{ marginBottom: 0 }}>You&rsquo;re ready</div>
-            <h2 style={{ fontSize: 19, marginBottom: 2 }}>Invite your people</h2>
-            <p className="muted" style={{ marginBottom: 4 }}>{name} is live. Share the link to get everyone in.</p>
+          <div>
+            <div className="v2-eyebrow" style={{ marginBottom: 4 }}>You&rsquo;re ready</div>
+            <h2 className="v2-display" style={{ fontSize: 20, marginBottom: 6 }}>Invite your people</h2>
+            <p className="v2-muted" style={{ marginBottom: 12, fontSize: 13.5 }}>{name} is live. Share the link to get everyone in.</p>
             {inviteUrl && (
-              <div className="card" style={{ padding: 12 }}>
-                <span className="muted" style={{ wordBreak: 'break-all', fontSize: 12.5 }}>{inviteUrl}</span>
+              <div style={{ background: 'var(--v2-bg-deep)', borderRadius: 14, padding: 12, marginBottom: 12 }}>
+                <span className="v2-muted" style={{ wordBreak: 'break-all', fontSize: 12.5 }}>{inviteUrl}</span>
               </div>
             )}
-            <button className="btn btn-primary" onClick={shareInvite} disabled={!inviteUrl}>
+            <button className="v2-btn v2-btn-brand" style={{ width: '100%', marginBottom: 8 }} onClick={shareInvite} disabled={!inviteUrl}>
               {copied ? '✓ Copied' : 'Share invite link'}
             </button>
-            <button className="btn btn-ghost" onClick={finishCreate}>
+            <button className="v2-btn v2-btn-ghost" style={{ width: '100%' }} onClick={finishCreate}>
               Done
             </button>
           </div>
         )}
       </BottomSheet>
 
-      <TabBar />
-    </>
+      <TabBarV2 />
+    </div>
   );
 }

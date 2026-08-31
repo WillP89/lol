@@ -533,3 +533,34 @@ retried — routing back through the P3018 branch, which only ever resolves a mi
 applied once Postgres itself has said "already exists" for it. Every recovery path in this
 script now ends at a real, Postgres-verified fact, never an assumption about database history
 this environment can't otherwise inspect.
+
+## #v2-crews-and-sheet-fix
+
+Two real gaps between "code says v2" and "actually looks like v2," both found from the user
+directly using the deployed app rather than assumed:
+
+1. **Crews list (`/crews`) was never converted.** Crew chat itself (`/crews/[id]`) already was —
+   Home, Explore, auth and onboarding too — but the list screen you land on from the Crews tab
+   was still the original dark system entirely (`--ink-*` palette, old `TabBar`). Rebuilt on the
+   same primitives as Home V2 (`.v2-page`, `.v2-card`, `.v2-eyebrow`, `TabBarV2`) — same data and
+   logic, only the presentation changed.
+
+2. **`BottomSheet` was never made v2-aware, even on pages that already were.** Crew chat's "+"
+   composer sheet and Crew-info sheet, and Explore's filter sheet, all sit on top of pages
+   styled in the new light system but the shared `BottomSheet` component hardcoded the *old*
+   dark palette (`--ink-surface`) — both variables are defined globally on `:root`, so nothing
+   errored, it just always rendered the wrong one. This is very likely what actually read as
+   "the Crews section is still dark," more than the list page itself: the sheet is what you see
+   the moment you tap "+" mid-chat. Fixed with a `variant="light" | "dark"` prop (default
+   `"dark"`, so every untouched old-system caller — Crews list creation sheet, Profile once
+   converted — needs no change) rather than forking the component.
+
+Also fixed the onboarding-skip bug reported alongside this: `/auth/callback` decided "already
+onboarded, skip straight to Home" based only on whether *any* `tasteProfile` row existed —
+including one saved from testing earlier this session, before today's location step (and its
+`homeLat`/`homeLng` columns) existed at all. A real account hit exactly this: taste data from
+weeks-old testing meant the *current* onboarding wizard, interests screen included, never showed
+again on a fresh sign-in. Now requires `profile.homeLat` to be set too — a signal only the
+current LocationSearch step can produce, so it can't be satisfied by stale pre-migration data.
+
+Plans and Profile are still on the old dark system — not yet converted, next in line.

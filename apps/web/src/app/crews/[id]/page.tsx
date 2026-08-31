@@ -683,7 +683,7 @@ export default function CrewPage() {
 
       {/* THE COMPOSER'S "+" ACTION SHEET — every way of adding something to the conversation
           beyond plain text, one entry point. See docs/DECISIONS.md#decision-objects. */}
-      <BottomSheet open={actionOpen} onClose={closeActionSheet}>
+      <BottomSheet open={actionOpen} onClose={closeActionSheet} variant="light">
         {actionView === 'menu' && (
           <div>
             <div className="v2-eyebrow" style={{ marginBottom: 14 }}>Add to {crew.name}</div>
@@ -803,7 +803,7 @@ export default function CrewPage() {
         )}
       </BottomSheet>
 
-      <BottomSheet open={infoOpen} onClose={() => setInfoOpen(false)}>
+      <BottomSheet open={infoOpen} onClose={() => setInfoOpen(false)} variant="light">
         <div className="v2-eyebrow" style={{ marginBottom: 2 }}>{crew.name}</div>
         <p className="v2-muted" style={{ fontSize: 12.5, marginBottom: 16 }}>{crew.members.length} people</p>
 

@@ -41,8 +41,17 @@ function CallbackInner() {
         // not on the generic Home feed. A returning user with a profile already skips
         // straight to `destination` — the invite, or Home by default.
         try {
-          const { user } = await api.get<{ user: { tasteProfile: unknown } }>('/users/me');
-          router.replace(user.tasteProfile ? destination : `/onboarding?next=${encodeURIComponent(destination)}`);
+          const { user } = await api.get<{
+            user: { tasteProfile: unknown; profile: { homeLat: number | null } | null };
+          }>('/users/me');
+          // `tasteProfile` alone isn't proof this person has been through *this* onboarding —
+          // confirmed live: an account with a taste row saved from testing earlier this session
+          // (before today's location step existed) skipped straight past the interests screen
+          // entirely on a later sign-in. `homeLat` is only ever set by the current
+          // LocationSearch step, so it's a real signal this exact flow was completed, not just
+          // that some taste data exists from however long ago.
+          const onboarded = Boolean(user.tasteProfile) && user.profile?.homeLat != null;
+          router.replace(onboarded ? destination : `/onboarding?next=${encodeURIComponent(destination)}`);
         } catch {
           router.replace(`/onboarding?next=${encodeURIComponent(destination)}`);
         }

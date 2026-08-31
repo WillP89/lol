@@ -294,7 +294,7 @@ export default function ExplorePage() {
         )}
       </div>
 
-      <BottomSheet open={selected !== null} onClose={closeSheet}>
+      <BottomSheet open={selected !== null} onClose={closeSheet} variant="light">
         {selected && !pickingCrew && (
           <div>
             <div style={{ position: 'relative', margin: '-10px -20px 16px', height: 210, background: v2Art(selected.imageUrl, selected.category) }} />
