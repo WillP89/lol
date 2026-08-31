@@ -733,3 +733,37 @@ the screen with no way to scroll to it — the button was rendered entirely off-
 unreachable. Fixed with `maxHeight: calc(100dvh - 40px)` + its own `overflowY: auto`, verified
 against a genuinely short (660px) viewport where the button was previously unreachable and is
 now confirmed reachable via scroll.
+
+## #premium-material-and-motion-pass
+
+Direct response to explicit feedback that the app "feels super basic... no branding, no real
+vibe... just pages with colours" — a request for material depth, motion, texture and a stronger
+brand feel, not another primitive/spacing pass. Real, concrete changes, not a repaint:
+
+- **Film grain** — a near-invisible tiled SVG noise filter over every `.v2` page background
+  (opacity 0.035, `mix-blend-mode: multiply`). The single cheapest thing that separates "flat
+  colour a browser painted" from a material the product actually sits on. Caught and fixed a
+  real stacking bug while building this: a `z-index: 0` positioned overlay actually paints
+  *above* ordinary in-flow content per the CSS2.1 stacking order, not below — used `z-index: -1`
+  instead of the naive `0` + reordering every child's own stacking, which is both simpler and
+  doesn't touch anything else's positioning.
+- **Glass, not flat white, on overlay chrome** — the floating bottom nav pill, the desktop nav
+  rail (now a real gradient block, not a flat plum fill), and every light-variant `BottomSheet`
+  now use `backdrop-filter: blur() saturate()` over a translucent surface. Content surfaces
+  (cards) deliberately stay solid so text keeps full contrast — the glass treatment is reserved
+  for things that float *over* content, which is where it actually reads as a real material.
+- **An actual motion system**, not isolated hover states: a slow (22s), barely-perceptible
+  ambient drift on every decorative gradient background (landing, invite-landing, Home) so the
+  app reads as alive rather than a static image; a staggered entrance (`--stagger-i` + a 45ms
+  delay-per-index) on every card list (Crews, Plans, Home's people row) so a list arrives as a
+  considered sequence, not everything popping in at once; and a real "Lock it in" celebration —
+  brand-coloured dots bursting from centre and fading over ~700ms, the one moment the brief
+  explicitly said deserved a little delight ("we've stopped talking about it, this is
+  happening"). The poll-lock path's navigation now waits ~550ms so the celebration is actually
+  seen before the page changes, instead of being cut off by an instant redirect.
+- **Bolder, more editorial typography** — display type moved from weight 700 to 800 with tighter
+  (-0.03em vs -0.02em) tracking, a small change that reads as more considered/designed rather
+  than default-weight-plus-a-nice-font.
+
+Everything here respects `prefers-reduced-motion`. None of it touches product logic — this is
+presentation only, same data and behaviour as before.

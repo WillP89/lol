@@ -195,8 +195,13 @@ export default function HomePage() {
                 <Link href="/crews" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>See all</Link>
               </div>
               <div style={{ display: 'flex', gap: 18, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
-                {crews.slice(0, 6).map((crew) => (
-                  <Link key={crew.id} href={`/crews/${crew.id}`} className="fade-up" style={{ flex: '0 0 auto', width: 76, textAlign: 'center' }}>
+                {crews.slice(0, 6).map((crew, i) => (
+                  <Link
+                    key={crew.id}
+                    href={`/crews/${crew.id}`}
+                    className="fade-up v2-stagger"
+                    style={{ flex: '0 0 auto', width: 76, textAlign: 'center', ['--stagger-i' as string]: i }}
+                  >
                     <div
                       style={{
                         width: 68,

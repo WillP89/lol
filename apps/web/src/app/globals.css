@@ -711,11 +711,69 @@ input.field:focus {
   color: var(--v2-ink);
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   min-height: 100vh;
+  position: relative;
 }
+/* A near-invisible film grain over the flat cream ground — the single cheapest thing that
+   separates "designed in a browser" from a material a premium product actually sits on (Stripe,
+   Linear, Arc all do a version of this). A tiled SVG noise filter, not an image asset — a few
+   bytes, GPU-cheap, never sharpens or blurs at any zoom. */
+.v2::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  /* Negative, not 0 — a positioned z-index:0 layer actually paints ABOVE ordinary in-flow
+     content per the CSS2.1 stacking order (non-positioned content paints before z-index:0
+     positioned content), which would bury every card under the grain. Negative z-index paints
+     behind ordinary content with no need to touch every other element's own stacking. */
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.035;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* A slow ambient drift on the decorative gradient blobs (landing, auth, invite-landing, Home) —
+   the difference between "a static background image" and something that reads as alive without
+   ever calling attention to itself. 22s, barely perceptible, respects reduced-motion. */
+@keyframes v2Drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(1.5%, -2%) scale(1.03); }
+  66% { transform: translate(-1.5%, 1.5%) scale(0.98); }
+}
+.v2-ambient-glow { animation: v2Drift 22s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .v2-ambient-glow { animation: none; }
+}
+
+/* Staggered list entrance — apply alongside .fade-up with a numeric --stagger-i custom property
+   (0, 1, 2…) set inline per item; each item's fade-in delays a beat after the last, so a list
+   arrives as a considered sequence instead of every row popping in at once. */
+.v2-stagger { animation-delay: calc(var(--stagger-i, 0) * 45ms); }
+
+/* The "Lock it in" moment — the one place a little delight is earned (brief: "we've stopped
+   talking about it, this is happening"). A handful of brand-coloured dots bursting outward from
+   the tapped button and fading, ~700ms, not confetti-everywhere. */
+@keyframes v2LockBurst {
+  0% { transform: translate(var(--tx-start, 0), var(--ty-start, 0)) scale(0.4); opacity: 1; }
+  100% { transform: translate(var(--tx-end, 0), var(--ty-end, 0)) scale(1); opacity: 0; }
+}
+.v2-lock-dot {
+  position: fixed;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 200;
+  animation: v2LockBurst 0.7s cubic-bezier(.2,.8,.3,1) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v2-lock-dot { display: none; }
+}
+
 .v2 h1, .v2 h2, .v2 h3, .v2-display {
   font-family: 'Bricolage Grotesque', 'Inter', sans-serif;
-  letter-spacing: -0.02em;
-  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-weight: 800;
 }
 .v2 a { color: inherit; text-decoration: none; }
 .v2 button { font-family: inherit; }
@@ -802,7 +860,12 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   display: flex;
   align-items: center;
   gap: 4px;
-  background: var(--v2-surface);
+  /* Frosted glass, not a flat white pill — the floating nav sitting over live content below it
+     is exactly the moment a real material read (iOS-native, not "a div with a shadow") lands. */
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   padding: 8px;
   border-radius: 100px;
   box-shadow: var(--v2-shadow-lg);
@@ -846,7 +909,12 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
     bottom: 0;
     width: 84px;
     padding: 22px 0;
-    background: var(--v2-plum);
+    /* A gradient block, not a flat fill — the plum rail is the one place in the whole system
+       that reads as a real colour material rather than a UI colour token; a subtle vertical
+       depth gradient plus an inner-edge highlight is what makes a solid colour panel look like
+       a crafted surface instead of a `background: plum` div. */
+    background: linear-gradient(165deg, #2e1a3d 0%, var(--v2-plum) 45%, #1a0e24 100%);
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.06);
     z-index: 40;
   }
   .v2-nav-rail .v2-rail-mark {
@@ -993,6 +1061,10 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
     radial-gradient(38% 32% at 8% 4%, rgba(255, 61, 90, 0.10), transparent 62%),
     radial-gradient(42% 34% at 96% 18%, rgba(91, 61, 240, 0.09), transparent 60%),
     radial-gradient(46% 38% at 50% 100%, rgba(255, 178, 56, 0.10), transparent 60%);
+  animation: v2Drift 22s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v2-home-glow { animation: none; }
 }
 /* A coloured accent rule under the greeting — a small, cheap way to make the header read as a
    considered moment instead of plain black text on cream, per the brief's "Partiful energy"

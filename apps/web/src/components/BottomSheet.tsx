@@ -26,7 +26,10 @@ export function BottomSheet({
   children: React.ReactNode;
   variant?: 'dark' | 'light';
 }) {
-  const surface = variant === 'light' ? 'var(--v2-surface)' : 'var(--ink-surface)';
+  // The light variant gets a frosted-glass surface (backdrop-filter) instead of flat white —
+  // overlay chrome (sheets, the floating nav) reads as a real material this way; content
+  // surfaces (cards) stay solid so text inside them keeps full contrast.
+  const surface = variant === 'light' ? 'rgba(255, 255, 255, 0.86)' : 'var(--ink-surface)';
   const border = variant === 'light' ? 'var(--v2-line)' : 'var(--ink-border)';
   const handle = variant === 'light' ? 'var(--v2-ink-dim)' : 'var(--ink-border)';
   const radius = variant === 'light' ? 'var(--v2-r-lg) var(--v2-r-lg) 0 0' : '20px 20px 0 0';
@@ -83,6 +86,7 @@ export function BottomSheet({
           transform: open ? 'translateY(0)' : 'translateY(100%)',
           transition: 'transform 0.25s cubic-bezier(.32,.72,0,1)',
           boxShadow: variant === 'light' ? 'var(--v2-shadow-lg)' : '0 -20px 40px -12px rgba(0,0,0,0.5)',
+          ...(variant === 'light' ? { backdropFilter: 'blur(24px) saturate(1.6)', WebkitBackdropFilter: 'blur(24px) saturate(1.6)' } : {}),
         }}
       >
         <div style={{ width: 36, height: 4, borderRadius: 4, background: handle, margin: '4px auto 14px', opacity: variant === 'light' ? 0.35 : 1, position: 'sticky', top: 0 }} />

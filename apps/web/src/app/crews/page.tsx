@@ -219,8 +219,13 @@ export default function CrewsPage() {
 
           {crews && crews.length > 0 && (
             <div className="v2-card-grid" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {crews.map((crew) => (
-                <Link key={crew.id} href={`/crews/${crew.id}`} className="v2-card fade-up" style={{ display: 'block', padding: '15px 18px' }}>
+              {crews.map((crew, i) => (
+                <Link
+                  key={crew.id}
+                  href={`/crews/${crew.id}`}
+                  className="v2-card fade-up v2-stagger"
+                  style={{ display: 'block', padding: '15px 18px', ['--stagger-i' as string]: i }}
+                >
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
                     <div className="v2-display" style={{ fontSize: 16.5 }}>{crew.name}</div>
                     <div className="stack" style={{ flexShrink: 0 }}>

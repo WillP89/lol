@@ -256,6 +256,43 @@ function ReactionRow({
   );
 }
 
+const LOCK_BURST_COLORS = ['var(--v2-brand)', 'var(--v2-gold)', 'var(--v2-plum)', 'var(--v2-green)'];
+
+/** The "Lock it in" celebration — a small, quick burst of dots, not confetti-everywhere. See
+ * globals.css's .v2-lock-dot for the animation itself; this just seeds a handful of them at
+ * randomised angles/colours each time it mounts (keyed by the parent's `celebrating` toggle). */
+function LockCelebration() {
+  const dots = Array.from({ length: 12 }, (_, i) => {
+    const angle = (i / 12) * Math.PI * 2 + Math.random() * 0.3;
+    const dist = 90 + Math.random() * 70;
+    return {
+      id: i,
+      color: LOCK_BURST_COLORS[i % LOCK_BURST_COLORS.length],
+      tx: Math.cos(angle) * dist,
+      ty: Math.sin(angle) * dist,
+    };
+  });
+  return (
+    <div aria-hidden style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 200 }}>
+      {dots.map((d) => (
+        <div
+          key={d.id}
+          className="v2-lock-dot"
+          style={{
+            left: '50%',
+            top: '40%',
+            background: d.color,
+            ['--tx-start' as string]: '0px',
+            ['--ty-start' as string]: '0px',
+            ['--tx-end' as string]: `${d.tx}px`,
+            ['--ty-end' as string]: `${d.ty}px`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 /**
  * Crew/Chat V2 — same data/logic as the original (polling, reactions, plan-card parsing,
  * suggest-to-chat), an entirely different presentation. The brief's own words: "the interface
@@ -300,6 +337,12 @@ export default function CrewPage() {
   // Desktop only — the persistent Crews rail beside the active conversation (see globals.css's
   // .v2-crew-split comment for why this exists instead of just widening the message column).
   const [crewList, setCrewList] = useState<CrewListItem[] | null>(null);
+  // The "Lock it in" celebration — see LockCelebration below and globals.css's .v2-lock-dot.
+  const [celebrating, setCelebrating] = useState(false);
+  const celebrate = useCallback(() => {
+    setCelebrating(true);
+    setTimeout(() => setCelebrating(false), 750);
+  }, []);
 
   useEffect(() => {
     api.get<{ crew: CrewDetail }>(`/crews/${crewId}`).then((res) => setCrew(res.crew)).catch((err) => setError(err instanceof ApiError ? err.message : 'Could not load Crew.'));
@@ -481,6 +524,7 @@ export default function CrewPage() {
     setLockingPlanId(planId);
     try {
       await api.post(`/plans/${planId}/lock`);
+      celebrate();
       await poll();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not lock that in.');
@@ -497,7 +541,11 @@ export default function CrewPage() {
     try {
       const res = await api.post<{ plan: { id: string; publicSlug: string } }>(`/crews/${crewId}/plans/manual`, { title: `${question} — ${option}` });
       await api.post(`/plans/${res.plan.id}/lock`);
-      router.push(`/plans/${res.plan.publicSlug}`);
+      celebrate();
+      // The brief's own words: "we've stopped talking about it, this is happening" deserves a
+      // beat to actually be seen — navigating away instantly would cut the celebration off
+      // before it plays, so the redirect waits just long enough for it to land.
+      setTimeout(() => router.push(`/plans/${res.plan.publicSlug}`), 550);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not lock that in.');
       setLockingPlanId(null);
@@ -915,6 +963,7 @@ export default function CrewPage() {
         )}
       </BottomSheet>
 
+      {celebrating && <LockCelebration />}
       <TabBarV2 />
     </div>
   );

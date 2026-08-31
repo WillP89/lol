@@ -19,6 +19,7 @@ export default function LandingPage() {
             uses, so the very first thing anyone sees already belongs to Plot's own language. */}
         <div
           aria-hidden
+          className="v2-ambient-glow"
           style={{
             position: 'absolute', inset: '-20%', zIndex: 0,
             background:

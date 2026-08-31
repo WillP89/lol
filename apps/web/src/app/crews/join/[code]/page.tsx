@@ -70,6 +70,7 @@ export default function JoinCrewPage() {
     <div className="v2" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <div
         aria-hidden
+        className="v2-ambient-glow"
         style={{
           position: 'fixed', inset: '-20%', zIndex: 0,
           background: 'radial-gradient(50% 40% at 50% 0%, rgba(255,61,90,0.14), transparent 60%), radial-gradient(55% 45% at 50% 100%, rgba(91,61,240,0.12), transparent 62%)',

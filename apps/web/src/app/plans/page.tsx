@@ -75,11 +75,16 @@ export default function PlansPage() {
 
           {plans && plans.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {plans.map((plan) => {
+              {plans.map((plan, i) => {
                 const badge = dateBadge(plan.startsAt);
                 const price = formatPriceFrom(plan.priceMinMinor, plan.currency);
                 return (
-                  <Link key={plan.id} href={`/plans/${plan.publicSlug}`} className="v2-card fade-up" style={{ display: 'flex', gap: 12, alignItems: 'stretch', padding: 10 }}>
+                  <Link
+                    key={plan.id}
+                    href={`/plans/${plan.publicSlug}`}
+                    className="v2-card fade-up v2-stagger"
+                    style={{ display: 'flex', gap: 12, alignItems: 'stretch', padding: 10, ['--stagger-i' as string]: i }}
+                  >
                     <div
                       style={{
                         flexShrink: 0,
