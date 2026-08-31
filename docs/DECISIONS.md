@@ -1247,3 +1247,30 @@ free" (opens the availability poll), "Find something for the Crew" (opens Sugges
 "Say hello" (pre-fills the composer and focuses it). Deliberately not emoji/icon buttons — each
 one states the actual outcome in plain English, matching the emoji-removal direction for the
 rest of the pass.
+
+#### in-maybe-pass-who — "who's said what," everywhere there's a group tally
+
+Real pilot feedback: "the user wants to see WHO selected each state" — a bare "3 in" or "2
+voted" was never enough once a Crew grows past a couple of people. One shared bottom sheet
+(`voterSheetData`, computed live from `planCards`/`messages` on every render — not a frozen
+snapshot taken when it opened, so it keeps moving if someone else votes while it's open) now
+backs three surfaces: a Plan's In/Maybe/Can't breakdown, a poll's (including an Availability
+check-in — same `PollCard` component) per-option breakdown, and a message's reactions, each
+grouped by name with avatars, not just counts.
+
+Backend change to support the reactions case: `aggregateReactions` (services/chat.ts) already
+had each reaction's `userId` on hand for the count — it just threw it away. Added `reactedBy:
+string[]` to `ReactionSummary` so the client can show who, not only how many; `golden-path.test.ts`'s
+reaction assertions updated accordingly (membership checks via `expect.arrayContaining`, since
+reactor order isn't guaranteed).
+
+A real bug caught by testing this live rather than trusting the code, exactly the kind the
+pilot pass exists to catch: the first version nested a clickable div (`role="button"`) inside an
+existing `<button>` (the poll option) and inside a `<Link>` (the EventCard's `<a>` wrapper) —
+invalid HTML, and Chromium silently refuses to hit-test the inner element reliably. Multi-user
+Playwright runs against a live dev server (not a read-through of the JSX) reproduced this as a
+real click timeout, not a flaky test — the fix was structural: every "who said what" trigger is
+now a genuine sibling `<button>`, never nested inside another interactive element. Verified with
+two real, separately-authenticated users: a poll where both vote Friday, a plan where one votes
+In and the other Maybe, and a message both react to — each sheet correctly named both people in
+the right bucket, and tapping it never navigated away from the conversation.

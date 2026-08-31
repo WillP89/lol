@@ -169,7 +169,7 @@ describe('golden path: signup through Rewind', () => {
       payload: { emoji: '👍' },
     });
     expect(samReact.statusCode).toBe(200);
-    expect(samReact.json()).toEqual({ reactions: [{ emoji: '👍', count: 1, reactedByMe: true }] });
+    expect(samReact.json()).toEqual({ reactions: [{ emoji: '👍', count: 1, reactedByMe: true, reactedBy: [sessions.sam.userId] }] });
 
     const benReact = await app.inject({
       method: 'POST',
@@ -177,14 +177,17 @@ describe('golden path: signup through Rewind', () => {
       headers: { cookie: sessions.ben.cookie },
       payload: { emoji: '👍' },
     });
-    expect(benReact.json()).toEqual({ reactions: [{ emoji: '👍', count: 2, reactedByMe: true }] });
+    // reactedBy carries the actual named people behind the tally (see docs/DECISIONS.md#in-
+    // maybe-pass-who) — order isn't guaranteed, so this checks membership, not array identity.
+    const benReactBody = benReact.json() as { reactions: { emoji: string; count: number; reactedByMe: boolean; reactedBy: string[] }[] };
+    expect(benReactBody.reactions).toEqual([{ emoji: '👍', count: 2, reactedByMe: true, reactedBy: expect.arrayContaining([sessions.sam.userId, sessions.ben.userId]) }]);
 
     // A third viewer (Alex, who hasn't reacted) sees the same aggregate count but
     // reactedByMe: false — the flag is per-viewer, not baked into the message.
     const listAsAlex = await app.inject({ method: 'GET', url: `/crews/${crewId}/messages`, headers: { cookie: sessions.alex.cookie } });
-    const { messages } = listAsAlex.json() as { messages: { id: string; reactions: { emoji: string; count: number; reactedByMe: boolean }[] }[] };
+    const { messages } = listAsAlex.json() as { messages: { id: string; reactions: { emoji: string; count: number; reactedByMe: boolean; reactedBy: string[] }[] }[] };
     const seen = messages.find((m) => m.id === message.id)!;
-    expect(seen.reactions).toEqual([{ emoji: '👍', count: 2, reactedByMe: false }]);
+    expect(seen.reactions).toEqual([{ emoji: '👍', count: 2, reactedByMe: false, reactedBy: expect.arrayContaining([sessions.sam.userId, sessions.ben.userId]) }]);
 
     // Sam taps the same emoji again — toggles their own reaction off.
     const samToggleOff = await app.inject({
@@ -193,7 +196,7 @@ describe('golden path: signup through Rewind', () => {
       headers: { cookie: sessions.sam.cookie },
       payload: { emoji: '👍' },
     });
-    expect(samToggleOff.json()).toEqual({ reactions: [{ emoji: '👍', count: 1, reactedByMe: false }] });
+    expect(samToggleOff.json()).toEqual({ reactions: [{ emoji: '👍', count: 1, reactedByMe: false, reactedBy: [sessions.ben.userId] }] });
 
     // Ben switches to a different emoji — one reaction per user, not accumulating.
     const benSwitch = await app.inject({
@@ -202,7 +205,7 @@ describe('golden path: signup through Rewind', () => {
       headers: { cookie: sessions.ben.cookie },
       payload: { emoji: '❤️' },
     });
-    expect(benSwitch.json()).toEqual({ reactions: [{ emoji: '❤️', count: 1, reactedByMe: true }] });
+    expect(benSwitch.json()).toEqual({ reactions: [{ emoji: '❤️', count: 1, reactedByMe: true, reactedBy: [sessions.ben.userId] }] });
 
     const invalidEmoji = await app.inject({
       method: 'POST',

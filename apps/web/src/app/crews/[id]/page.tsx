@@ -24,6 +24,7 @@ interface Reaction {
   emoji: string;
   count: number;
   reactedByMe: boolean;
+  reactedBy: string[];
 }
 
 interface Poll {
@@ -62,6 +63,21 @@ interface ExploreExperienceLite {
 const REACTION_CHOICES = ['👍', '❤️', '😂', '🎉'];
 
 type MemberLite = { user: { id: string; displayName: string | null; email: string } };
+
+/** One named group in the "who's behind this tally" sheet — see `computeVoterSheet` below. A
+ * poll option opens with a single group; an IN/MAYBE/CAN'T breakdown or a multi-emoji reaction
+ * opens with one group per bucket. */
+type VoterGroup = { label: string; userIds: string[] };
+/** What to show is resolved from a lightweight *source*, not a frozen snapshot of ids — the
+ * brief's own requirement is "live-updating": if someone else votes while the sheet is open, it
+ * should visibly move, the same way the underlying card does. Storing "which plan/poll/message"
+ * and re-deriving the actual group membership from current state on every render achieves that
+ * for free, using data CrewPage is already re-fetching on its poll interval. */
+type VoterSheetSource =
+  | { kind: 'plan'; planId: string }
+  | { kind: 'poll'; messageId: string }
+  | { kind: 'reactions'; messageId: string };
+type OpenVoterSheet = (source: VoterSheetSource) => void;
 
 interface PlanCardData {
   plan: {
@@ -151,7 +167,7 @@ function planStageCopy(status: string, pulse: PlanCardData['pulse'], proposerNam
  * open Plan gets its own one-tap "Lock it in" right here — the payoff moment shouldn't require
  * navigating away from the conversation it happened in. */
 function EventCard({
-  data, members, me, onLock, locking, justLocked, onVote,
+  data, members, me, onLock, locking, justLocked, onVote, onExpandVoters,
 }: {
   data: PlanCardData;
   members: MemberLite[];
@@ -160,6 +176,7 @@ function EventCard({
   locking: boolean;
   justLocked: boolean;
   onVote: (planId: string, vote: 'in' | 'maybe' | 'out') => void;
+  onExpandVoters: OpenVoterSheet;
 }) {
   const exp = data.plan.experience;
   const lockable = LOCKABLE_STATUSES.has(data.plan.status);
@@ -167,7 +184,10 @@ function EventCard({
   const proposer = members.find((m) => m.user.id === data.plan.proposedByUserId)?.user;
   const proposerName = proposer ? displayNameOf(proposer.displayName, proposer.email).split(' ')[0] : 'Someone';
   const inVoterIds = data.plan.votes.filter((v) => v.vote === 'IN').map((v) => v.userId);
+  const maybeVoterIds = data.plan.votes.filter((v) => v.vote === 'MAYBE').map((v) => v.userId);
+  const outVoterIds = data.plan.votes.filter((v) => v.vote === 'OUT').map((v) => v.userId);
   const myVote = data.plan.votes.find((v) => v.userId === me)?.vote ?? null;
+  const openBreakdown = () => onExpandVoters({ kind: 'plan', planId: data.plan.id });
   return (
     <div className={`v2-hoverable${justLocked ? ' v2-confirm-transition' : ' fade-up'}`} style={{ width: 264, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)' }}>
       <Link href={`/plans/${data.plan.publicSlug}`} style={{ display: 'block' }}>
@@ -190,15 +210,32 @@ function EventCard({
             </div>
           )}
           {/* The actual life-cycle line — different words at each stage, not the same "X/Y in"
-              counter throughout — plus the avatars of who's actually in, converging visibly. */}
+              counter throughout. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: locked ? 'var(--v2-green)' : 'var(--v2-ink)' }}>
               {locked ? '🔒 Locked in' : planStageCopy(data.plan.status, data.pulse, proposerName)}
             </span>
           </div>
-          <OptionVoters voterIds={inVoterIds} members={members} />
         </div>
       </Link>
+      {/* Who's actually in, converging visibly — and the real "who selected each state" fix: a
+          bare "3 in" was never enough detail once the group grows past a couple of people.
+          Tapping breaks down all three buckets (In/Maybe/Can't) by name, live-updating as votes
+          change. Deliberately a sibling of the Link above, not nested inside it — a clickable
+          element inside an <a> is invalid HTML and unreliable to tap on some browsers. */}
+      {(inVoterIds.length + maybeVoterIds.length + outVoterIds.length) > 0 && (
+        <button
+          type="button"
+          onClick={openBreakdown}
+          className="v2-tap-feedback"
+          style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', margin: 0, padding: '0 14px 10px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}
+        >
+          <OptionVoters voterIds={inVoterIds} members={members} />
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--v2-ink-dim)', textDecoration: 'underline', textUnderlineOffset: 2 }}>
+            {inVoterIds.length} in · {maybeVoterIds.length} maybe · {outVoterIds.length} can&rsquo;t make it
+          </span>
+        </button>
+      )}
       {/* Voting happens right here — no detour to a separate page to say "I'm in". Hidden once
           locked: the decision is made, voting on it further is meaningless. */}
       {!locked && (
@@ -236,12 +273,20 @@ function EventCard({
 /** Small overlapping avatar chips for who picked a given option — this is the actual point of
  * exposing `votersByOption`: seeing the group visibly forming around a choice, not just a
  * number climbing. New voters mount as genuinely new keyed DOM nodes, so `.v2-pop-in` fires on
- * them automatically with zero animation-library wiring. */
-function OptionVoters({ voterIds, members }: { voterIds: string[]; members: MemberLite[] }) {
+ * them automatically with zero animation-library wiring.
+ *
+ * `onExpand`, when given, makes the whole cluster tappable — the pilot-readiness fix for "the
+ * user wants to see WHO selected each state": a stack of initials tells you a group exists but
+ * not who's actually in it. Tapping opens the full named breakdown (see `openVoterSheet`). */
+function OptionVoters({ voterIds, members, onExpand }: { voterIds: string[]; members: MemberLite[]; onExpand?: () => void }) {
   if (voterIds.length === 0) return null;
   const shown = voterIds.slice(0, 4);
   return (
-    <div className="stack" style={{ marginTop: 4 }}>
+    <div
+      className="stack"
+      style={{ marginTop: 4, cursor: onExpand ? 'pointer' : undefined }}
+      {...(onExpand ? { role: 'button', tabIndex: 0, onClick: (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); onExpand(); }, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); onExpand(); } } } : {})}
+    >
       {shown.map((id) => {
         const m = members.find((x) => x.user.id === id)?.user;
         if (!m) return null;
@@ -275,13 +320,15 @@ function OptionVoters({ voterIds, members }: { voterIds: string[]; members: Memb
  * into a real Plan. `justLocked` renders the same card in its confirmed state for a beat before
  * the real "locked in" system message replaces it — the state TRANSFORMATION is the point, not
  * only the confetti burst alongside it. */
-function PollCard({ poll, onVote, members, onLockOption, locking, justLocked }: {
+function PollCard({ poll, messageId, onVote, members, onLockOption, locking, justLocked, onExpandVoters }: {
   poll: Poll;
+  messageId: string;
   onVote: (option: string) => void;
   members: MemberLite[];
   onLockOption: (option: string) => void;
   locking: boolean;
   justLocked: string | null;
+  onExpandVoters: OpenVoterSheet;
 }) {
   const leading = poll.totalVotes > 0 ? poll.options.reduce((a, b) => (poll.counts[b] > poll.counts[a] ? b : a)) : null;
 
@@ -335,6 +382,19 @@ function PollCard({ poll, onVote, members, onLockOption, locking, justLocked }: 
           );
         })}
       </div>
+      {/* "Who's voted" — one sheet covering every option, opened by a real sibling button, not
+          a clickable nested inside each option's own <button> (which is invalid HTML and
+          unreliable to tap on some browsers). */}
+      {poll.totalVotes > 0 && (
+        <button
+          type="button"
+          onClick={() => onExpandVoters({ kind: 'poll', messageId })}
+          className="v2-tap-feedback"
+          style={{ display: 'block', width: '100%', padding: '2px 0 8px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--v2-ink-dim)', textDecoration: 'underline', textUnderlineOffset: 2 }}
+        >
+          See who voted
+        </button>
+      )}
       {leading && (
         <button
           onClick={() => onLockOption(leading)}
@@ -355,15 +415,18 @@ function ReactionRow({
   onTogglePicker,
   onPick,
   align,
+  onExpandVoters,
 }: {
   reactions: Reaction[];
   pickerOpen: boolean;
   onTogglePicker: () => void;
   onPick: (emoji: string) => void;
   align: 'flex-end' | 'flex-start';
+  onExpandVoters: () => void;
 }) {
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4, justifyContent: align === 'flex-end' ? 'flex-end' : 'flex-start' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: align === 'flex-end' ? 'flex-end' : 'flex-start', gap: 2, marginTop: 4 }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: align === 'flex-end' ? 'flex-end' : 'flex-start' }}>
       {reactions.map((r) => (
         <button
           // Keying on count too forces a fresh DOM node whenever the tally changes — which is
@@ -390,6 +453,19 @@ function ReactionRow({
       ) : (
         <button onClick={onTogglePicker} aria-label="Add reaction" className="v2-tap-feedback" style={{ fontSize: 11, padding: '2px 7px', borderRadius: 100, border: 'none', background: 'transparent', color: 'var(--v2-ink-dim)', cursor: 'pointer' }}>+</button>
       )}
+    </div>
+    {/* "Who reacted" — separate from the tap-to-react chips above (which react on tap), so
+        seeing names never accidentally changes your own reaction. */}
+    {reactions.length > 0 && (
+      <button
+        type="button"
+        onClick={onExpandVoters}
+        className="v2-tap-feedback"
+        style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer', fontSize: 10.5, fontWeight: 600, color: 'var(--v2-ink-dim)' }}
+      >
+        {reactions.reduce((n, r) => n + r.count, 0) === 1 ? '1 person reacted' : `${reactions.reduce((n, r) => n + r.count, 0)} people reacted`}
+      </button>
+    )}
     </div>
   );
 }
@@ -496,6 +572,12 @@ export default function CrewPage() {
   // Desktop only — the persistent Crews rail beside the active conversation (see globals.css's
   // .v2-crew-split comment for why this exists instead of just widening the message column).
   const [crewList, setCrewList] = useState<CrewListItem[] | null>(null);
+  // "Who's behind this tally" — see docs/DECISIONS.md#in-maybe-pass-who. One shared sheet for
+  // every group-state surface (plan votes, poll options, reactions) rather than a bespoke
+  // popover per feature. Stores only a *source* (which plan/poll/message), not a frozen
+  // snapshot — see VoterSheetSource's own comment for why that's what makes it live-update.
+  const [voterSheetSource, setVoterSheetSource] = useState<VoterSheetSource | null>(null);
+  const openVoterSheet: OpenVoterSheet = useCallback((source) => setVoterSheetSource(source), []);
   // The "Lock it in" celebration — see LockCelebration below and globals.css's .v2-lock-dot.
   const [celebrating, setCelebrating] = useState(false);
   const celebrate = useCallback(() => {
@@ -645,14 +727,16 @@ export default function CrewPage() {
     setMessages((prev) => prev?.map((m) => {
       if (m.id !== messageId) return m;
       const mine = m.reactions.find((r) => r.reactedByMe);
-      let next = m.reactions.map((r) => ({ ...r }));
+      let next = m.reactions.map((r) => ({ ...r, reactedBy: [...r.reactedBy] }));
       if (mine) {
-        next = next.map((r) => (r.emoji === mine.emoji ? { ...r, count: r.count - 1, reactedByMe: false } : r)).filter((r) => r.count > 0);
+        next = next
+          .map((r) => (r.emoji === mine.emoji ? { ...r, count: r.count - 1, reactedByMe: false, reactedBy: r.reactedBy.filter((id) => id !== me) } : r))
+          .filter((r) => r.count > 0);
       }
       if (!mine || mine.emoji !== emoji) {
         const target = next.find((r) => r.emoji === emoji);
-        if (target) { target.count += 1; target.reactedByMe = true; }
-        else next.push({ emoji, count: 1, reactedByMe: true });
+        if (target) { target.count += 1; target.reactedByMe = true; if (me) target.reactedBy.push(me); }
+        else next.push({ emoji, count: 1, reactedByMe: true, reactedBy: me ? [me] : [] });
       }
       return { ...m, reactions: next };
     }) ?? prev);
@@ -917,6 +1001,36 @@ export default function CrewPage() {
   const upcomingPlan = crew.plans.find((p) => p.status === 'LOCKED' || p.status === 'BOOKED');
   const context = upcomingPlan ?? activePlan;
 
+  // Re-derived from the live `planCards`/`messages` state on every render (not a snapshot taken
+  // when the sheet opened) — see VoterSheetSource's comment.
+  let voterSheetData: { title: string; groups: VoterGroup[] } | null = null;
+  if (voterSheetSource?.kind === 'plan') {
+    const entry = Object.values(planCards).find((v) => v !== 'loading' && v !== 'error' && v.plan.id === voterSheetSource.planId) as PlanCardData | undefined;
+    if (entry) {
+      voterSheetData = {
+        title: entry.plan.title,
+        groups: [
+          { label: 'In', userIds: entry.plan.votes.filter((v) => v.vote === 'IN').map((v) => v.userId) },
+          { label: 'Maybe', userIds: entry.plan.votes.filter((v) => v.vote === 'MAYBE').map((v) => v.userId) },
+          { label: "Can't make it", userIds: entry.plan.votes.filter((v) => v.vote === 'OUT').map((v) => v.userId) },
+        ],
+      };
+    }
+  } else if (voterSheetSource?.kind === 'poll') {
+    const msg = messages?.find((m) => m.id === voterSheetSource.messageId);
+    if (msg?.poll) {
+      voterSheetData = {
+        title: msg.poll.question,
+        groups: msg.poll.options.map((option) => ({ label: option, userIds: msg.poll!.votersByOption[option] ?? [] })),
+      };
+    }
+  } else if (voterSheetSource?.kind === 'reactions') {
+    const msg = messages?.find((m) => m.id === voterSheetSource.messageId);
+    if (msg) {
+      voterSheetData = { title: 'Reactions', groups: msg.reactions.map((r) => ({ label: r.emoji, userIds: r.reactedBy })) };
+    }
+  }
+
   return (
     <div className="v2">
       <div className="v2-shell-desktop v2-crew-split">
@@ -1067,11 +1181,13 @@ export default function CrewPage() {
                     {m.poll ? (
                       <PollCard
                         poll={m.poll}
+                        messageId={m.id}
                         members={crew.members}
                         onVote={(option) => votePollOption(m.id, option)}
                         locking={lockingPlanId === m.id}
                         onLockOption={(option) => lockPollOption(m.id, m.poll!.question, option)}
                         justLocked={justLockedByMessage[m.id] ?? null}
+                        onExpandVoters={openVoterSheet}
                       />
                     ) : planMatch && cardData && cardData !== 'loading' && cardData !== 'error' ? (
                       <EventCard
@@ -1082,6 +1198,7 @@ export default function CrewPage() {
                         locking={lockingPlanId === cardData.plan.id}
                         justLocked={justLockedPlanIds.has(cardData.plan.id)}
                         onVote={votePlanCard}
+                        onExpandVoters={openVoterSheet}
                       />
                     ) : planMatch && cardData === 'loading' ? (
                       <div style={{ width: 260, height: 120, borderRadius: 16, background: 'var(--v2-bg-deep)' }} />
@@ -1099,7 +1216,16 @@ export default function CrewPage() {
                         {m.body}
                       </div>
                     )}
-                    {!planMatch && !m.poll && !failed && <ReactionRow reactions={m.reactions} pickerOpen={pickerFor === m.id} onTogglePicker={() => setPickerFor(m.id)} onPick={(emoji) => react(m.id, emoji)} align={mine ? 'flex-end' : 'flex-start'} />}
+                    {!planMatch && !m.poll && !failed && (
+                      <ReactionRow
+                        reactions={m.reactions}
+                        pickerOpen={pickerFor === m.id}
+                        onTogglePicker={() => setPickerFor(m.id)}
+                        onPick={(emoji) => react(m.id, emoji)}
+                        align={mine ? 'flex-end' : 'flex-start'}
+                        onExpandVoters={() => openVoterSheet({ kind: 'reactions', messageId: m.id })}
+                      />
+                    )}
                     {failed ? (
                       <button onClick={() => retrySend(m.id)} className="v2-tap-feedback" style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3, border: 'none', background: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--v2-error)', padding: 0 }}>
                         Didn&rsquo;t send — retry
@@ -1399,6 +1525,45 @@ export default function CrewPage() {
           </button>
         ) : (
           <button onClick={getInviteLink} className="v2-btn v2-btn-ghost">Get invite link</button>
+        )}
+      </BottomSheet>
+
+      {/* "Who's behind this" — the shared sheet for every group-state tally (plan votes, poll
+          options, reactions). Re-derived live from `planCards`/`messages` on every render (see
+          `voterSheetData` above), so it keeps moving while it's open if someone else votes. */}
+      <BottomSheet open={voterSheetSource !== null} onClose={() => setVoterSheetSource(null)}>
+        {voterSheetData && (
+          <div>
+            <div className="v2-eyebrow" style={{ marginBottom: 2 }}>{voterSheetData.title}</div>
+            <p className="v2-muted" style={{ fontSize: 12.5, marginBottom: 18 }}>Who&rsquo;s said what</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {voterSheetData.groups.map((group) => (
+                <div key={group.label}>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 8 }}>
+                    {group.label} <span className="v2-dim" style={{ fontWeight: 600 }}>· {group.userIds.length}</span>
+                  </div>
+                  {group.userIds.length === 0 ? (
+                    <p className="v2-dim" style={{ fontSize: 12.5, margin: 0 }}>No one yet.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {group.userIds.map((id) => {
+                        const m = crew.members.find((x) => x.user.id === id)?.user;
+                        if (!m) return null;
+                        return (
+                          <div key={id} className="v2-pop-in" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                            <div style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, fontSize: 10, fontWeight: 800, color: '#fff', background: avatarColor(m.displayName ?? m.email), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {initials(m.displayName, m.email)}
+                            </div>
+                            <span style={{ fontSize: 13.5, fontWeight: 600 }}>{displayNameOf(m.displayName, m.email)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </BottomSheet>
 

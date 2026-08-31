@@ -28,13 +28,18 @@ export interface ReactionSummary {
   emoji: string;
   count: number;
   reactedByMe: boolean;
+  // Who, not just how many — see docs/DECISIONS.md#in-maybe-pass-who: the pilot-readiness pass
+  // requires tapping any group tally (reaction, vote, poll option, RSVP) to reveal the actual
+  // named people behind it, not just a number.
+  reactedBy: string[];
 }
 
 function aggregateReactions(reactions: RawReaction[], viewerId: string): ReactionSummary[] {
-  const byEmoji = new Map<string, { count: number; reactedByMe: boolean }>();
+  const byEmoji = new Map<string, { count: number; reactedByMe: boolean; reactedBy: string[] }>();
   for (const r of reactions) {
-    const entry = byEmoji.get(r.emoji) ?? { count: 0, reactedByMe: false };
+    const entry = byEmoji.get(r.emoji) ?? { count: 0, reactedByMe: false, reactedBy: [] };
     entry.count += 1;
+    entry.reactedBy.push(r.userId);
     if (r.userId === viewerId) entry.reactedByMe = true;
     byEmoji.set(r.emoji, entry);
   }
