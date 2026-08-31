@@ -41,12 +41,14 @@ function Card({
   size,
   selected,
   onClick,
+  onHoverChange,
   id,
 }: {
   exp: ExploreExperience;
   size: 'hero' | 'grid';
   selected?: boolean;
   onClick: () => void;
+  onHoverChange?: (hovering: boolean) => void;
   id?: string;
 }) {
   const price = formatPrice(exp);
@@ -54,6 +56,8 @@ function Card({
     <button
       id={id}
       onClick={onClick}
+      onMouseEnter={() => onHoverChange?.(true)}
+      onMouseLeave={() => onHoverChange?.(false)}
       className="fade-up v2-hoverable"
       style={{
         display: 'block',
@@ -99,6 +103,9 @@ export default function ExplorePage() {
   const [mobileMap, setMobileMap] = useState(false);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Desktop-only hover sync between the result list and the map — see ExploreMapV2's own
+  // comment. Meaningless on touch (no hover), so it's simply never set there.
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selected, setSelected] = useState<ExploreExperience | null>(null);
   const [pickingCrew, setPickingCrew] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
@@ -268,9 +275,26 @@ export default function ExplorePage() {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        {hero && <Card exp={hero} size="hero" selected={hero.id === selectedId} onClick={() => openDetail(hero)} id={`v2-exp-${hero.id}`} />}
+        {hero && (
+          <Card
+            exp={hero}
+            size="hero"
+            selected={hero.id === selectedId}
+            onClick={() => openDetail(hero)}
+            onHoverChange={(h) => setHoveredId(h ? hero.id : null)}
+            id={`v2-exp-${hero.id}`}
+          />
+        )}
         {rest.map((exp) => (
-          <Card key={exp.id} exp={exp} size="grid" selected={exp.id === selectedId} onClick={() => openDetail(exp)} id={`v2-exp-${exp.id}`} />
+          <Card
+            key={exp.id}
+            exp={exp}
+            size="grid"
+            selected={exp.id === selectedId}
+            onClick={() => openDetail(exp)}
+            onHoverChange={(h) => setHoveredId(h ? exp.id : null)}
+            id={`v2-exp-${exp.id}`}
+          />
         ))}
       </div>
     </div>
@@ -286,7 +310,7 @@ export default function ExplorePage() {
     }
     return (
       <div style={{ position: 'relative', height: '100%', width: '100%' }}>
-        <ExploreMapV2 experiences={searched} center={center} selectedId={selectedId} onMarkerClick={(exp) => setSelectedId(exp.id)} />
+        <ExploreMapV2 experiences={searched} center={center} selectedId={selectedId} hoveredId={hoveredId} onMarkerClick={(exp) => setSelectedId(exp.id)} />
         {/* Real bug, confirmed via a live screenshot: `selectedId` stays set once the full
             detail sheet opens (openDetail sets both), so this compact preview kept rendering
             underneath the sheet — two cards for the same event stacked on top of each other.

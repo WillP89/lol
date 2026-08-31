@@ -1066,3 +1066,19 @@ straight to Google Maps for the venue — a contextual action that only appears 
 plan, not cluttering every row regardless of urgency. Verified end-to-end: logged a manual plan
 for 3 hours from now, locked it, confirmed it lands under "🔥 Tonight" with the Directions
 shortcut visible, via screenshot.
+
+**Explore ↔ Map hover sync** (`ExploreMapV2.tsx`/`explore/page.tsx`) — desktop only (no hover on
+touch): hovering a result card now grows its map pin partway toward selected-size, staying black
+(not the pink of an actual selection) — list and map agree on "this is the one I'm looking at"
+before a tap commits to it, the Airbnb/Apple-Maps convention the brief named explicitly. Click-
+based select↔fly-to↔highlight continuity (card ring, marker recolour, `FlyToSelected`) already
+existed from the original overlap-fix pass and is unchanged.
+
+**Full 3-user regression, run clean after this entire batch**: Robin creates a Crew, Sam and Cam
+join via invite link; Robin suggests something (picks 1 of 3), posts a plain message, reacts to
+it; Sam opens the Crew cold and votes IN; Cam opens the Crew cold and votes MAYBE; Robin — whose
+session was never touched or reloaded during either vote — sees both register within one poll
+cycle; Robin locks it in; Sam's Home (never revisited the Crew) shows "Next up"; Cam's Plans page
+reflects it; Robin does a genuine hard refresh and the locked state, confirmation copy, and
+reaction all persist exactly as before. Zero page errors across all three sessions. Screenshots
+captured at every step, not just asserted from the final state.

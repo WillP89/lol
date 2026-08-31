@@ -17,11 +17,12 @@ import type { ExploreExperience } from './ExploreMap';
 // keyless (no account, no key) — the tradeoff is OSM's usage policy asks production apps not to
 // hotlink it at real scale, which is a real future consideration once Plot has meaningful
 // traffic, not a pilot-scale one.
-function pinIcon(selected: boolean) {
-  const size = selected ? 26 : 16;
+function pinIcon(selected: boolean, hovered = false) {
+  const size = selected ? 26 : hovered ? 21 : 16;
   // Neutral black pins at rest (Apple Maps' own convention); the selected pin switches to the
   // same signature pink used for the selected card's ring, so list and map visibly agree on
-  // which one is highlighted.
+  // which one is highlighted. A hovered-not-selected pin grows partway there, staying black —
+  // "I'm looking at this" is a different, lighter signal than "I picked this."
   return L.divIcon({
     className: '',
     html: selected
@@ -47,11 +48,13 @@ export default function ExploreMapV2({
   experiences,
   center,
   selectedId,
+  hoveredId,
   onMarkerClick,
 }: {
   experiences: ExploreExperience[];
   center: [number, number];
   selectedId?: string | null;
+  hoveredId?: string | null;
   onMarkerClick: (exp: ExploreExperience) => void;
 }) {
   return (
@@ -66,8 +69,12 @@ export default function ExploreMapV2({
       {experiences.map((exp) => (
         <Marker
           key={exp.id}
+          // A hovered-but-not-yet-selected result gets the same enlarged pin as selected (just
+          // not the pink recolour, which stays reserved for an actual selection) — the list and
+          // map should visibly agree on "this is the one I'm looking at" before you've committed
+          // to a tap, the same convention Airbnb/Apple Maps use for list<->map hover sync.
           position={[exp.venue.latitude, exp.venue.longitude]}
-          icon={pinIcon(exp.id === selectedId)}
+          icon={pinIcon(exp.id === selectedId, exp.id === hoveredId)}
           eventHandlers={{ click: () => onMarkerClick(exp) }}
         />
       ))}
