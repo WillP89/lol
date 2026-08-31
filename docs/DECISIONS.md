@@ -490,9 +490,25 @@ Render's Shell (an interactive terminal into the running container, which would 
 be run by hand) turned out to be gated behind a paid plan on the Free tier actually in use —
 not assumed available. Rather than depend on Shell at all (paid-only, and a manual step that'd
 have to be repeated by hand after every future migration), `apps/api/package.json`'s `start`
-script now runs the migration itself before booting the server:
-`"start": "prisma migrate deploy && node dist/src/server.js"`. Render always runs the start
-command on deploy, on every plan tier, so this applies any pending migration automatically and
-needs nobody to remember a manual step — `prisma migrate deploy` is a no-op (fast, safe) when
-there's nothing pending, so this is free to leave in permanently rather than only for this one
-fix.
+script was changed to run the migration itself before booting the server. Render always runs
+the start command on deploy, on every plan tier, so this applies any pending migration
+automatically with nobody needing to remember a manual step.
+
+The first version of this (`"start": "prisma migrate deploy && node dist/src/server.js"`) hit a
+second, more specific problem on the real deploy, confirmed via Render's own logs: `P3005`,
+"the database schema is not empty" — this production database has real tables in it but no
+`_prisma_migrations` history table, meaning it was provisioned by something other than
+`prisma migrate` at some point in its life (before this session), so Prisma has no record of
+what's already applied and refuses to guess rather than risk re-running `CREATE TABLE` on
+objects that already exist. Fixed with `scripts/migrate-and-start.sh` (what `start` now runs),
+which lets Postgres itself be the source of truth instead of assuming which migrations predate
+tracking: it attempts a normal deploy, and if a specific migration fails because its own
+objects already exist (`P3018` — meaning that migration's whole transaction rolled back
+untouched, since Postgres DDL is transactional, so nothing partially applied), that migration's
+target state is therefore provably already true of the database, and only then is it marked
+resolved (`prisma migrate resolve --applied`) and the deploy retried. This converges on
+applying only what's genuinely new regardless of how many migrations predate this database ever
+being tracked by `prisma migrate`, without needing me to assume or the user to manually
+diff a live production schema I can't otherwise inspect from this environment. Both `migrate
+deploy` and this whole script are no-ops (fast, safe) once there's nothing pending, so it's
+free to leave in permanently rather than only for this one incident.
