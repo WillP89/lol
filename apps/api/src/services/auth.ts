@@ -86,24 +86,25 @@ export async function requestMagicLink(
   const safeNext = sanitiseNext(next);
   const url = `${config.WEB_APP_URL}/auth/callback?token=${rawToken}${safeNext ? `&next=${encodeURIComponent(safeNext)}` : ''}`;
 
-  if (providerReadiness.postmarkEmail && config.NODE_ENV !== 'test') {
+  const emailReady = providerReadiness.smtpEmail || providerReadiness.postmarkEmail;
+  if (emailReady && config.NODE_ENV !== 'test') {
     try {
       await sendMagicLinkEmail(normalisedEmail, url);
       return {};
     } catch (err) {
-      // A real send failing (bad key, Postmark outage, unverified domain) shouldn't fully
-      // lock someone out of signing in — log loudly and fall through to the dev-link
+      // A real send failing (bad credentials, provider outage, unverified sender) shouldn't
+      // fully lock someone out of signing in — log loudly and fall through to the dev-link
       // response rather than leaving them with nothing. This does mean the raw link is
       // exposed in the API response on that failure path; that's a deliberate pilot-scale
       // tradeoff (this response only ever reaches the person who made the request), not an
       // oversight.
-      logger.error({ err, email: normalisedEmail }, 'Postmark send failed — falling back to dev-mode link in the response');
+      logger.error({ err, email: normalisedEmail }, 'Email send failed — falling back to dev-mode link in the response');
     }
   }
 
   logger.info(
     { email: normalisedEmail, url },
-    providerReadiness.postmarkEmail ? 'Magic link (test mode — Postmark send skipped)' : 'Magic link — no email provider configured, returning link directly',
+    emailReady ? 'Magic link (test mode — real send skipped)' : 'Magic link — no email provider configured, returning link directly',
   );
   return { devMagicLinkUrl: url };
 }

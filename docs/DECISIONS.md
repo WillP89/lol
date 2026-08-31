@@ -451,3 +451,26 @@ have let a Stafford sync overwrite a London listing that happened to share the s
 index, if the mock `externalId`s hadn't been made city-scoped). Real UK-wide event coverage
 (gigs/festivals/restaurants beyond this curated sample) requires a live provider key — see
 CREDENTIAL BLOCKERS.
+
+## #smtp-email
+
+Postmark's account-approval process turned out to reject/stall a personal-Gmail-only signup —
+a real blocker for anyone without a work email or their own domain, discovered by the user
+actually trying it, not something the earlier "use a Sender Signature" guidance anticipated.
+Added plain SMTP as the primary path (`lib/email.ts`, checked ahead of Postmark): any mailbox
+you can already log into, Gmail's `smtp.gmail.com` + an App Password specifically, needs no
+domain, no third-party account review. Postmark stays available (better deliverability
+reputation at real volume) for whenever a verified domain exists. See
+docs/providers/email.md.
+
+## #eventbrite-adapter
+
+Added `src/providers/live/eventbrite.ts` (self-serve, free, no partner agreement — unlike
+DICE/OpenTable/Resy/SevenRooms, all confirmed partner-gated, see docs/providers/ticketing.md
+and restaurants.md) so more than one live ticketed-events source can run at once — the
+registry now includes every live provider whose credential is configured, not one replacing
+another. Flagged honestly rather than presented as confirmed-working: Eventbrite significantly
+restricted public event search around 2020, and this environment can't reach their API to
+verify a fresh self-serve key can still search all-public events versus only the key-holder's
+own organisation's — the adapter file's own top comment has the one curl command to confirm
+which, and what to tell me if it's the latter.

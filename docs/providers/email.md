@@ -1,53 +1,69 @@
 # Going live: transactional email (magic links, notifications)
 
-**Implemented** — `apps/api/src/lib/email.ts` sends via Postmark's REST API, called from
-`services/auth.ts#requestMagicLink`. Not exercised against a live Postmark account from the
-environment this was written in (no outbound network to `api.postmarkapp.com` from that
-sandbox) — verify against the deployed service's logs once a real key is configured.
+**Implemented** — `apps/api/src/lib/email.ts` sends via SMTP (preferred) or Postmark's REST API
+(fallback), called from `services/auth.ts#requestMagicLink`. Neither path has been exercised
+against a live account from the environment this was written in (no outbound network to
+`smtp.gmail.com`/`api.postmarkapp.com` from that sandbox) — verify against the deployed
+service's logs once real credentials are configured.
 
-Gating is on `POSTMARK_API_KEY` being set, not `NODE_ENV`: configured → a real email is sent
-and the magic-link API response omits the raw link; not configured → the link comes back
-directly in the response (any environment) so the web app can show a "Continue →" button and
-the whole auth flow stays testable without a provider. `NODE_ENV === 'test'` always skips a
-real send regardless of whether a key is present, so the automated test suite never calls out
-to Postmark.
+Gating is on `SMTP_HOST`+`SMTP_USER`+`SMTP_PASS` or `POSTMARK_API_KEY` being set, not
+`NODE_ENV` — SMTP is checked first. Neither configured → the magic-link API response returns
+the raw link directly (any environment) so the web app can show a "Continue →" button and the
+whole auth flow stays testable without a provider. `NODE_ENV === 'test'` always skips a real
+send regardless of what's configured, so the automated test suite never calls out to either.
 
-If a real send throws (bad key, Postmark outage, unverified domain), `requestMagicLink` logs
-the error and falls back to returning the raw link rather than leaving the user with nothing —
-a deliberate pilot-scale tradeoff (this response only ever reaches the person who requested
-it), not an oversight.
+If a real send throws (bad credentials, provider outage, unverified sender), `requestMagicLink`
+logs the error and falls back to returning the raw link rather than leaving the user with
+nothing — a deliberate pilot-scale tradeoff (this response only ever reaches the person who
+requested it), not an oversight.
 
-## Setup — domain verification (best for a real launch)
-1. Sign up at [postmarkapp.com](https://postmarkapp.com), create a Server.
-2. Add and verify a sending domain (SPF + DKIM DNS records) — budget for DNS propagation, up
-   to a few hours. Needs a domain you control the DNS for (a work/company domain, or a
-   personal one bought from any registrar).
-3. Grab the Server API token → `POSTMARK_API_KEY`.
-4. Set `EMAIL_FROM` to an address on that verified domain.
+## Setup — SMTP through a mailbox you already have (recommended: no domain, no account approval)
+Sends real email through any mailbox you can already log into — Gmail specifically, no
+business/work email, no third-party signup or review process. This is the path that's actually
+been reachable without a work email/domain.
 
-Without a verified domain, Postmark's sandbox mode only delivers to pre-approved test
-addresses — enough to confirm the integration works, not enough for a real pilot.
+1. On the Google account you want to send from: turn on **2-Step Verification**
+   (myaccount.google.com/security) — required to generate an App Password.
+2. **myaccount.google.com/apppasswords** → create one (name it "Plot") → copy the 16-character
+   password it shows you once.
+3. Set on the API service (Render):
+   - `SMTP_HOST=smtp.gmail.com`
+   - `SMTP_PORT=465`
+   - `SMTP_USER=<the Gmail address>`
+   - `SMTP_PASS=<the 16-character App Password, no spaces>`
+   - `EMAIL_FROM=<the same Gmail address>` — Gmail rejects/overrides a From that isn't the
+     authenticated account (or one of its configured Send As aliases), so this has to match
+     `SMTP_USER`.
 
-## Setup — Sender Signature (no domain needed, right for a personal beta)
-No domain to verify DNS on? A Sender Signature verifies a single mailbox instead — exactly
-enough to send real magic-link emails from a personal Gmail/Outlook/etc. address for a
-friends-and-family beta.
-1. Sign up at [postmarkapp.com](https://postmarkapp.com), create a Server.
-2. **Sender Signatures** → **Add Sender Signature** → enter the personal email you want Plot to
-   send from (e.g. `will@gmail.com`).
-3. Postmark emails that address a confirmation link — click it from that inbox.
-4. Grab the Server API token → `POSTMARK_API_KEY`.
-5. Set `EMAIL_FROM` to that exact verified address.
+Real limitation: personal Gmail caps outgoing mail around 500/day — nowhere near a concern for
+a friends-and-family beta, worth knowing if Plot ever needs to send at real volume, at which
+point moving to Workspace (2,000/day) or a dedicated ESP is the next step. Any other SMTP-
+capable mailbox (Outlook/Office 365, a hosting provider's mailbox, etc.) works the same way —
+swap `SMTP_HOST`/`SMTP_PORT` for that provider's values.
 
-One real limitation: a Sender Signature account starts in Postmark's trial/sandbox review —
-Postmark may cap volume or ask a couple of qualifying questions before lifting it to
-production sending. For a handful of friends signing up over a few days this is normally not
-a practical blocker, but if sends start failing, check the Server's "Sending" status in the
-Postmark dashboard first.
+## Setup — Postmark (better once there's a real domain to verify)
+Two paths depending on whether a domain is available:
 
-## Why Postmark over SES
-Postmark: fastest to set up, good deliverability reputation out of the box, paid from message
-one. SES is cheaper at volume but needs more setup and starts in a sandbox that caps you to
-verified recipients only — a real blocker for a public pilot until AWS grants production
-access. Postmark is what's implemented; swapping to SES later means a new
-`sendMagicLinkEmail`-shaped function in `lib/email.ts`, not a rearchitecture.
+**Domain verification** (best for a real launch): sign up at
+[postmarkapp.com](https://postmarkapp.com), create a Server, add and verify a sending domain
+(SPF + DKIM DNS records — budget for DNS propagation, up to a few hours), grab the Server API
+token → `POSTMARK_API_KEY`, set `EMAIL_FROM` to an address on that domain.
+
+**Sender Signature** (verifies one mailbox instead of a domain — no DNS needed): Sender
+Signatures → Add Sender Signature → the address to send from → click the confirmation link
+Postmark emails to it → grab the Server API token → set `EMAIL_FROM` to that exact address.
+**In practice this has not been enough on its own** — Postmark's account approval/review
+process has rejected or stalled a personal-Gmail-only signup even after the Sender Signature
+itself verified; it seems to expect a business use case to actually lift an account to
+production sending. If Postmark is worth revisiting later (better deliverability reputation at
+volume than raw SMTP), expect to need a real domain or an explanation of the use case to their
+support team — SMTP above is what actually worked without either.
+
+## Why SMTP over Postmark, for now
+Postmark is the better choice once Plot has a real domain and volume — but it's implemented
+to sit behind an account-approval process that a purely personal Gmail signup didn't clear,
+and that made it the actual blocker to sending anything at all. SMTP through Gmail needs
+nothing beyond an existing Google account and a two-minute App Password, and every magic link
+this session's testing generated by "sending" for real would go out through it once
+configured. Swapping to a different SMTP host, or back to Postmark once a domain exists, is a
+config change, not a rearchitecture.

@@ -31,7 +31,18 @@ const EnvSchema = z.object({
   EVENTBRITE_API_KEY: z.string().optional(),
   OPENTABLE_API_KEY: z.string().optional(),
   POSTMARK_API_KEY: z.string().optional(),
-  // Must be on a domain verified in Postmark (SPF/DKIM) — see docs/providers/email.md.
+  // Plain SMTP — sends through any mailbox you can already log into (Gmail's smtp.gmail.com
+  // with an App Password, in particular): no domain verification, no third-party account
+  // approval process, just credentials for a mailbox you already have. See
+  // docs/providers/email.md. Checked ahead of Postmark below — it's the one that's actually
+  // been reachable without a work email/domain.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().default(465),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  // Must be on a domain verified in Postmark (SPF/DKIM) if sending via Postmark; if sending
+  // via SMTP, most providers (Gmail included) require this to match SMTP_USER. See
+  // docs/providers/email.md.
   EMAIL_FROM: z.string().email().default('hello@plot.invalid'),
 });
 
@@ -53,4 +64,5 @@ export const providerReadiness = {
   eventbrite: Boolean(config.EVENTBRITE_API_KEY),
   openTable: Boolean(config.OPENTABLE_API_KEY),
   postmarkEmail: Boolean(config.POSTMARK_API_KEY),
+  smtpEmail: Boolean(config.SMTP_HOST && config.SMTP_USER && config.SMTP_PASS),
 };

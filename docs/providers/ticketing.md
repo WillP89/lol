@@ -23,11 +23,21 @@ needs before it can replace or sit alongside the mock.
 - **Env**: `DICE_API_KEY` (placeholder until an agreement exists)
 
 ## Eventbrite
-- **Access**: self-serve OAuth app + API key, free.
+- **Access**: self-serve OAuth app + API key, free — **implemented**
+  (`src/providers/live/eventbrite.ts`), registers automatically alongside Ticketmaster (or on
+  its own) the moment `EVENTBRITE_API_KEY` is set. Genuinely uncertain whether it actually
+  works yet: Eventbrite significantly restricted its public API around 2020, and this
+  environment can't reach `api.eventbrite.com` to confirm the general public search endpoint
+  (`/v3/events/search/`) this adapter calls is still open to a *new* self-serve key rather than
+  scoped to just the key-holder's own organisation's events. See the caveat and a one-line curl
+  test to run yourself in the adapter file's own top comment before relying on it.
 - **Env**: `EVENTBRITE_API_KEY`
-- **Implementation**: Eventbrite's `/events/search/` returns broader, lower-curation inventory
-  than Ticketmaster/DICE — expect a lower average `qualityScore` from this source; that's the
-  quality scorer working as intended, not a bug.
+- **If search turns out to be restricted**: the adapter's `mapCategory`/`mapToCanonical` are
+  still correct for whatever Eventbrite endpoint eventually returns similarly-shaped event
+  objects — only `fetchPage`'s URL/endpoint would need to change.
+- Expect broader, lower-curation inventory than Ticketmaster (workshops, markets, local
+  meetups) if/once it works — a lower average `qualityScore` from this source is the quality
+  scorer working as intended, not a bug.
 
 ## Resident Advisor / Songkick / Bandsintown
 - No public commercial API as of writing for RA; Songkick's API is deprecated for new
