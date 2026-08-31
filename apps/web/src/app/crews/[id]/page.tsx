@@ -49,9 +49,10 @@ interface ChatMessage {
 interface ExploreExperienceLite {
   id: string;
   name: string;
+  description?: string;
   category: string;
   startsAt: string;
-  venue: { name: string };
+  venue: { name: string; city?: string };
   priceMinMinor: number | null;
   priceMaxMinor?: number | null;
   currency: string;
@@ -461,6 +462,7 @@ export default function CrewPage() {
   const [copied, setCopied] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const lastIdRef = useRef<string | undefined>(undefined);
+  const composerInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
   // The composer's "+" action sheet — one entry point into every way of adding something to
@@ -472,6 +474,10 @@ export default function CrewPage() {
   // the picker closes — the rest are just not sent, same as browsing "Share a place" and
   // picking one. See docs/DECISIONS.md.
   const [suggestOptions, setSuggestOptions] = useState<ExploreExperienceLite[] | 'loading' | 'error' | null>(null);
+  // Real UX bug this fixes: tapping a suggested tile used to send it to the Crew immediately —
+  // no preview, no chance to actually look at what you're about to share. Now a tap opens this
+  // instead; only the explicit "Share with Crew" button on the preview actually sends.
+  const [previewOption, setPreviewOption] = useState<ExploreExperienceLite | null>(null);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
   const [postingPoll, setPostingPoll] = useState(false);
@@ -663,6 +669,7 @@ export default function CrewPage() {
     setActionView('menu');
     setPollQuestion('');
     setPollOptions(['', '']);
+    setPreviewOption(null);
   }
 
   function openAction(view: 'poll' | 'availability' | 'share' | 'suggest' | 'manual') {
@@ -1009,8 +1016,30 @@ export default function CrewPage() {
               </div>
             )}
             {!solo && messages?.length === 0 && (
-              <div style={{ textAlign: 'center', margin: 'auto' }}>
-                <p className="v2-muted">Someone has to start it — say hi.</p>
+              <div style={{ margin: 'auto', maxWidth: 300, textAlign: 'center' }}>
+                <div className="v2-display" style={{ fontSize: 19, marginBottom: 6 }}>{crew.name} is ready.</div>
+                <p className="v2-muted" style={{ fontSize: 13.5, marginBottom: 20 }}>Here&rsquo;s a good way to start.</p>
+                {/* Real, actionable starter prompts — replaces a dead "say hi" line that gave a
+                    brand-new Crew no obvious next move. Each one is the same real action the "+"
+                    composer menu offers, just surfaced where a first-time member actually is. */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <button className="v2-card v2-tap-feedback" style={{ padding: '13px 16px', border: 'none', textAlign: 'left', cursor: 'pointer', width: '100%' }} onClick={() => openAction('availability')}>
+                    <div style={{ fontWeight: 800, fontSize: 14 }}>See when everyone&rsquo;s free</div>
+                    <div className="v2-muted" style={{ fontSize: 12 }}>A quick poll for the next few weekend nights</div>
+                  </button>
+                  <button className="v2-card v2-tap-feedback" style={{ padding: '13px 16px', border: 'none', textAlign: 'left', cursor: 'pointer', width: '100%' }} onClick={() => openAction('suggest')}>
+                    <div style={{ fontWeight: 800, fontSize: 14 }}>Find something for the Crew</div>
+                    <div className="v2-muted" style={{ fontSize: 12 }}>Plot picks a few — you choose what to share</div>
+                  </button>
+                  <button
+                    className="v2-card v2-tap-feedback"
+                    style={{ padding: '13px 16px', border: 'none', textAlign: 'left', cursor: 'pointer', width: '100%' }}
+                    onClick={() => { setDraft('Hey everyone!'); composerInputRef.current?.focus(); }}
+                  >
+                    <div style={{ fontWeight: 800, fontSize: 14 }}>Say hello</div>
+                    <div className="v2-muted" style={{ fontSize: 12 }}>Break the ice — everyone can see this</div>
+                  </button>
+                </div>
               </div>
             )}
             {!solo && messages?.map((m, i) => {
@@ -1097,6 +1126,7 @@ export default function CrewPage() {
                 +
               </button>
               <input
+                ref={composerInputRef}
                 style={{
                   flex: 1, padding: '13px 18px', borderRadius: 100, border: 'none', outline: 'none',
                   background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)', fontSize: 14.5, fontFamily: 'inherit', color: 'var(--v2-ink)',
@@ -1187,12 +1217,47 @@ export default function CrewPage() {
           </div>
         )}
 
+        {/* The preview step — this is the real fix, not the list below it. Tapping any result
+            (from either "Suggest something" or "Share a place") used to send it to the Crew
+            immediately, with no chance to actually look at what you were about to share. Now a
+            tap only opens this; nothing sends until "Share with Crew" is tapped explicitly. */}
+        {previewOption && (
+          <div>
+            <button onClick={() => setPreviewOption(null)} className="v2-muted" style={{ background: 'none', border: 'none', fontSize: 13, marginBottom: 10, cursor: 'pointer', padding: 0 }}>← Back to results</button>
+            <div style={{ height: 150, margin: '0 0 14px', borderRadius: 16, background: v2Art(previewOption.imageUrl, previewOption.category) }} />
+            <div className="v2-eyebrow" style={{ marginBottom: 4 }}>{previewOption.category.replace(/_/g, ' ')}</div>
+            <div className="v2-display" style={{ fontSize: 19, marginBottom: 6 }}>{previewOption.name}</div>
+            <div className="v2-muted" style={{ fontSize: 13.5, marginBottom: 10 }}>
+              {new Date(previewOption.startsAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+            </div>
+            {/* Location hierarchy the brief specifically called out as inconsistent: venue name,
+                then town/city, always together — never a bare venue name with no sense of where
+                it actually is. */}
+            <div style={{ fontSize: 13.5, marginBottom: 10 }}>
+              {previewOption.venue.name}{previewOption.venue.city && `, ${previewOption.venue.city}`}
+            </div>
+            {formatPriceFrom(previewOption.priceMinMinor) && (
+              <div style={{ fontSize: 13.5, marginBottom: 10, fontWeight: 700 }}>{formatPriceFrom(previewOption.priceMinMinor)}</div>
+            )}
+            {previewOption.description && (
+              <p style={{ fontSize: 13.5, lineHeight: 1.55, color: 'var(--v2-ink-muted)', marginBottom: 18 }}>{previewOption.description}</p>
+            )}
+            <button
+              className="v2-btn v2-btn-brand v2-tap-feedback"
+              style={{ width: '100%' }}
+              disabled={sharingId !== null}
+              onClick={() => shareExperience(previewOption.id)}
+            >
+              {sharingId === previewOption.id ? 'Sharing…' : 'Share with Crew'}
+            </button>
+          </div>
+        )}
+
         {/* A curated shortlist, not an auto-post of several full cards straight into permanent
             chat history — that was the old "Suggest something" behaviour and it was too heavy
             for what should be a fast, considered moment. Plot narrows to 2-3 matches; tapping one
-            sends only that one (via the same shareExperience as "Share a place") and the rest
-            are simply never sent, same as browsing and picking. */}
-        {actionView === 'suggest' && (
+            opens the preview above, which is the only place that actually sends. */}
+        {!previewOption && actionView === 'suggest' && (
           <div>
             <button onClick={() => setActionView('menu')} className="v2-muted" style={{ background: 'none', border: 'none', fontSize: 13, marginBottom: 10, cursor: 'pointer', padding: 0 }}>← Back</button>
             <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Plot&rsquo;s picks for this Crew</div>
@@ -1204,8 +1269,7 @@ export default function CrewPage() {
                 {suggestOptions.map((exp) => (
                   <button
                     key={exp.id}
-                    onClick={() => shareExperience(exp.id)}
-                    disabled={sharingId !== null}
+                    onClick={() => setPreviewOption(exp)}
                     className="v2-hoverable"
                     style={{ display: 'block', textAlign: 'left', border: 'none', background: 'var(--v2-bg-deep)', borderRadius: 14, padding: 0, overflow: 'hidden', cursor: 'pointer' }}
                   >
@@ -1214,10 +1278,10 @@ export default function CrewPage() {
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 800, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
                         <div className="v2-muted" style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {exp.venue.name} · {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+                          {exp.venue.name}{exp.venue.city && `, ${exp.venue.city}`} · {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
                         </div>
                       </div>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--v2-brand)', flexShrink: 0 }}>{sharingId === exp.id ? '…' : 'Send'}</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--v2-brand)', flexShrink: 0 }}>View</span>
                     </div>
                   </button>
                 ))}
@@ -1226,7 +1290,7 @@ export default function CrewPage() {
           </div>
         )}
 
-        {actionView === 'share' && (
+        {!previewOption && actionView === 'share' && (
           <div>
             <button onClick={() => setActionView('menu')} className="v2-muted" style={{ background: 'none', border: 'none', fontSize: 13, marginBottom: 10, cursor: 'pointer', padding: 0 }}>← Back</button>
             <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Share a place</div>
@@ -1236,16 +1300,15 @@ export default function CrewPage() {
               {shareItems?.map((exp) => (
                 <button
                   key={exp.id}
-                  onClick={() => shareExperience(exp.id)}
-                  disabled={sharingId !== null}
+                  onClick={() => setPreviewOption(exp)}
                   style={{ display: 'flex', alignItems: 'center', gap: 12, border: 'none', background: 'var(--v2-bg-deep)', borderRadius: 14, padding: 10, cursor: 'pointer', textAlign: 'left' }}
                 >
                   <div style={{ width: 52, height: 52, borderRadius: 10, flexShrink: 0, background: v2Art(exp.imageUrl, exp.category) }} />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontWeight: 700, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
-                    <div className="v2-muted" style={{ fontSize: 11.5 }}>{exp.venue.name}</div>
+                    <div className="v2-muted" style={{ fontSize: 11.5 }}>{exp.venue.name}{exp.venue.city && `, ${exp.venue.city}`}</div>
                   </div>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--v2-brand)', flexShrink: 0 }}>{sharingId === exp.id ? '…' : 'Send'}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--v2-brand)', flexShrink: 0 }}>View</span>
                 </button>
               ))}
             </div>

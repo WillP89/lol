@@ -1224,3 +1224,26 @@ each of the ~10 affected inputs individually — systemic bug, systemic fix. Des
 existing tighter density above 720px, where no browser does this. Verified by measuring computed
 font-size on every input across the new-Crew sheet, the chat composer, the poll builder, and the
 manual-plan builder at 390px width: all now report exactly 16px.
+
+#### plot-suggest-preview-and-crew-starters — preview-before-send, and a real "what do I do first" fix
+
+Two related fixes to the same file, both from the pilot-readiness pass's "no trap flows / no
+accidental sends" and "unclear first action" requirements.
+
+**Suggest Something used to send on first tap.** Tapping a result tile in the Suggest
+Something/Share a place action sheet called `shareExperience()` directly — there was no way to
+see what you were about to post to the whole Crew before it posted. Rebuilt as browse → tap →
+preview (image, category, title, formatted UK date/time, `venue.name, venue.city` — the
+consistent display hierarchy the brief called for, address-level detail deferred to the eventual
+event-detail page rather than invented here — price, description) → explicit "Share with Crew"
+button, which is now the *only* call site left that shares. Verified live with two real users
+(desktop + mobile) via Playwright: tapping a tile shows the preview and nothing is posted to
+chat yet; only after tapping "Share with Crew" does the card appear in the conversation.
+
+**A brand-new empty Crew had nothing telling you what to do.** The empty-chat state was a single
+muted line ("Someone has to start it — say hi."). Replaced with three concrete starter actions
+that route straight into the product's real loop rather than generic chips: "See when everyone's
+free" (opens the availability poll), "Find something for the Crew" (opens Suggest Something),
+"Say hello" (pre-fills the composer and focuses it). Deliberately not emoji/icon buttons — each
+one states the actual outcome in plain English, matching the emoji-removal direction for the
+rest of the pass.
