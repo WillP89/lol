@@ -512,3 +512,24 @@ being tracked by `prisma migrate`, without needing me to assume or the user to m
 diff a live production schema I can't otherwise inspect from this environment. Both `migrate
 deploy` and this whole script are no-ops (fast, safe) once there's nothing pending, so it's
 free to leave in permanently rather than only for this one incident.
+
+## #migrate-p3009-rollback
+
+The timeout fix above (bounding every `prisma` call so a stalled connection fails fast instead
+of hanging) surfaced a real third failure on the very next deploy: `P3009`, "found failed
+migrations in the target database." Root cause, confirmed by the timeline in the logs: the
+*previous* deploy attempt had correctly caught `add_crew_messages` already existing (`P3018`)
+and started resolving it — then got `SIGTERM`'d mid-resolve by Render's own port-scan-timeout
+kill, before the timeout fix existed to prevent that hang in the first place. That left a
+"started... failed" row sitting in Prisma's own migration-history table, which blocks every
+subsequent deploy from touching anything until it's explicitly cleared — a real, one-time
+consequence of the earlier hang, not a new independent bug.
+
+`scripts/migrate-and-start.sh` does NOT auto-resolve a P3009 migration as "already applied" —
+deliberately, unlike the P3018 case, nothing in a P3009 error actually proves the migration's
+objects exist. It's marked `--rolled-back` (Prisma's own documented recovery step, which clears
+the stuck status and makes the migration eligible to be attempted again) and the deploy is
+retried — routing back through the P3018 branch, which only ever resolves a migration as
+applied once Postgres itself has said "already exists" for it. Every recovery path in this
+script now ends at a real, Postgres-verified fact, never an assumption about database history
+this environment can't otherwise inspect.

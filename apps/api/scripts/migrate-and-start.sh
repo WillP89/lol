@@ -17,6 +17,17 @@
 #    applied — which means its target state is *already* true of the database in fact, just not
 #    recorded. Safe to mark it resolved and move on to the next one.
 #
+# 3. P3009 ("found failed migrations in the target database") — Prisma's own migration-history
+#    table has a row recorded as "started... failed", blocking everything after it. Happens when
+#    an application attempt gets interrupted mid-flight (confirmed via a real deploy: the
+#    container was SIGTERM'd mid-resolve, before the timeout fix in case 2 existed, leaving the
+#    row stuck). Deliberately NOT auto-resolved as "already applied" — unlike case 2, nothing
+#    here has proven the migration's objects actually exist. Instead it's marked
+#    `--rolled-back` (clearing the stuck "failed" status, the officially documented recovery)
+#    and deploy is retried, routing back through case 2's real Postgres-verified check: if the
+#    objects genuinely already exist, THAT'S what safely resolves it, on actual evidence rather
+#    than an assumption baked in here.
+#
 # Every `prisma` call is wrapped in `timeout` — confirmed via a real deploy that a stalled
 # handshake against Neon's pooled connection can hang a `prisma migrate resolve` call
 # indefinitely with zero output, which silently hung the whole container until Render killed the
@@ -52,6 +63,23 @@ resolve_applied() {
   return 0
 }
 
+resolve_rolled_back() {
+  name="$1"
+  echo "== Clearing stuck 'failed' status on '$name' (--rolled-back, timeout ${STEP_TIMEOUT}s)... =="
+  OUT=$(run_prisma migrate resolve --rolled-back "$name")
+  ST=$?
+  echo "$OUT"
+  if [ "$ST" -eq 124 ]; then
+    echo "== resolve timed out after ${STEP_TIMEOUT}s — will retry =="
+    return 1
+  fi
+  if [ "$ST" -ne 0 ]; then
+    echo "== resolve --rolled-back failed — exiting =="
+    exit 1
+  fi
+  return 0
+}
+
 attempt=0
 while [ "$attempt" -lt "$max_attempts" ]; do
   attempt=$((attempt + 1))
@@ -82,6 +110,21 @@ while [ "$attempt" -lt "$max_attempts" ]; do
     if [ -n "$FAILED" ]; then
       echo "== P3018: '$FAILED' failed because its objects already exist — already true of the database in fact. =="
       resolve_applied "$FAILED"
+      continue
+    fi
+  fi
+
+  if echo "$OUTPUT" | grep -q "P3009"; then
+    # Format: "The `<name>` migration started at <timestamp> failed" — one line per stuck
+    # migration. Extract every backtick-quoted migration name mentioned and resolve each; this
+    # is the same class of already-applied-in-fact migration as P3018, just discovered via a
+    # leftover history-table row instead of a live application attempt.
+    STUCK=$(echo "$OUTPUT" | grep -oE '`[0-9]{14}_[a-zA-Z0-9_]+`' | tr -d '`' | sort -u)
+    if [ -n "$STUCK" ]; then
+      echo "== P3009: stuck failed-migration record(s) found — clearing each so it can be re-attempted for real. =="
+      for name in $STUCK; do
+        resolve_rolled_back "$name"
+      done
       continue
     fi
   fi
