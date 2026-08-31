@@ -424,6 +424,14 @@ input.field:focus {
   padding-bottom: 116px;
 }
 
+/* See components/TabBar.tsx's `desktopOnly` prop — used on Crew (chat's full-height, keyboard-
+   safe layout on mobile has no room for a second fixed-bottom element). */
+@media (max-width: 899px) {
+  .tabbar-desktop-only {
+    display: none;
+  }
+}
+
 /* Desktop composition (brief: "do not stretch the phone layout across desktop"). The nav
    becomes a fixed left sidebar instead of competing for vertical space at the bottom of a
    wide viewport; .page/.nav shift right to clear it and get a little more breathing room
@@ -477,7 +485,8 @@ input.field:focus {
      content pushed right to clear it — the immersive pages that deliberately go without one
      (chat, auth, onboarding, the public Plan Card) stay full-width. */
   body:has(.tabbar) .nav,
-  body:has(.tabbar) .page {
+  body:has(.tabbar) .page,
+  body:has(.tabbar) .crew-context-strip {
     margin-left: 236px;
     max-width: 720px;
   }

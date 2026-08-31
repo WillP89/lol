@@ -70,11 +70,16 @@ const TABS = [
   },
 ];
 
-export function TabBar() {
+export function TabBar({ desktopOnly }: { desktopOnly?: boolean } = {}) {
   const pathname = usePathname();
 
+  // Chat needs its full-height keyboard-safe layout on mobile — a floating pill nav fixed to
+  // the same bottom edge as the composer would sit on top of it. Desktop has no such
+  // constraint and, unlike every other screen, was left with no persistent nav at all once
+  // Crew+Chat merged into one full-height view — this renders the sidebar there without
+  // reintroducing the mobile collision.
   return (
-    <nav className="tabbar">
+    <nav className={`tabbar ${desktopOnly ? 'tabbar-desktop-only' : ''}`}>
       <div className="tabbar-brand">
         Plot<span>·</span>
       </div>

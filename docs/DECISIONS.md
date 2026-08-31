@@ -243,3 +243,60 @@ itself, not another screen's content:
   hashed per Crew id) instead of another vertical stack of uniform cards — five Crews now read
   as five different groups, not five identical rows repeated. The "next plan" card is a real
   full-bleed photo hero with text scrimmed onto it, not an image strip glued above a text block.
+
+## #crew-chat-merge
+
+Crew detail and Crew chat used to be two separate routes/screens (`/crews/:id` summarising
+the Crew with a "Conversation" preview card that linked out to `/crews/:id/chat` for the real
+thing). Merged into one screen at `/crews/:id`: a compact header (name, avatars, an info
+button), at most one slim "what's happening" strip (a confirmed plan or an open vote — never
+both at full size), then the message list at full height with the composer pinned below —
+because the conversation is the actual product here, not a feature the Crew summary links out
+to. Group DNA, the availability strip, and the invite link — none of them belong competing for
+space with chat — moved into a single "Crew info" BottomSheet reachable by tapping the header,
+the same way a real messaging app puts group settings behind "tap the group name." The old
+`/crews/:id/chat` route now just redirects to `/crews/:id` so no existing link dead-ends. The
+standalone `/crews/:id/match` results page is gone too — "Find us something" now always posts
+straight into the conversation (`suggest-to-chat`, see #nav-restructure's core-loop note),
+which superseded the private single-viewer results screen as the only path in.
+
+## #explore-rails
+
+Explore's opening state was a single filterable list (discovery-mode chips + a flat card
+stack) — a database result view, not discovery. Rebuilt as themed horizontal rails (Tonight /
+This weekend / Free / Under £30 / Coming up), each a different slice of the same fetched
+experience set — an event can legitimately appear in more than one rail, since a rail is a
+lens on the data, not a bucket it belongs to. A rail only renders if it has content, so an
+empty "Tonight" (the mock catalogue's dates used to all be 2+ days out, so it always would be)
+doesn't sit there looking broken — see the mock provider fix below. Map stays as a real second
+mode via a segmented Browse/Map control in the header, not a permanently-visible box competing
+with the rails for space.
+
+## #image-fallback-layering
+
+A photo URL existing and that photo successfully loading are two different things — a slow
+network, an expired/broken provider link, or (as hit repeatedly building this in a sandbox
+that blocks the image CDNs used) a blocked host all leave a plain `background-image: url(...)`
+rendering nothing, a blank box, with no visible failure. `categoryStyle.ts#categoryBackground`
+fixes this at the CSS level rather than needing an `<img onError>` handler everywhere: it
+layers the photo and the category gradient in one `background` shorthand value
+(`url(...) center/cover, <gradient>`) — a failed top layer is simply transparent, so the
+gradient underneath always shows through instead of nothing. Applied everywhere an
+Experience/Plan image renders (Explore's rails and detail sheet, Home's hero and ideas rail,
+Plans, Crew chat's event cards).
+
+Same trip wired a real, previously-latent bug in the mock ticketing catalogue: category was
+assigned via `index % 3` completely decoupled from the artist/venue, and every listing's
+`daysOut` had a uniform 2-day minimum — so "Tonight" could never have content and "This
+weekend" often wouldn't either. Both fixed: category now comes from a coherent (name, venue,
+category) tuple, and the first two listings are pinned to today/tomorrow specifically so the
+near-term rails always have something to show.
+
+## #message-preview
+
+Anywhere a Crew's `latestMessage.body` is shown outside the actual conversation (Home's
+activity feed, a Crew tile on Home/Crews) — a "📍 Sent X to the Crew — /plans/slug" system
+message was rendering with its raw internal `/plans/slug` suffix intact, which only means
+something to chat's own link-detection regex and reads as a raw URL fragment everywhere else.
+`lib/messagePreview.ts#messagePreview` strips it down to the human part ("📍 Sent X to the
+Crew") for every non-chat surface.

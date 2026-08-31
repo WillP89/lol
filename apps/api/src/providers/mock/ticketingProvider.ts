@@ -78,8 +78,12 @@ function generateMockCatalogue(): MockTicketingRaw[] {
     ...COMEDY_LINEUP.map((c, i) => ({ id: `mock-tkt-comedy-${i}`, name: c.name, venue: LONDON_VENUES[c.venue], cat: 'COMEDY' as ExperienceCategory, sub: ['stand_up'] })),
   ];
 
-  return entries.map(({ id, name, venue, cat, sub }) => {
-    const daysOut = 2 + Math.floor(rand() * 21);
+  return entries.map(({ id, name, venue, cat, sub }, i) => {
+    // The first couple of listings are deliberately pinned near-term (today, tomorrow) rather
+    // than left to the same 2-23-day spread as the rest — otherwise Explore's "Tonight" rail
+    // (and often "This weekend") would be empty every single time, since a uniform 2+ day
+    // minimum can never land on today. Everything else keeps the wider spread for variety.
+    const daysOut = i === 0 ? 0 : i === 1 ? 1 : 2 + Math.floor(rand() * 21);
     const start = new Date();
     start.setDate(start.getDate() + daysOut);
     start.setHours(20, 0, 0, 0);

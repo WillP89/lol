@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import { TabBar } from '@/components/TabBar';
-import { categoryStyle } from '@/lib/categoryStyle';
+import { categoryStyle, categoryBackground } from '@/lib/categoryStyle';
 import { formatPriceFrom } from '@/lib/formatPrice';
 
 interface UpcomingPlan {
@@ -118,9 +118,7 @@ export default function PlansPage() {
                   height: 56,
                   borderRadius: 12,
                   fontSize: 20,
-                  ...(plan.imageUrl
-                    ? { backgroundImage: `url(${plan.imageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-                    : { background: style.bg }),
+                  background: categoryBackground(plan.imageUrl, plan.category),
                 }}
               >
                 {!plan.imageUrl && style.emoji}

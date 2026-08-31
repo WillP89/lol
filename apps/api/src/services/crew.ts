@@ -123,7 +123,7 @@ export async function listCrewsForUser(userId: string) {
 export async function listUpcomingPlansForUser(userId: string) {
   const plans = await prisma.plan.findMany({
     where: { status: 'BOOKED', crew: { members: { some: { userId, status: 'ACTIVE' } } } },
-    include: { crew: { select: { id: true, name: true } }, experience: { include: { venue: true } } },
+    include: { crew: { select: { id: true, name: true } }, experience: { include: { venue: true } }, votes: true, members: true },
     orderBy: { updatedAt: 'desc' },
   });
 
@@ -140,6 +140,10 @@ export async function listUpcomingPlansForUser(userId: string) {
       imageUrl: plan.experience?.imageUrl ?? null,
       priceMinMinor: plan.experience?.priceMinMinor ?? null,
       currency: plan.experience?.currency ?? 'GBP',
+      // "5 going" on the Home hero — real signal, not decoration: whoever actually voted IN,
+      // falling back to the full invited-member count for a Plan nobody voted on before it
+      // was booked (e.g. a manually-confirmed soft plan).
+      goingCount: plan.votes.filter((v) => v.vote === 'IN').length || plan.members.length,
     }))
     .sort((a, b) => {
       if (a.startsAt && b.startsAt) return new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();

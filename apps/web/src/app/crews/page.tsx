@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 import { TabBar } from '@/components/TabBar';
 import { BottomSheet } from '@/components/BottomSheet';
+import { messagePreview } from '@/lib/messagePreview';
 
 interface CrewSummary {
   id: string;
@@ -75,7 +76,7 @@ function CrewActivityLine({ crew }: { crew: CrewSummary }) {
     return (
       <div className="muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         <span style={{ fontWeight: 600, color: 'var(--ink-text)' }}>{crew.latestMessage.authorName}: </span>
-        {crew.latestMessage.body}
+        {messagePreview(crew.latestMessage.body)}
       </div>
     );
   }

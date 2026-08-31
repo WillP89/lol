@@ -30,3 +30,18 @@ export const DEFAULT_CATEGORY_STYLE: CategoryVisual = { emoji: '📍', bg: 'var(
 export function categoryStyle(category: string | null | undefined): CategoryVisual {
   return (category && CATEGORY_STYLE[category]) || DEFAULT_CATEGORY_STYLE;
 }
+
+/**
+ * A real photo URL existing is not the same as that photo successfully loading — a slow
+ * network, a provider's broken/expired link, or (in this sandbox) a blocked image CDN all
+ * leave a plain CSS `background-image: url(...)` rendering nothing at all. Layering the
+ * category gradient as a second, lower background — not swapping between "image OR gradient"
+ * — means a failed image quietly reveals the gradient underneath instead of a blank box; a
+ * gradient is the designed fallback, not a rectangle of nothing. Use with the `background`
+ * shorthand (not `backgroundImage` alone), since only the shorthand's last layer may be a
+ * plain colour.
+ */
+export function categoryBackground(imageUrl: string | null | undefined, category: string | null | undefined): string {
+  const style = categoryStyle(category);
+  return imageUrl ? `url("${imageUrl}") center / cover no-repeat, ${style.bg}` : style.bg;
+}
