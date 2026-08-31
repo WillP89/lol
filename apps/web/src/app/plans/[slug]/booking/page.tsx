@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
-import { categoryStyle } from '@/lib/categoryStyle';
+import { v2Art } from '@/lib/v2Art';
 
 interface PlanDetail {
   plan: {
@@ -107,53 +107,51 @@ export default function BookingPage() {
 
   if (!data) {
     return (
-      <div className="page">
-        {error ? (
-          <div className="error">{error}</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 20 }}>
-            <div className="art-block" style={{ background: 'var(--ink-surface-2)', height: 88, margin: '0 -20px', opacity: 0.6 }} />
-            <div className="card" style={{ height: 70, opacity: 0.5 }} />
-          </div>
-        )}
+      <div className="v2">
+        <div className="v2-page" style={{ paddingTop: 28 }}>
+          {error ? (
+            <div style={{ color: 'var(--v2-brand)' }}>{error}</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ height: 88, borderRadius: 'var(--v2-r-lg)', background: 'var(--v2-bg-deep)' }} />
+              <div style={{ height: 70, borderRadius: 'var(--v2-r-lg)', background: 'var(--v2-bg-deep)', opacity: 0.6 }} />
+            </div>
+          )}
+        </div>
       </div>
     );
   }
 
   const { plan } = data;
   const isBooked = plan.status === 'BOOKED' || Boolean(existingBooking && existingBooking.status === 'CONFIRMED');
-  const style = categoryStyle(plan.experience?.category);
 
   return (
-    <>
-      <nav className="nav">
-        <Link href={`/crews/${plan.crewId}`} className="muted" style={{ fontSize: 13 }}>
+    <div className="v2">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '18px 20px 0' }}>
+        <Link href={`/crews/${plan.crewId}`} className="v2-muted" style={{ fontSize: 13, fontWeight: 700 }}>
           ← Crew
         </Link>
-        <div className="wordmark">Plot</div>
-      </nav>
-      <div className="page" style={{ paddingTop: 0 }}>
-        <div className="art-block" style={{ background: style.bg, height: 88, fontSize: 30, borderRadius: 0, margin: '0 -20px 20px' }}>
-          {style.emoji}
-        </div>
+      </div>
+      <div className="v2-page" style={{ paddingTop: 12, maxWidth: 480 }}>
+        <div style={{ height: 100, margin: '0 -20px 22px', background: v2Art(null, plan.experience?.category), borderRadius: 0 }} />
 
-        <div className="eyebrow">Book for the Crew</div>
-        <h1 style={{ fontSize: 24, marginBottom: 8 }}>{plan.title}</h1>
-        {plan.experience?.venue && <p className="muted" style={{ marginBottom: 20 }}>{plan.experience.venue.name}</p>}
+        <div className="v2-eyebrow">Book for the Crew</div>
+        <h1 className="v2-display" style={{ fontSize: 24, marginBottom: 8 }}>{plan.title}</h1>
+        {plan.experience?.venue && <p className="v2-muted" style={{ marginBottom: 20, fontSize: 14 }}>{plan.experience.venue.name}</p>}
 
-        <div className="banner-card">
-          <div className="muted" style={{ marginBottom: 4 }}>
+        <div className="v2-card" style={{ padding: '16px 18px', marginBottom: 16 }}>
+          <div className="v2-muted" style={{ marginBottom: 4, fontSize: 13 }}>
             {inVoterIds.length} of {plan.members.length} paying now
           </div>
           {plan.experience?.priceMinMinor !== null && plan.experience?.priceMinMinor !== undefined && (
-            <div style={{ fontFamily: 'Fraunces, serif', fontSize: 22, color: 'var(--ink-gold)' }}>
+            <div className="v2-display" style={{ fontSize: 22, color: 'var(--v2-brand)' }}>
               £{((plan.experience.priceMinMinor * inVoterIds.length) / 100).toFixed(2)} total
             </div>
           )}
         </div>
 
         {plan.status === 'COMPLETED' ? (
-          <div className="banner-card" style={{ textAlign: 'center' }}>
+          <div className="v2-card" style={{ padding: '20px 18px', textAlign: 'center' }}>
             {rewindRating ? (
               <>
                 <div style={{ fontSize: 30, marginBottom: 8 }}>✓</div>
@@ -161,8 +159,8 @@ export default function BookingPage() {
               </>
             ) : (
               <>
-                <div className="eyebrow">Rewind</div>
-                <p style={{ margin: '4px 0 14px', fontFamily: 'Fraunces, serif', fontSize: 17 }}>Would the Crew do this again?</p>
+                <div className="v2-eyebrow">Rewind</div>
+                <p className="v2-display" style={{ margin: '4px 0 14px', fontSize: 17 }}>Would the Crew do this again?</p>
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
                   {([
                     ['love', '😍', 'Love it'],
@@ -174,12 +172,14 @@ export default function BookingPage() {
                       key={value}
                       onClick={() => submitRewind(value)}
                       disabled={rewindSubmitting}
-                      className="chip"
-                      style={{ flexDirection: 'column', gap: 4, padding: '10px 8px', flex: 1 }}
+                      style={{
+                        display: 'flex', flexDirection: 'column', gap: 4, padding: '10px 8px', flex: 1,
+                        border: 'none', borderRadius: 14, background: 'var(--v2-bg-deep)', cursor: 'pointer',
+                      }}
                       aria-label={label}
                     >
                       <span style={{ fontSize: 18 }}>{emoji}</span>
-                      <span style={{ fontSize: 9 }}>{label}</span>
+                      <span style={{ fontSize: 9, fontWeight: 700 }}>{label}</span>
                     </button>
                   ))}
                 </div>
@@ -188,32 +188,30 @@ export default function BookingPage() {
           </div>
         ) : isBooked ? (
           <>
-            <div className="card" style={{ borderColor: 'var(--ink-moss)' }}>
-              <div className="eyebrow" style={{ color: 'var(--ink-moss)' }}>
-                ✓ Booked
-              </div>
-              <p style={{ margin: 0 }}>The Crew is going. Added to everyone&rsquo;s calendar.</p>
+            <div className="v2-card" style={{ padding: '16px 18px', marginBottom: 10 }}>
+              <div className="v2-eyebrow" style={{ color: 'var(--v2-green)' }}>✓ Booked</div>
+              <p style={{ margin: '4px 0 0' }}>The Crew is going. Added to everyone&rsquo;s calendar.</p>
             </div>
-            <button className="btn btn-ghost" onClick={markAsDone} disabled={markingDone}>
+            <button className="v2-btn v2-btn-ghost" style={{ width: '100%' }} onClick={markAsDone} disabled={markingDone}>
               {markingDone ? 'Marking…' : 'Already happened? Mark as done →'}
             </button>
           </>
         ) : !booking ? (
-          <button className="btn btn-primary" onClick={startBooking} disabled={busy || inVoterIds.length === 0}>
+          <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={startBooking} disabled={busy || inVoterIds.length === 0}>
             {busy ? 'Starting…' : 'Book for the Crew →'}
           </button>
         ) : (
           <>
-            <p className="muted" style={{ marginBottom: 12 }}>
+            <p className="v2-muted" style={{ marginBottom: 12, fontSize: 13.5 }}>
               We opened the provider&rsquo;s checkout in a new tab. Come back here once you&rsquo;ve completed it.
             </p>
-            <button className="btn btn-primary" onClick={confirmBooking} disabled={busy || confirmed}>
+            <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={confirmBooking} disabled={busy || confirmed}>
               {confirmed ? 'Confirmed ✓' : busy ? 'Confirming…' : "I've completed checkout"}
             </button>
           </>
         )}
-        {error && <div className="error">{error}</div>}
+        {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginTop: 12 }}>{error}</div>}
       </div>
-    </>
+    </div>
   );
 }

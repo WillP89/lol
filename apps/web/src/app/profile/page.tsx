@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
-import { TabBar } from '@/components/TabBar';
+import { TabBarV2 } from '@/components/TabBarV2';
 import { BottomSheet } from '@/components/BottomSheet';
 import { formatPriceFrom } from '@/lib/formatPrice';
 
@@ -21,6 +21,14 @@ interface ProfileUser {
   locationPrefs: { kind: string; label: string }[];
 }
 
+// Same palette as Home V2's avatar colours — one shared identity system across the app.
+const AVATAR_COLORS = ['#ff3d5a', '#ffb238', '#1c7a52', '#5b3df0', '#ff6fae'];
+function avatarColor(seed: string) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[hash];
+}
+
 function initials(displayName: string | null, email: string) {
   return (displayName?.trim() || email).slice(0, 1).toUpperCase();
 }
@@ -34,6 +42,9 @@ type DangerAction = 'deactivate' | 'delete' | null;
  * shared device, or close their account, even though all three already existed as real backend
  * endpoints (POST /auth/logout, /users/me/deactivate, /users/me/delete). This page is the first
  * thing that actually calls them.
+ *
+ * Profile V2 — brought onto the same primitives as Home/Crews/Plans (see
+ * docs/DECISIONS.md#v2-art-direction); same data/logic, only the presentation changed.
  */
 export default function ProfilePage() {
   const router = useRouter();
@@ -83,8 +94,10 @@ export default function ProfilePage() {
 
   if (!user) {
     return (
-      <div className="page" style={{ paddingTop: 40, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {error ? <div className="error">{error}</div> : <div className="card" style={{ height: 120, opacity: 0.5 }} />}
+      <div className="v2">
+        <div className="v2-page" style={{ paddingTop: 28, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {error ? <div style={{ color: 'var(--v2-brand)' }}>{error}</div> : <div style={{ height: 120, borderRadius: 'var(--v2-r-lg)', background: 'var(--v2-bg-deep)' }} />}
+        </div>
       </div>
     );
   }
@@ -99,107 +112,120 @@ export default function ProfilePage() {
   const memberSince = new Date(user.createdAt).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
   return (
-    <>
-      <nav className="nav">
-        <Link href="/home" className="muted" style={{ fontSize: 13 }}>
-          ← Home
-        </Link>
-        <div className="wordmark">Plot</div>
-      </nav>
-      <div className="page">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
-          <div className="avatar" style={{ width: 56, height: 56, fontSize: 22, background: 'var(--ink-gold)', color: 'var(--ink-gold-ink)' }}>
-            {initials(user.displayName, user.email)}
+    <div className="v2">
+      <div className="v2-shell-desktop">
+        <div className="v2-page" style={{ paddingTop: 28 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24 }}>
+            <div
+              style={{
+                width: 56, height: 56, borderRadius: '50%', fontSize: 22, fontWeight: 800, color: '#fff',
+                background: avatarColor(user.displayName ?? user.email), display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              {initials(user.displayName, user.email)}
+            </div>
+            <div>
+              <h1 className="v2-display" style={{ fontSize: 21, marginBottom: 2 }}>{user.displayName || 'Your profile'}</h1>
+              <div className="v2-muted" style={{ fontSize: 13 }}>{user.email}</div>
+              <div className="v2-dim" style={{ fontSize: 11.5 }}>Member since {memberSince}</div>
+            </div>
           </div>
-          <div>
-            <h1 style={{ fontSize: 21, marginBottom: 2 }}>{user.displayName || 'Your profile'}</h1>
-            <div className="muted" style={{ fontSize: 13 }}>{user.email}</div>
-            <div className="muted" style={{ fontSize: 11.5 }}>Member since {memberSince}</div>
-          </div>
-        </div>
 
-        {error && <div className="error">{error}</div>}
+          {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
-        <div className="banner-card">
-          <div className="eyebrow">Areas</div>
-          <p style={{ margin: '6px 0 0' }}>
-            {home?.label ?? 'Not set'}
-            {favs.length > 0 && ` · also likes ${favs.map((f) => f.label).join(', ')}`}
-          </p>
+          <div className="v2-card" style={{ padding: '18px 20px', marginBottom: 14 }}>
+            <div className="v2-eyebrow">Areas</div>
+            <p style={{ margin: '6px 0 0', fontSize: 14.5 }}>
+              {home?.label ?? 'Not set'}
+              {favs.length > 0 && ` · also likes ${favs.map((f) => f.label).join(', ')}`}
+            </p>
 
-          <div style={{ height: 1, background: 'var(--ink-border)', margin: '14px 0' }} />
+            <div style={{ height: 1, background: 'var(--v2-line)', margin: '16px 0' }} />
 
-          <div className="eyebrow">Into</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-            {liked.length ? (
-              liked.map((c) => (
-                <span key={c} className="chip gold static">
-                  {c.replace(/_/g, ' ')}
-                </span>
-              ))
-            ) : (
-              <span className="muted">Nothing marked yet.</span>
+            <div className="v2-eyebrow">Into</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+              {liked.length ? (
+                liked.map((c) => (
+                  <span key={c} className="v2-chip">
+                    {c.replace(/_/g, ' ')}
+                  </span>
+                ))
+              ) : (
+                <span className="v2-dim">Nothing marked yet.</span>
+              )}
+            </div>
+
+            {user.tasteProfile && (
+              <>
+                <div style={{ height: 1, background: 'var(--v2-line)', margin: '16px 0' }} />
+                <div className="v2-eyebrow">Budget &amp; energy</div>
+                <p style={{ margin: '6px 0 0', fontSize: 14.5 }}>
+                  Up to {formatPriceFrom(user.tasteProfile.budgetMaxMinor)?.replace('from ', '') ?? '—'} · {user.tasteProfile.energyPreference.toLowerCase()} energy
+                </p>
+              </>
             )}
+
+            <Link href="/onboarding?next=/profile" className="v2-btn v2-btn-brand" style={{ marginTop: 18, width: '100%' }}>
+              Edit taste &amp; areas
+            </Link>
           </div>
 
-          {user.tasteProfile && (
-            <>
-              <div style={{ height: 1, background: 'var(--ink-border)', margin: '14px 0' }} />
-              <div className="eyebrow">Budget &amp; energy</div>
-              <p style={{ margin: '6px 0 0' }}>
-                Up to {formatPriceFrom(user.tasteProfile.budgetMaxMinor)?.replace('from ', '') ?? '—'} · {user.tasteProfile.energyPreference.toLowerCase()} energy
-              </p>
-            </>
-          )}
-
-          <Link href="/onboarding?next=/profile" className="btn" style={{ marginTop: 16 }}>
-            Edit taste &amp; areas
-          </Link>
-        </div>
-
-        <div className="card">
-          <button className="btn btn-ghost" onClick={signOut} disabled={busy} style={{ justifyContent: 'flex-start' }}>
-            Sign out
-          </button>
-        </div>
-
-        <div className="card">
-          <div className="eyebrow" style={{ marginBottom: 10 }}>Danger zone</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button className="btn btn-danger" onClick={() => setDangerAction('deactivate')} disabled={busy}>
-              Deactivate account
-            </button>
-            <button className="btn btn-danger" onClick={() => setDangerAction('delete')} disabled={busy}>
-              Delete account
+          <div className="v2-card" style={{ padding: '8px 20px', marginBottom: 14 }}>
+            <button
+              onClick={signOut}
+              disabled={busy}
+              style={{ width: '100%', padding: '14px 0', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 14.5, fontWeight: 700, color: 'var(--v2-ink)' }}
+            >
+              Sign out
             </button>
           </div>
-          <p className="muted" style={{ fontSize: 11.5, marginTop: 10, marginBottom: 0 }}>
-            Deactivating signs you out everywhere and hides you from your Crews — you can come back later. Deleting
-            removes your personal details for good.
-          </p>
+
+          <div className="v2-card" style={{ padding: '18px 20px' }}>
+            <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Danger zone</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                onClick={() => setDangerAction('deactivate')}
+                disabled={busy}
+                style={{ padding: '12px 16px', borderRadius: 100, border: 'none', background: 'var(--v2-bg-deep)', color: 'var(--v2-brand)', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}
+              >
+                Deactivate account
+              </button>
+              <button
+                onClick={() => setDangerAction('delete')}
+                disabled={busy}
+                style={{ padding: '12px 16px', borderRadius: 100, border: 'none', background: 'var(--v2-bg-deep)', color: 'var(--v2-brand)', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}
+              >
+                Delete account
+              </button>
+            </div>
+            <p className="v2-dim" style={{ fontSize: 11.5, marginTop: 12, marginBottom: 0, lineHeight: 1.5 }}>
+              Deactivating signs you out everywhere and hides you from your Crews — you can come back later. Deleting
+              removes your personal details for good.
+            </p>
+          </div>
         </div>
       </div>
 
-      <BottomSheet open={dangerAction !== null} onClose={() => !busy && setDangerAction(null)}>
+      <BottomSheet open={dangerAction !== null} onClose={() => !busy && setDangerAction(null)} variant="light">
         {dangerAction && (
           <div>
-            <div className="eyebrow">{dangerAction === 'deactivate' ? 'Deactivate account?' : 'Delete account?'}</div>
+            <div className="v2-eyebrow" style={{ marginBottom: 4 }}>{dangerAction === 'deactivate' ? 'Deactivate account?' : 'Delete account?'}</div>
             <p style={{ fontSize: 14, lineHeight: 1.6, margin: '8px 0 16px' }}>
               {dangerAction === 'deactivate'
                 ? 'You’ll be signed out on every device and your Crews will stop seeing you as active. You can sign back in any time to reactivate.'
                 : 'This permanently removes your name, email and taste profile from Plot. Your Crews and past Plans stay intact for everyone else, but you won’t be identifiable in them any more. This can’t be undone.'}
             </p>
-            <button className="btn btn-danger" onClick={confirmDanger} disabled={busy}>
+            <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={confirmDanger} disabled={busy}>
               {busy ? 'Working…' : dangerAction === 'deactivate' ? 'Yes, deactivate' : 'Yes, delete my account'}
             </button>
-            <button className="btn btn-ghost" onClick={() => setDangerAction(null)} disabled={busy} style={{ marginTop: 8 }}>
+            <button className="v2-btn v2-btn-ghost" style={{ width: '100%', marginTop: 8 }} onClick={() => setDangerAction(null)} disabled={busy}>
               Cancel
             </button>
           </div>
         )}
       </BottomSheet>
 
-      <TabBar />
-    </>
+      <TabBarV2 />
+    </div>
   );
 }

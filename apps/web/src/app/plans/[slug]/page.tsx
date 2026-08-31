@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { apiFetchServer } from '@/lib/apiServer';
-import { categoryStyle } from '@/lib/categoryStyle';
+import { v2Art } from '@/lib/v2Art';
 import { formatPriceFrom } from '@/lib/formatPrice';
 import { VoteForm } from './VoteForm';
 
@@ -62,35 +62,34 @@ export default async function PlanCardPage({ params }: { params: { slug: string 
 
   const { plan, pulse } = data;
   const isAuthenticated = Boolean(cookies().get('plot_session'));
-  const style = categoryStyle(plan.experience?.category);
 
   return (
-    <div className="page" style={{ paddingTop: 0, maxWidth: 480 }}>
-      <div className="art-block" style={{ background: style.bg, height: 96, fontSize: 34, borderRadius: 0, margin: '0 -20px 20px' }}>
-        {style.emoji}
+    <div className="v2">
+      <div className="v2-page" style={{ paddingTop: 0, paddingBottom: 40, maxWidth: 480 }}>
+        <div style={{ height: 150, margin: '0 -20px 22px', background: v2Art(null, plan.experience?.category) }} />
+
+        <div className="v2-eyebrow">{plan.crew.name}</div>
+        <h1 className="v2-display" style={{ fontSize: 27, marginBottom: 8 }}>{plan.title}</h1>
+
+        {(plan.experience || plan.manualVenueName || plan.manualStartsAt) && (
+          <p className="v2-muted" style={{ marginBottom: 22, fontSize: 14 }}>
+            {plan.experience ? (
+              <>
+                {new Date(plan.experience.startsAt).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
+                {plan.experience.venue && ` · ${plan.experience.venue.name}, ${plan.experience.venue.city}`}
+                {formatPriceFrom(plan.experience.priceMinMinor) && ` · ${formatPriceFrom(plan.experience.priceMinMinor)}`}
+              </>
+            ) : (
+              <>
+                {plan.manualStartsAt && new Date(plan.manualStartsAt).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
+                {plan.manualVenueName && `${plan.manualStartsAt ? ' · ' : ''}${plan.manualVenueName}`}
+              </>
+            )}
+          </p>
+        )}
+
+        <VoteForm slug={params.slug} initialPulse={pulse} isAuthenticated={isAuthenticated} />
       </div>
-
-      <div className="eyebrow">{plan.crew.name}</div>
-      <h1 style={{ fontSize: 26, marginBottom: 8 }}>{plan.title}</h1>
-
-      {(plan.experience || plan.manualVenueName || plan.manualStartsAt) && (
-        <p className="muted" style={{ marginBottom: 20 }}>
-          {plan.experience ? (
-            <>
-              {new Date(plan.experience.startsAt).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
-              {plan.experience.venue && ` · ${plan.experience.venue.name}, ${plan.experience.venue.city}`}
-              {formatPriceFrom(plan.experience.priceMinMinor) && ` · ${formatPriceFrom(plan.experience.priceMinMinor)}`}
-            </>
-          ) : (
-            <>
-              {plan.manualStartsAt && new Date(plan.manualStartsAt).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
-              {plan.manualVenueName && `${plan.manualStartsAt ? ' · ' : ''}${plan.manualVenueName}`}
-            </>
-          )}
-        </p>
-      )}
-
-      <VoteForm slug={params.slug} initialPulse={pulse} isAuthenticated={isAuthenticated} />
     </div>
   );
 }

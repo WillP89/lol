@@ -910,6 +910,34 @@ input.field:focus {
   z-index: 500;
 }
 
+/* Static (non-interactive) tag pill — Profile's "Into" list. */
+.v2-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px;
+  border-radius: 100px;
+  background: var(--v2-bg-deep);
+  color: var(--v2-ink-muted);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+/* Plan Card's "how many are in" strip (VoteForm) — same idea as the old .pulse-flame, v2 tone. */
+.v2-pulse-flames {
+  display: flex;
+  gap: 3px;
+  margin: 10px 0 4px;
+}
+.v2-pulse-flame {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--v2-bg-deep);
+}
+.v2-pulse-flame.on {
+  background: var(--v2-brand);
+}
+
 /* Leaflet's stock light zoom control needs a little polish to match the new system. */
 .v2 .leaflet-control-zoom a {
   background: var(--v2-surface) !important;

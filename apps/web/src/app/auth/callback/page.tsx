@@ -63,13 +63,13 @@ function CallbackInner() {
     <>
       {error ? (
         <>
-          <div className="error">{error}</div>
-          <a className="btn" href="/auth" style={{ marginTop: 16 }}>
+          <div style={{ color: 'var(--v2-brand)', fontSize: 13.5 }}>{error}</div>
+          <a className="v2-btn v2-btn-brand" href="/auth" style={{ marginTop: 16 }}>
             Try again
           </a>
         </>
       ) : (
-        <p className="muted">Signing you in…</p>
+        <p className="v2-muted">Signing you in…</p>
       )}
     </>
   );
@@ -77,10 +77,12 @@ function CallbackInner() {
 
 export default function AuthCallbackPage() {
   return (
-    <div className="page" style={{ paddingTop: 60 }}>
-      <Suspense fallback={<p className="muted">Signing you in…</p>}>
-        <CallbackInner />
-      </Suspense>
+    <div className="v2">
+      <div className="v2-page" style={{ paddingTop: 80, textAlign: 'center' }}>
+        <Suspense fallback={<p className="v2-muted">Signing you in…</p>}>
+          <CallbackInner />
+        </Suspense>
+      </div>
     </div>
   );
 }

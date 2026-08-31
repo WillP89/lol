@@ -564,3 +564,16 @@ again on a fresh sign-in. Now requires `profile.homeLat` to be set too — a sig
 current LocationSearch step can produce, so it can't be satisfied by stale pre-migration data.
 
 Plans and Profile are still on the old dark system — not yet converted, next in line.
+
+## #v2-full-rollout
+
+Finished bringing the whole app onto the v2 design system started with entry/onboarding/Home
+(see #v2-art-direction, #v2-crews-and-sheet-fix): Plans list, the public Plan Card (the page
+that gets shared into WhatsApp/iMessage — brief §16, real growth-mechanic surface, so it
+mattered as much as anything behind auth), the booking flow, Profile, and the small utility
+pages (`error.tsx`, `not-found.tsx`, the auth-callback loading state) that would otherwise have
+been the one place the "this is one coherent app" illusion broke. Same data and logic
+everywhere — this was presentation only. Added two small new v2 primitives along the way that
+didn't exist yet: `.v2-chip` (Profile's static "Into" tags) and `.v2-pulse-flames`/
+`.v2-pulse-flame` (the Plan Card "how many are in" strip). No page in the app is still on the
+old dark system.
