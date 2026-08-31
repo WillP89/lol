@@ -474,3 +474,25 @@ restricted public event search around 2020, and this environment can't reach the
 verify a fresh self-serve key can still search all-public events versus only the key-holder's
 own organisation's — the adapter file's own top comment has the one curl command to confirm
 which, and what to tell me if it's the latter.
+
+## #auto-migrate-on-deploy
+
+Root cause of the production "Something went wrong" on onboarding's final step: Render deploys
+new code on every push but never runs `prisma migrate deploy` on its own — that's a separate
+step. The `#social-first-architecture` migration (new `Profile.homeLat`/`homeLng` columns, the
+`MessagePoll`/`MessagePollVote` tables) shipped as code but was never applied to the real
+production database, so the first request touching those columns (`POST /users/me/profile`,
+called by onboarding's "Let's go") 500'd. Confirmed as the cause rather than assumed: no other
+plausible failure fit the shape (fresh account, first-time profile write, generic error message
+implying an unhandled server exception rather than a validation error).
+
+Render's Shell (an interactive terminal into the running container, which would have let this
+be run by hand) turned out to be gated behind a paid plan on the Free tier actually in use —
+not assumed available. Rather than depend on Shell at all (paid-only, and a manual step that'd
+have to be repeated by hand after every future migration), `apps/api/package.json`'s `start`
+script now runs the migration itself before booting the server:
+`"start": "prisma migrate deploy && node dist/src/server.js"`. Render always runs the start
+command on deploy, on every plan tier, so this applies any pending migration automatically and
+needs nobody to remember a manual step — `prisma migrate deploy` is a no-op (fast, safe) when
+there's nothing pending, so this is free to leave in permanently rather than only for this one
+fix.
