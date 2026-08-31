@@ -1274,3 +1274,24 @@ now a genuine sibling `<button>`, never nested inside another interactive elemen
 two real, separately-authenticated users: a poll where both vote Friday, a plan where one votes
 In and the other Maybe, and a message both react to — each sheet correctly named both people in
 the right bucket, and tapping it never navigated away from the conversation.
+
+#### post-onboarding-landing — a named "Joined X" moment, not a silent drop into chat
+
+Real complaint: finishing onboarding via an invite link dropped straight into chat with zero
+acknowledgment that anything had happened — indistinguishable from a broken redirect. The
+join page (`crews/join/[code]/page.tsx`) already had a transient "joined" state, but it used a
+generic 🎉 emoji and a crew-agnostic "You're in" — read as decoration, not confirmation. Now
+shows "Joined {crew name}" with a plain checkmark badge (same visual language as a locked Plan
+card's "✓ Confirmed", not a party emoji), held for ~1.1s before the redirect into the Crew —
+long enough to actually read, short enough not to feel like a stall.
+
+Non-invite users already landed on Home with a real new-user state (`crews?.length === 0` →
+"Your weekends start here" + Start a Crew), but the "3 nearby suggestions" section below it was
+unconditionally labelled "For your Crews" — nonsensical with zero Crews. Now reads "Worth a look
+nearby" when there are none, "For your Crews" once there are.
+
+Verified live: an unauthenticated invite visitor sees the pre-auth preview (not a login wall);
+after signup + onboarding, the same invite context survives (via `next`) back to the join page,
+shows "Joined {name}" with no emoji, and lands in the real Crew; a separate non-invite signup
+lands on Home showing "Start a Crew" and "Worth a look nearby" with real Stafford-resolved
+suggestions.

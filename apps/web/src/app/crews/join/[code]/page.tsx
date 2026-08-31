@@ -28,7 +28,7 @@ export default function JoinCrewPage() {
   const [preview, setPreview] = useState<Preview | null | 'error'>(null);
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
-  const [joined, setJoined] = useState(false);
+  const [joinedCrew, setJoinedCrew] = useState<{ name: string } | null>(null);
 
   useEffect(() => {
     api
@@ -54,8 +54,11 @@ export default function JoinCrewPage() {
     setError(null);
     try {
       const res = await api.post<{ crew: { id: string; name: string } }>('/crews/join', { inviteCode: code });
-      setJoined(true);
-      setTimeout(() => router.push(`/crews/${res.crew.id}`), 600);
+      setJoinedCrew({ name: res.crew.name });
+      // A real orientation beat, not a flash — the pilot brief's own complaint was landing
+      // straight in chat with zero acknowledgment of what just happened. Long enough to read
+      // "Joined {name}", short enough not to feel like a stall.
+      setTimeout(() => router.push(`/crews/${res.crew.id}`), 1100);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         router.push(`/auth?next=/crews/join/${code}`);
@@ -75,13 +78,12 @@ export default function JoinCrewPage() {
 
         {preview === 'error' && (
           <div className="fade-up">
-            <div style={{ fontSize: 40, marginBottom: 14 }}>🔗</div>
             <h1 className="v2-display" style={{ fontSize: 22, marginBottom: 8 }}>That invite has expired</h1>
             <p className="v2-muted">Ask whoever sent it for a fresh link.</p>
           </div>
         )}
 
-        {preview && preview !== 'error' && !joined && (
+        {preview && preview !== 'error' && !joinedCrew && (
           <div className="fade-up">
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 22 }}>
               {preview.memberInitials.slice(0, 5).map((initial, i) => (
@@ -111,10 +113,20 @@ export default function JoinCrewPage() {
           </div>
         )}
 
-        {joined && (
+        {/* The orientation beat the pilot brief specifically called for — landing in chat with
+            zero acknowledgment read as broken. A named "Joined X" moment, not a generic
+            celebration icon: a plain checkmark badge, same visual language as the "Confirmed"
+            state on a locked Plan card (see EventCard), not a party emoji. */}
+        {joinedCrew && (
           <div className="fade-up">
-            <div style={{ fontSize: 44, marginBottom: 10 }}>🎉</div>
-            <h1 className="v2-display" style={{ fontSize: 22 }}>You&rsquo;re in — taking you there…</h1>
+            <div
+              className="v2-pop-in"
+              style={{ width: 60, height: 60, borderRadius: '50%', margin: '0 auto 18px', background: 'var(--v2-green)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <span style={{ fontSize: 26, fontWeight: 800, color: '#fff' }}>✓</span>
+            </div>
+            <h1 className="v2-display" style={{ fontSize: 24, marginBottom: 8 }}>Joined {joinedCrew.name}</h1>
+            <p className="v2-muted">Taking you there…</p>
           </div>
         )}
       </div>

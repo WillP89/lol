@@ -403,11 +403,13 @@ export default function HomePage() {
 
           {/* FOR YOUR CREWS — a few genuinely useful suggestions, deliberately small and last:
               discovery feeds the social loop, it doesn't lead the page. Not an event catalogue —
-              three compact rows, not a big image grid. */}
+              three compact rows, not a big image grid. Also doubles as the brand-new-user Home
+              state's "3 nearby suggestions" (brief) when there are no Crews yet — same real,
+              location-resolved data, just a heading that doesn't presuppose a Crew exists. */}
           {ideas && ideas.length > 0 && (
             <div>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
-                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>For your Crews</div>
+                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>{crews && crews.length > 0 ? 'For your Crews' : 'Worth a look nearby'}</div>
                 <Link href="/explore" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>Discover</Link>
               </div>
               <div style={{ display: 'flex', gap: 10, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
