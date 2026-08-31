@@ -271,8 +271,8 @@ export default function ExplorePage() {
 
       {experiences === null && !error && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <div style={{ gridColumn: '1 / -1', height: 280, borderRadius: 20, background: 'var(--v2-bg-deep)' }} />
-          {[1, 2, 3, 4].map((i) => <div key={i} style={{ height: 200, borderRadius: 20, background: 'var(--v2-bg-deep)' }} />)}
+          <div className="v2-skeleton" style={{ gridColumn: '1 / -1', height: 280, borderRadius: 20 }} />
+          {[1, 2, 3, 4].map((i) => <div key={i} className="v2-skeleton" style={{ height: 200, borderRadius: 20 }} />)}
         </div>
       )}
 

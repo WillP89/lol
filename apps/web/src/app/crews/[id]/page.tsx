@@ -1119,7 +1119,7 @@ export default function CrewPage() {
     return (
       <div className="v2">
         <div className="v2-page" style={{ paddingTop: 28 }}>
-          {error ? <div style={{ color: 'var(--v2-error)' }}>{error}</div> : <div style={{ height: 60, borderRadius: 16, background: 'var(--v2-bg-deep)' }} />}
+          {error ? <div style={{ color: 'var(--v2-error)' }}>{error}</div> : <div className="v2-skeleton" style={{ height: 60, borderRadius: 16 }} />}
         </div>
       </div>
     );
@@ -1260,7 +1260,7 @@ export default function CrewPage() {
             )}
             {!solo && messages === null && !error && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {[1, 2, 3].map((i) => <div key={i} style={{ height: 34, borderRadius: 16, background: 'var(--v2-bg-deep)', width: `${50 + i * 12}%` }} />)}
+                {[1, 2, 3].map((i) => <div key={i} className="v2-skeleton" style={{ height: 34, borderRadius: 16, width: `${50 + i * 12}%` }} />)}
               </div>
             )}
             {!solo && messages?.length === 0 && (
@@ -1336,7 +1336,7 @@ export default function CrewPage() {
                         onRespondRecommendation={(recId) => setRespondingRecId(recId)}
                       />
                     ) : planMatch && cardData === 'loading' ? (
-                      <div style={{ width: 260, height: 120, borderRadius: 16, background: 'var(--v2-bg-deep)' }} />
+                      <div className="v2-skeleton" style={{ width: 260, height: 120, borderRadius: 16 }} />
                     ) : (
                       <div
                         className={pending ? 'v2-pending' : undefined}

@@ -105,7 +105,7 @@ export default function ProfilePage() {
     return (
       <div className="v2">
         <div className="v2-page v2-page-wide" style={{ paddingTop: 28, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {error ? <div style={{ color: 'var(--v2-error)' }}>{error}</div> : <div style={{ height: 120, borderRadius: 'var(--v2-r-lg)', background: 'var(--v2-bg-deep)' }} />}
+          {error ? <div style={{ color: 'var(--v2-error)' }}>{error}</div> : <div className="v2-skeleton" style={{ height: 120, borderRadius: 'var(--v2-r-lg)' }} />}
         </div>
       </div>
     );

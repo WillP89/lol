@@ -83,7 +83,7 @@ export default function PlansPage() {
           {plans === null && !error && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {[1, 2].map((i) => (
-                <div key={i} style={{ height: 80, borderRadius: 'var(--v2-r-lg)', background: 'var(--v2-bg-deep)' }} />
+                <div key={i} className="v2-skeleton" style={{ height: 80, borderRadius: 'var(--v2-r-lg)' }} />
               ))}
             </div>
           )}

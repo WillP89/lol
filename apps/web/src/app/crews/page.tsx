@@ -212,7 +212,7 @@ export default function CrewsPage() {
           {crews === null && !error && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {[1, 2].map((i) => (
-                <div key={i} style={{ height: 78, borderRadius: 'var(--v2-r-lg)', background: 'var(--v2-bg-deep)' }} />
+                <div key={i} className="v2-skeleton" style={{ height: 78, borderRadius: 'var(--v2-r-lg)' }} />
               ))}
             </div>
           )}

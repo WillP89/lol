@@ -1469,3 +1469,30 @@ Escape closes it, and focus returns to the `New Crew` trigger button afterward �
 checks passing against the real running app, not just inferred from the diff. Because every
 sheet in the app shares this one component, the fix applies everywhere at once without
 touching each call site.
+
+## #loading-skeleton-shimmer
+
+Loading-state audit (task: skeletons/empty-states/microcopy pass) found the shapes were already
+right — Home, Crews, Plans, Explore, Profile, and the Crew chat page all show correctly-sized
+placeholder blocks (card height, message-bubble width) while their first fetch is in flight,
+never a bare spinner or a blank screen. The real gap was that every one of those blocks was a
+flat, static `var(--v2-bg-deep)` fill — visually identical to "this loaded and there's genuinely
+nothing here" or a broken/missing image. Nothing distinguished "still working" from "empty" or
+"stuck" at a glance, which matters most exactly when it's most likely to be seen: a slow network,
+the case a skeleton exists for in the first place.
+
+Fixed with one shared utility, `.v2-skeleton` (globals.css): a soft diagonal gradient sweeping
+left-to-right on a 1.6s loop (`background-position` animated across an oversized gradient, not a
+JS-driven animation), applied in place of the flat fill on every skeleton block across Home,
+Crews, Plans, Explore, Profile, and the Crew chat page (top-level crew load, message-list load,
+and the individual "plan card resolving" placeholder) — one class, seven call sites, no per-page
+reinvention. Respects `prefers-reduced-motion: reduce` by falling back to the original flat fill,
+consistent with every other motion primitive already in globals.css.
+
+Verified live, not just visually plausible in isolation: real signup → onboarding → `/home`,
+with the `/api/crews` response deliberately delayed via Playwright route interception (CSS/JS
+load at full speed so the check isn't confounded by asset-loading time, only the data fetch that
+actually drives the `loading` state). Confirmed mid-load: 2 `.v2-skeleton` elements present,
+computed `animation-name: v2Shimmer`, `animation-duration: 1.6s`, a real gradient background —
+and confirmed they're gone once the delayed response resolves. Screenshot taken mid-shimmer as
+visual evidence, not just computed-style assertions.

@@ -208,8 +208,8 @@ export default function HomePage() {
 
           {loading && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
-              <div style={{ height: 320, borderRadius: 28, background: 'var(--v2-bg-deep)' }} />
-              <div style={{ height: 88, borderRadius: 20, background: 'var(--v2-bg-deep)' }} />
+              <div className="v2-skeleton" style={{ height: 320, borderRadius: 28 }} />
+              <div className="v2-skeleton" style={{ height: 88, borderRadius: 20 }} />
             </div>
           )}
 

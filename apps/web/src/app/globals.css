@@ -33,6 +33,25 @@ body {
   .fade-up { animation: none; }
 }
 
+/* Loading skeletons across Home/Crews/Plans/Explore/Crew-chat were correctly *shaped* (card-
+   height blocks, message-bubble-width blocks) but rendered as a flat, static `--v2-bg-deep`
+   fill — indistinguishable at a glance from "this loaded and there's just nothing here" or a
+   broken image. A slow shimmer sweep is the one visual signal that reads unambiguously as "still
+   working" rather than "empty" or "stuck". Respects prefers-reduced-motion by falling back to
+   the flat fill these already had. */
+@keyframes v2Shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.v2-skeleton {
+  background: linear-gradient(90deg, var(--v2-bg-deep) 25%, var(--v2-line) 50%, var(--v2-bg-deep) 75%);
+  background-size: 200% 100%;
+  animation: v2Shimmer 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v2-skeleton { animation: none; background: var(--v2-bg-deep); }
+}
+
 /* A flex row for an overlapping avatar stack — each avatar sets its own negative margin-left
    inline (the overlap amount varies by avatar size at each call site), this just lines them up. */
 .stack {
