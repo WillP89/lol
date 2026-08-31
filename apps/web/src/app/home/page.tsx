@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
-import { TabBar } from '@/components/TabBar';
-import { categoryStyle, categoryBackground } from '@/lib/categoryStyle';
+import { TabBarV2 } from '@/components/TabBarV2';
+import { v2Art } from '@/lib/v2Art';
 import { formatPriceFrom } from '@/lib/formatPrice';
 import { displayNameOf } from '@/lib/displayName';
 import { messagePreview } from '@/lib/messagePreview';
@@ -42,17 +42,9 @@ interface Experience {
   venue: { name: string };
 }
 
-const AVATAR_COLORS = ['#ffab2e', '#ff6b4a', '#8fc9a3', '#c9a0dc', '#7fb3d5'];
-
-// Each Crew tile gets its own gradient identity — otherwise a row of same-toned cards reads
-// as one grey mass instead of "different groups of different people."
-const CREW_GRADIENTS = [
-  'linear-gradient(150deg, #4a2f6b, #241a2e)',
-  'linear-gradient(150deg, #6b3a1f, #2a1810)',
-  'linear-gradient(150deg, #1f4a3f, #10241e)',
-  'linear-gradient(150deg, #6b2f4a, #241626)',
-  'linear-gradient(150deg, #2f3f6b, #16182a)',
-];
+const AVATAR_COLORS = ['#ff3d5a', '#ffb238', '#1c7a52', '#5b3df0', '#ff6fae'];
+// One ring tint per Crew (hashed) — the identity marker for the Crew-bubble row below.
+const CREW_RINGS = ['#ff3d5a', '#5b3df0', '#1c7a52', '#ffb238', '#ff6fae'];
 
 function initials(displayName: string | null, email: string) {
   return (displayName?.trim() || email).slice(0, 1).toUpperCase();
@@ -65,8 +57,8 @@ function seedHash(seed: string, mod: number) {
 function avatarColor(seed: string) {
   return AVATAR_COLORS[seedHash(seed, AVATAR_COLORS.length)];
 }
-function crewGradient(seed: string) {
-  return CREW_GRADIENTS[seedHash(seed, CREW_GRADIENTS.length)];
+function crewRing(seed: string) {
+  return CREW_RINGS[seedHash(seed, CREW_RINGS.length)];
 }
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -81,18 +73,15 @@ function timeAgo(iso: string): string {
 function greeting(): string {
   const hour = new Date().getHours();
   if (hour < 5) return 'Late night';
-  if (hour < 12) return 'Morning';
-  if (hour < 17) return 'Afternoon';
-  return 'Evening';
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
 /**
- * Home — "what are my people up to?", not a Crews index and not a Crew-creation form. Composed
- * from three real signals, in priority order: is something already booked and coming up (the
- * hero), does a decision specifically need me (Needs You), then what's alive across every Crew
- * and what's worth doing that Plot already knows about (the two rails below). See
- * docs/DECISIONS.md#golden-hour-redesign and #nav-restructure for how this replaced the old
- * combined Home+Crews page.
+ * Home V2 — same data/logic as v1 (crews, upcoming plans, ideas, activity), an entirely
+ * different presentation. See globals.css's "V2 DESIGN SYSTEM" block and
+ * docs/DECISIONS.md#v2-art-direction for what changed and why.
  */
 export default function HomePage() {
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
@@ -122,10 +111,7 @@ export default function HomePage() {
 
   const nextPlan = upcoming?.find((p) => p.startsAt && new Date(p.startsAt).getTime() > Date.now()) ?? upcoming?.[0] ?? null;
 
-  const needsAttention = useMemo(
-    () => (crews ?? []).filter((c) => c.activePlan && !c.activePlan.iVoted),
-    [crews],
-  );
+  const needsAttention = useMemo(() => (crews ?? []).filter((c) => c.activePlan && !c.activePlan.iVoted), [crews]);
 
   const recentActivity = useMemo(
     () =>
@@ -137,279 +123,259 @@ export default function HomePage() {
   );
 
   const loading = crews === null && !error;
+  const firstName = me ? displayNameOf(me.displayName, me.email).split(' ')[0] : '';
 
   return (
-    <>
-      {/* Compact identity strip, not a masthead — the point of arriving here is the content
-          below, not a wordmark. Tapping the avatar goes to You, same as the tab. */}
-      <nav className="nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <div className="muted" style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.03em' }}>{greeting()}{me ? `, ${displayNameOf(me.displayName, me.email).split(' ')[0]}` : ''}</div>
-        </div>
-        <Link href="/profile" aria-label="Your profile">
-          <div
-            className="avatar"
-            style={{ width: 34, height: 34, fontSize: 13, background: me ? avatarColor(me.displayName ?? me.email) : 'var(--ink-surface-2)' }}
-          >
-            {me ? initials(me.displayName, me.email) : ''}
-          </div>
-        </Link>
-      </nav>
-
-      <div className="page" style={{ paddingTop: 18 }}>
-        {error && <div className="error">{error}</div>}
-
-        {loading && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 14 }}>
-            <div style={{ height: 200, borderRadius: 24, background: 'var(--ink-surface)', opacity: 0.5 }} />
-            <div style={{ height: 60, borderRadius: 16, background: 'var(--ink-surface)', opacity: 0.5 }} />
-          </div>
-        )}
-
-        {/* The app's real empty state (brief: teach the value proposition, don't hand someone
-            a form) — creating a Crew is a deliberate second step on /crews, never a text field
-            sitting in the middle of the feed. */}
-        {crews?.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '64px 12px 32px' }}>
-            <div style={{ fontSize: 40, marginBottom: 14 }}>🌆</div>
-            <h1 style={{ fontFamily: 'Fraunces, serif', fontSize: 25, marginBottom: 8, lineHeight: 1.2 }}>
-              Your weekends<br />start here.
-            </h1>
-            <p className="muted" style={{ marginBottom: 22, lineHeight: 1.6, maxWidth: 280, marginInline: 'auto' }}>
-              Start a Crew, bring your people in, and Plot finds what you should do together.
-            </p>
-            <Link href="/crews?new=1" className="btn btn-primary" style={{ width: 'auto', padding: '13px 26px', marginBottom: 10 }}>
-              Start a Crew
-            </Link>
+    <div className="v2">
+      <div className="v2-shell-desktop">
+        <div className="v2-page" style={{ paddingTop: 28 }}>
+          {/* Header — a real page element, not a slim top bar. The avatar here is a mobile-only
+              affordance (desktop already has one pinned to the nav rail). */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 26 }}>
             <div>
-              <Link href="/crews" className="muted" style={{ fontSize: 13 }}>
-                Have an invite? Join a Crew
-              </Link>
+              <h1 className="v2-display" style={{ fontSize: 34, lineHeight: 1.06, marginBottom: 4 }}>
+                {greeting()}{firstName && `, ${firstName}`}
+              </h1>
+              <p className="v2-muted" style={{ fontSize: 14.5 }}>Here&rsquo;s what your people are up to.</p>
             </div>
+            <Link
+              href="/profile"
+              aria-label="Your profile"
+              style={{
+                flexShrink: 0,
+                width: 42,
+                height: 42,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 800,
+                fontSize: 15,
+                color: '#fff',
+                background: me ? avatarColor(me.displayName ?? me.email) : 'var(--v2-ink-dim)',
+                boxShadow: 'var(--v2-shadow-sm)',
+              }}
+            >
+              {me ? initials(me.displayName, me.email) : ''}
+            </Link>
           </div>
-        )}
 
-        {/* NEXT UP — a confirmed plan is the single most important thing Plot can tell someone;
-            it gets the one big visual module on the page, everything else is quieter. */}
-        {nextPlan && (
-          <Link
-            href={`/plans/${nextPlan.publicSlug}`}
-            className="fade-up"
-            style={{
-              display: 'block',
-              textDecoration: 'none',
-              color: 'inherit',
-              position: 'relative',
-              height: 236,
-              borderRadius: 26,
-              overflow: 'hidden',
-              marginBottom: 28,
-              boxShadow: 'var(--ambient-shadow)',
-              background: categoryBackground(nextPlan.imageUrl, nextPlan.category),
-            }}
-          >
-            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(15,10,6,0) 25%, rgba(15,10,6,0.6) 62%, rgba(15,10,6,0.94) 100%)' }} />
-            {!nextPlan.imageUrl && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 60, opacity: 0.5 }}>
-                {categoryStyle(nextPlan.category).emoji}
-              </div>
-            )}
-            <div style={{ position: 'absolute', top: 16, left: 20 }}>
-              <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#100a05', background: 'var(--ink-gold)', padding: '5px 10px', borderRadius: 8 }}>
-                Next up
-              </span>
-            </div>
-            <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '20px 22px' }}>
-              <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 25, lineHeight: 1.12, marginBottom: 6, textShadow: '0 2px 14px rgba(0,0,0,0.5)' }}>
-                {nextPlan.title}
-              </div>
-              <div style={{ fontSize: 13.5, color: 'rgba(247,240,228,0.9)' }}>
-                {nextPlan.startsAt
-                  ? new Date(nextPlan.startsAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-                  : 'Time to be confirmed'}
-                {nextPlan.venueName && ` · ${nextPlan.venueName}`}
-              </div>
-              <div style={{ fontSize: 13, color: 'rgba(247,240,228,0.7)', marginTop: 2 }}>
-                {nextPlan.crew.name} · {nextPlan.goingCount} going
-              </div>
-            </div>
-          </Link>
-        )}
+          {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
-        {/* NEEDS YOU — plain list rhythm, no card boxing: each row is a hairline-divided,
-            fully-tappable action, not a database record in a container. */}
-        {needsAttention.length > 0 && (
-          <div style={{ marginBottom: 26 }}>
-            <div className="eyebrow" style={{ marginBottom: 4 }}>Needs you</div>
-            {needsAttention.map((c) => (
-              <Link
-                key={c.id}
-                href={`/plans/${c.activePlan!.publicSlug}`}
-                className="fade-up"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  textDecoration: 'none',
-                  color: 'inherit',
-                  padding: '14px 2px',
-                  borderBottom: '1px solid var(--ink-border)',
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{c.activePlan!.title}</div>
-                  <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-                    {c.name} · {c.activePlan!.inCount}/{c.activePlan!.totalMembers} voted
-                  </div>
-                </div>
+          {loading && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
+              <div style={{ height: 320, borderRadius: 28, background: 'var(--v2-bg-deep)' }} />
+              <div style={{ height: 88, borderRadius: 20, background: 'var(--v2-bg-deep)' }} />
+            </div>
+          )}
+
+          {crews?.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '56px 12px 32px' }}>
+              <h2 className="v2-display" style={{ fontSize: 28, marginBottom: 10, lineHeight: 1.15 }}>
+                Your weekends<br />start here.
+              </h2>
+              <p className="v2-muted" style={{ marginBottom: 22, lineHeight: 1.6, maxWidth: 280, marginInline: 'auto' }}>
+                Start a Crew, bring your people in, and Plot finds what you should do together.
+              </p>
+              <Link href="/crews?new=1" className="v2-btn v2-btn-brand">Start a Crew</Link>
+            </div>
+          )}
+
+          {/* NEXT UP — the one big, confident module on the page. */}
+          {nextPlan && (
+            <Link
+              href={`/plans/${nextPlan.publicSlug}`}
+              className="fade-up"
+              style={{
+                display: 'block',
+                position: 'relative',
+                height: 340,
+                borderRadius: 'var(--v2-r-lg)',
+                overflow: 'hidden',
+                marginBottom: 32,
+                boxShadow: 'var(--v2-shadow-lg)',
+                background: v2Art(nextPlan.imageUrl, nextPlan.category),
+              }}
+            >
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(21,11,44,0) 30%, rgba(21,11,44,0.55) 70%, rgba(21,11,44,0.88) 100%)' }} />
+              <div style={{ position: 'absolute', top: 20, left: 22 }}>
                 <span
                   style={{
-                    flexShrink: 0,
-                    fontSize: 12.5,
-                    fontWeight: 700,
-                    color: 'var(--ink-gold-ink)',
-                    background: 'var(--ink-gold)',
-                    padding: '8px 16px',
+                    fontSize: 11.5,
+                    fontWeight: 800,
+                    letterSpacing: '-0.01em',
+                    color: 'var(--v2-brand-ink)',
+                    background: 'var(--v2-brand)',
+                    padding: '7px 14px',
                     borderRadius: 100,
                   }}
                 >
-                  Vote
+                  Next up
                 </span>
-              </Link>
-            ))}
-          </div>
-        )}
+              </div>
+              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '24px 26px' }}>
+                <div className="v2-display" style={{ fontSize: 30, lineHeight: 1.08, color: '#fff', marginBottom: 10, maxWidth: '90%' }}>
+                  {nextPlan.title}
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.92)', marginBottom: 12 }}>
+                  {nextPlan.startsAt
+                    ? new Date(nextPlan.startsAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+                    : 'Time to be confirmed'}
+                  {nextPlan.venueName && ` · ${nextPlan.venueName}`}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.75)' }}>
+                    {nextPlan.crew.name} · {nextPlan.goingCount} going
+                  </span>
+                </div>
+              </div>
+            </Link>
+          )}
 
-        {/* YOUR CREWS — a rail, not a stack: each tile carries its own colour identity plus
-            whatever's actually happening in it, so a row of several reads as different groups
-            of different people, not repeats of the same row. */}
-        {crews && crews.length > 0 && (
-          <div style={{ marginBottom: 28 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
-              <div className="eyebrow" style={{ marginBottom: 0 }}>Your Crews</div>
-              <Link href="/crews" className="muted" style={{ fontSize: 12.5 }}>See all →</Link>
-            </div>
-            <div style={{ display: 'flex', gap: 12, overflowX: 'auto', margin: '0 -20px', padding: '0 20px 4px', scrollSnapType: 'x proximity' }}>
-              {crews.slice(0, 6).map((crew) => (
-                <Link
-                  key={crew.id}
-                  href={`/crews/${crew.id}`}
-                  className="fade-up"
-                  style={{
-                    flex: '0 0 auto',
-                    width: 180,
-                    borderRadius: 22,
-                    overflow: 'hidden',
-                    textDecoration: 'none',
-                    color: 'inherit',
-                    background: 'var(--ink-surface)',
-                    boxShadow: 'var(--ambient-shadow)',
-                    scrollSnapAlign: 'start',
-                  }}
-                >
-                  <div style={{ height: 86, background: crewGradient(crew.id), position: 'relative', padding: 10 }}>
-                    <div className="stack" style={{ position: 'absolute', bottom: 10, left: 10 }}>
-                      {crew.members.slice(0, 4).map((m) => (
-                        <div key={m.user.id} className="avatar" style={{ width: 24, height: 24, fontSize: 9.5, background: avatarColor(m.user.displayName ?? m.user.email), boxShadow: '0 0 0 2px var(--ink-surface)' }}>
-                          {initials(m.user.displayName, m.user.email)}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div style={{ padding: '11px 12px 13px' }}>
-                    <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 15, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {crew.name}
-                    </div>
-                    {crew.latestMessage ? (
-                      <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                        <span style={{ fontWeight: 600, color: 'var(--ink-text)' }}>{crew.latestMessage.authorName}: </span>
-                        {messagePreview(crew.latestMessage.body)}
-                      </div>
-                    ) : (
-                      <div className="muted" style={{ fontSize: 11.5 }}>Say hi →</div>
-                    )}
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* IDEAS FOR YOU — Explore surfaced right on Home, image-led, so discovery isn't
-            something you only find by tapping into a separate tab. */}
-        {ideas && ideas.length > 0 && (
-          <div style={{ marginBottom: 26 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
-              <div className="eyebrow" style={{ marginBottom: 0 }}>Ideas for you</div>
-              <Link href="/explore" className="muted" style={{ fontSize: 12.5 }}>Explore →</Link>
-            </div>
-            <div style={{ display: 'flex', gap: 12, overflowX: 'auto', margin: '0 -20px', padding: '0 20px 4px', scrollSnapType: 'x proximity' }}>
-              {ideas.map((exp) => {
-                const style = categoryStyle(exp.category);
-                const price = formatPriceFrom(exp.priceMinMinor, exp.currency);
-                return (
+          {/* NEEDS YOU */}
+          {needsAttention.length > 0 && (
+            <div style={{ marginBottom: 30 }}>
+              <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Needs you</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {needsAttention.map((c) => (
                   <Link
-                    key={exp.id}
-                    href="/explore"
-                    className="fade-up"
-                    style={{
-                      flex: '0 0 auto',
-                      width: 156,
-                      borderRadius: 20,
-                      overflow: 'hidden',
-                      textDecoration: 'none',
-                      color: 'inherit',
-                      boxShadow: 'var(--ambient-shadow)',
-                      scrollSnapAlign: 'start',
-                    }}
+                    key={c.id}
+                    href={`/plans/${c.activePlan!.publicSlug}`}
+                    className="v2-card fade-up"
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '15px 18px' }}
                   >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>{c.activePlan!.title}</div>
+                      <div className="v2-muted" style={{ fontSize: 12.5, marginTop: 2 }}>
+                        {c.name} · {c.activePlan!.inCount}/{c.activePlan!.totalMembers} voted
+                      </div>
+                    </div>
+                    <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--v2-brand-ink)', background: 'var(--v2-brand)', padding: '9px 18px', borderRadius: 100 }}>
+                      Vote
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* YOUR CREWS — a row of people, not a row of cards: a coloured ring (the Crew's own
+              identity) around a stacked-avatar bubble, name below, the way Stories rows work. */}
+          {crews && crews.length > 0 && (
+            <div style={{ marginBottom: 32 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Your Crews</div>
+                <Link href="/crews" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>See all</Link>
+              </div>
+              <div style={{ display: 'flex', gap: 18, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
+                {crews.slice(0, 6).map((crew) => (
+                  <Link key={crew.id} href={`/crews/${crew.id}`} className="fade-up" style={{ flex: '0 0 auto', width: 76, textAlign: 'center' }}>
                     <div
                       style={{
-                        height: 116,
+                        width: 68,
+                        height: 68,
+                        borderRadius: '50%',
+                        margin: '0 auto 8px',
+                        padding: 3,
+                        background: `conic-gradient(${crewRing(crew.id)}, ${crewRing(crew.id)}cc, ${crewRing(crew.id)})`,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        fontSize: 30,
-                        background: categoryBackground(exp.imageUrl, exp.category),
                       }}
                     >
-                      {!exp.imageUrl && style.emoji}
-                    </div>
-                    <div style={{ padding: '9px 10px 11px', background: 'var(--ink-surface)' }}>
-                      <div style={{ fontWeight: 700, fontSize: 12.5, lineHeight: 1.3, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                        {exp.name}
+                      <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'var(--v2-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 3 }}>
+                        <div className="stack">
+                          {crew.members.slice(0, 3).map((m) => (
+                            <div
+                              key={m.user.id}
+                              style={{
+                                width: 20, height: 20, borderRadius: '50%', marginLeft: -6, fontSize: 8, fontWeight: 800, color: '#fff',
+                                background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--v2-surface)',
+                              }}
+                            >
+                              {initials(m.user.displayName, m.user.email)}
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      <div className="muted" style={{ fontSize: 11 }}>
-                        {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
-                        {price && ` · ${price}`}
-                      </div>
                     </div>
+                    <div style={{ fontSize: 11.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crew.name}</div>
+                    {crew.latestMessage ? (
+                      <div className="v2-dim" style={{ fontSize: 10, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {messagePreview(crew.latestMessage.body)}
+                      </div>
+                    ) : (
+                      <div className="v2-dim" style={{ fontSize: 10, marginTop: 1 }}>Say hi</div>
+                    )}
                   </Link>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {recentActivity.length > 0 && (
-          <div>
-            <div className="eyebrow" style={{ marginBottom: 6 }}>Recent activity</div>
-            {recentActivity.map((c) => (
-              <div key={c.id} style={{ display: 'flex', gap: 10, padding: '9px 0', fontSize: 13, borderBottom: '1px solid var(--ink-border)' }}>
-                <div className="muted" style={{ flexShrink: 0, width: 26, fontSize: 11 }}>{timeAgo(c.latestMessage!.createdAt)}</div>
-                <div style={{ minWidth: 0 }}>
-                  <strong>{c.latestMessage!.authorName}</strong> in {c.name}
-                  <div className="muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {messagePreview(c.latestMessage!.body)}
+          {/* IDEAS FOR YOU — an asymmetric editorial grid, not a row of equal squares: one large
+              feature card plus two smaller ones stacked beside it. */}
+          {ideas && ideas.length > 0 && (
+            <div style={{ marginBottom: 30 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Ideas for tonight</div>
+                <Link href="/explore" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>Explore</Link>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 12 }}>
+                {ideas.slice(0, 3).map((exp, i) => {
+                  const price = formatPriceFrom(exp.priceMinMinor, exp.currency);
+                  return (
+                    <Link
+                      key={exp.id}
+                      href="/explore"
+                      className="fade-up"
+                      style={{
+                        gridColumn: i === 0 ? '1' : '2',
+                        gridRow: i === 0 ? '1 / span 2' : i === 1 ? '1' : '2',
+                        position: 'relative',
+                        borderRadius: 'var(--v2-r-md)',
+                        overflow: 'hidden',
+                        minHeight: i === 0 ? 240 : 114,
+                        boxShadow: 'var(--v2-shadow-sm)',
+                        background: v2Art(exp.imageUrl, exp.category),
+                      }}
+                    >
+                      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(21,11,44,0) 40%, rgba(21,11,44,0.82) 100%)' }} />
+                      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: i === 0 ? '16px' : '11px 12px' }}>
+                        <div style={{ fontWeight: 800, fontSize: i === 0 ? 17 : 12.5, color: '#fff', lineHeight: 1.25, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                          {exp.name}
+                        </div>
+                        <div style={{ fontSize: i === 0 ? 12.5 : 10.5, color: 'rgba(255,255,255,0.78)', fontWeight: 600 }}>
+                          {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+                          {price && ` · ${price}`}
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {recentActivity.length > 0 && (
+            <div>
+              <div className="v2-eyebrow" style={{ marginBottom: 8 }}>Recent activity</div>
+              {recentActivity.map((c) => (
+                <div key={c.id} style={{ display: 'flex', gap: 10, padding: '10px 0', fontSize: 13, borderBottom: '1px solid var(--v2-line)' }}>
+                  <div className="v2-dim" style={{ flexShrink: 0, width: 26, fontSize: 11, paddingTop: 1 }}>{timeAgo(c.latestMessage!.createdAt)}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <strong>{c.latestMessage!.authorName}</strong> <span className="v2-muted">in {c.name}</span>
+                    <div className="v2-muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {messagePreview(c.latestMessage!.body)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-      <TabBar />
-    </>
+      <TabBarV2 />
+    </div>
   );
 }
