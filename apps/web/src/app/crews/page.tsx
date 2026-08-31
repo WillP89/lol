@@ -7,6 +7,7 @@ import { api, ApiError } from '@/lib/api';
 import { TabBarV2 } from '@/components/TabBarV2';
 import { BottomSheet } from '@/components/BottomSheet';
 import { messagePreview } from '@/lib/messagePreview';
+import { IconCalendar, IconPoll } from '@/components/icons';
 
 interface CrewSummary {
   id: string;
@@ -56,7 +57,7 @@ function CrewActivityLine({ crew }: { crew: CrewSummary }) {
       : null;
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--v2-green)', fontWeight: 700 }}>
-        <span>📅</span>
+        <IconCalendar size={13} style={{ flexShrink: 0 }} />
         <span>
           {crew.upcomingPlan.title}
           {when && ` · ${when}`}
@@ -67,7 +68,7 @@ function CrewActivityLine({ crew }: { crew: CrewSummary }) {
   if (crew.activePlan) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#8a5f1f', fontWeight: 700 }}>
-        <span>🗳️</span>
+        <IconPoll size={13} style={{ flexShrink: 0 }} />
         <span>
           Deciding: {crew.activePlan.title} · {crew.activePlan.inCount}/{crew.activePlan.totalMembers} in
         </span>
@@ -253,7 +254,6 @@ export default function CrewsPage() {
 
           {crews?.length === 0 && (
             <div style={{ textAlign: 'center', padding: '56px 12px 32px' }}>
-              <div style={{ fontSize: 34, marginBottom: 10 }}>👋</div>
               <h2 className="v2-display" style={{ fontSize: 26, marginBottom: 10, lineHeight: 1.15 }}>No Crews yet.</h2>
               <p className="v2-muted" style={{ marginBottom: 22, lineHeight: 1.6, maxWidth: 280, marginInline: 'auto' }}>
                 Start one, or ask a friend for their invite link.

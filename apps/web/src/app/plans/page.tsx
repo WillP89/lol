@@ -7,6 +7,7 @@ import { TabBarV2 } from '@/components/TabBarV2';
 import { v2Art } from '@/lib/v2Art';
 import { formatPriceFrom } from '@/lib/formatPrice';
 import { useScrollReveal } from '@/lib/useScrollReveal';
+import { IconFlame, IconFlag, IconPlace } from '@/components/icons';
 
 interface UpcomingPlan {
   id: string;
@@ -89,7 +90,6 @@ export default function PlansPage() {
 
           {plans?.length === 0 && (
             <div style={{ textAlign: 'center', padding: '56px 12px 32px' }}>
-              <div style={{ fontSize: 34, marginBottom: 10 }}>🗓️</div>
               <h2 className="v2-display" style={{ fontSize: 26, marginBottom: 10, lineHeight: 1.15 }}>Nothing locked in yet.</h2>
               <p className="v2-muted" style={{ marginBottom: 22, lineHeight: 1.6, maxWidth: 280, marginInline: 'auto' }}>
                 Once a Crew votes something in, it shows up here.
@@ -112,8 +112,9 @@ export default function PlansPage() {
                   const tonight = bucket === 'Tonight';
                   return (
                     <div key={bucket}>
-                      <div className="v2-eyebrow" style={{ marginBottom: 10, color: tonight ? 'var(--v2-pop)' : undefined }}>
-                        {tonight ? '🔥 Tonight' : bucket}
+                      <div className="v2-eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 10, color: tonight ? 'var(--v2-pop)' : undefined }}>
+                        {tonight && <IconFlame size={12} />}
+                        {tonight ? 'Tonight' : bucket}
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                         {grouped.get(bucket)!.map((plan) => {
@@ -150,7 +151,7 @@ export default function PlansPage() {
                                     <div className="v2-display" style={{ fontSize: 18, color: tonight ? '#fff' : undefined }}>{badge.num}</div>
                                   </>
                                 ) : (
-                                  <div style={{ fontSize: 16 }}>📌</div>
+                                  <IconFlag size={16} style={{ color: tonight ? '#fff' : 'var(--v2-ink-muted)' }} />
                                 )}
                               </div>
                               <div style={{ flexShrink: 0, width: 56, height: 56, borderRadius: 12, background: v2Art(plan.imageUrl, plan.category) }} />
@@ -178,9 +179,9 @@ export default function PlansPage() {
                                   rel="noreferrer"
                                   onClick={(e) => e.stopPropagation()}
                                   className="v2-tap-feedback"
-                                  style={{ alignSelf: 'center', flexShrink: 0, fontSize: 11.5, fontWeight: 800, color: 'var(--v2-brand)', background: 'var(--v2-bg-deep)', padding: '8px 12px', borderRadius: 100 }}
+                                  style={{ display: 'flex', alignItems: 'center', gap: 4, alignSelf: 'center', flexShrink: 0, fontSize: 11.5, fontWeight: 800, color: 'var(--v2-brand)', background: 'var(--v2-bg-deep)', padding: '8px 12px', borderRadius: 100 }}
                                 >
-                                  📍 Directions
+                                  <IconPlace size={12} />Directions
                                 </a>
                               )}
                             </Link>

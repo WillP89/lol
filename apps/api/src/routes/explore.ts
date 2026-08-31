@@ -19,7 +19,7 @@ export async function exploreRoutes(app: FastifyInstance): Promise<void> {
       resolvedCity = profile?.homeCity ?? UK_FALLBACK_CENTER.name;
     }
 
-    const experiences = await listExploreExperiences(resolvedCity);
+    const experiences = await listExploreExperiences(resolvedCity, request.user.id);
     // The map needs *somewhere* to centre on even with zero results for this city — its own
     // coordinates from the gazetteer, not a hardcoded London point. See
     // docs/DECISIONS.md#uk-wide-location.

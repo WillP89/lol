@@ -8,6 +8,7 @@ import { v2Art } from '@/lib/v2Art';
 import { formatPriceFrom } from '@/lib/formatPrice';
 import { displayNameOf } from '@/lib/displayName';
 import { messagePreview } from '@/lib/messagePreview';
+import { IconCalendar, IconPoll } from '@/components/icons';
 
 interface CrewSummary {
   id: string;
@@ -77,20 +78,21 @@ function timeAgo(iso: string): string {
  * unread-message tracking, which doesn't exist as a persisted "last seen" concept yet — see
  * docs/DECISIONS.md for that as a known gap, not something faked here with a random dot.
  */
-function crewStatusLine(crew: CrewSummary): { text: string; urgent: boolean } {
+type CrewStatusKind = 'calendar' | 'poll' | 'none';
+function crewStatusLine(crew: CrewSummary): { text: string; urgent: boolean; kind: CrewStatusKind } {
   if (crew.activePlan && !crew.activePlan.iVoted) {
-    return { text: `Vote needed · ${crew.activePlan.title}`, urgent: true };
+    return { text: `Vote needed · ${crew.activePlan.title}`, urgent: true, kind: 'none' };
   }
   if (crew.upcomingPlan) {
-    return { text: `📅 ${crew.upcomingPlan.title}`, urgent: false };
+    return { text: crew.upcomingPlan.title, urgent: false, kind: 'calendar' };
   }
   if (crew.activePlan) {
-    return { text: `🗳️ ${crew.activePlan.inCount}/${crew.activePlan.totalMembers} in · ${crew.activePlan.title}`, urgent: false };
+    return { text: `${crew.activePlan.inCount}/${crew.activePlan.totalMembers} in · ${crew.activePlan.title}`, urgent: false, kind: 'poll' };
   }
   if (crew.latestMessage) {
-    return { text: messagePreview(crew.latestMessage.body), urgent: false };
+    return { text: messagePreview(crew.latestMessage.body), urgent: false, kind: 'none' };
   }
-  return { text: 'Say hi', urgent: false };
+  return { text: 'Say hi', urgent: false, kind: 'none' };
 }
 
 function greeting(): string {
@@ -281,8 +283,10 @@ export default function HomePage() {
                       )}
                     </div>
                     <div style={{ fontSize: 11.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crew.name}</div>
-                    <div className={status.urgent ? undefined : 'v2-dim'} style={{ fontSize: 10, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: status.urgent ? 'var(--v2-pop)' : undefined, fontWeight: status.urgent ? 700 : 400 }}>
-                      {status.text}
+                    <div className={status.urgent ? undefined : 'v2-dim'} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, marginTop: 1, overflow: 'hidden', color: status.urgent ? 'var(--v2-pop)' : undefined, fontWeight: status.urgent ? 700 : 400 }}>
+                      {status.kind === 'calendar' && <IconCalendar size={9} style={{ flexShrink: 0 }} />}
+                      {status.kind === 'poll' && <IconPoll size={9} style={{ flexShrink: 0 }} />}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{status.text}</span>
                     </div>
                   </Link>
                   );
@@ -471,8 +475,10 @@ export default function HomePage() {
                   </div>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crew.name}</div>
-                    <div className={status.urgent ? undefined : 'v2-dim'} style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: status.urgent ? 'var(--v2-pop)' : undefined, fontWeight: status.urgent ? 700 : 400 }}>
-                      {status.text}
+                    <div className={status.urgent ? undefined : 'v2-dim'} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, overflow: 'hidden', color: status.urgent ? 'var(--v2-pop)' : undefined, fontWeight: status.urgent ? 700 : 400 }}>
+                      {status.kind === 'calendar' && <IconCalendar size={10} style={{ flexShrink: 0 }} />}
+                      {status.kind === 'poll' && <IconPoll size={10} style={{ flexShrink: 0 }} />}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{status.text}</span>
                     </div>
                   </div>
                 </Link>

@@ -11,6 +11,7 @@ import { LocationSearch } from '@/components/LocationSearch';
 import { v2Art } from '@/lib/v2Art';
 import { formatPriceRange } from '@/lib/formatPrice';
 import { useScrollReveal } from '@/lib/useScrollReveal';
+import { IconChat, IconPlace, IconList, IconMap } from '@/components/icons';
 import type { ExploreExperience } from './ExploreMap';
 
 // Leaflet touches `window` at module load — client-side only.
@@ -221,8 +222,8 @@ export default function ExplorePage() {
         {crews === null && <p className="v2-muted">Loading your Crews…</p>}
         {crews?.length === 0 && <p className="v2-muted">You&rsquo;re not in a Crew yet — <Link href="/crews">create one first</Link>.</p>}
         {crews?.map((crew) => (
-          <button key={crew.id} className="v2-btn v2-btn-ghost" disabled={sending !== null} onClick={() => sendToCrew(crew.id)} style={{ justifyContent: 'flex-start' }}>
-            {sending === crew.id ? 'Sending…' : `💬 ${crew.name}`}
+          <button key={crew.id} className="v2-btn v2-btn-ghost" disabled={sending !== null} onClick={() => sendToCrew(crew.id)} style={{ justifyContent: 'flex-start', gap: 8 }}>
+            {sending === crew.id ? 'Sending…' : (<><IconChat size={15} />{crew.name}</>)}
           </button>
         ))}
         <button className="v2-btn v2-btn-ghost" onClick={() => setPickingCrew(false)} disabled={sending !== null}>← Back</button>
@@ -236,9 +237,9 @@ export default function ExplorePage() {
         <h1 className="v2-display" style={{ fontSize: 32 }}>Discover {city ?? ''}</h1>
         <button
           onClick={() => setPickingCity(true)}
-          style={{ flexShrink: 0, marginTop: 8, border: 'none', background: 'var(--v2-bg-deep)', borderRadius: 100, padding: '7px 14px', fontSize: 12.5, fontWeight: 700, color: 'var(--v2-ink-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, marginTop: 8, border: 'none', background: 'var(--v2-bg-deep)', borderRadius: 100, padding: '7px 14px', fontSize: 12.5, fontWeight: 700, color: 'var(--v2-ink-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}
         >
-          📍 Change
+          <IconPlace size={13} />Change
         </button>
       </div>
       <p className="v2-muted" style={{ fontSize: 14.5, marginBottom: 20 }}>Real things happening near you, picked for tonight.</p>
@@ -377,9 +378,9 @@ export default function ExplorePage() {
             <button
               onClick={() => setMobileMap((v) => !v)}
               className="v2-btn v2-btn-dark"
-              style={{ position: 'fixed', right: 18, bottom: 96, zIndex: 45, boxShadow: 'var(--v2-shadow-lg)' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, position: 'fixed', right: 18, bottom: 96, zIndex: 45, boxShadow: 'var(--v2-shadow-lg)' }}
             >
-              {mobileMap ? '☰ List' : '🗺 Map'}
+              {mobileMap ? <><IconList size={15} />List</> : <><IconMap size={15} />Map</>}
             </button>
             {mobileMap && (
               <div style={{ position: 'fixed', inset: 0, zIndex: 42, background: 'var(--v2-bg)' }}>

@@ -10,6 +10,7 @@ import { v2Art } from '@/lib/v2Art';
 import { messagePreview } from '@/lib/messagePreview';
 import { BottomSheet } from '@/components/BottomSheet';
 import { TabBarV2 } from '@/components/TabBarV2';
+import { IconSpark, IconPlace, IconPoll, IconCalendar, IconFlag, IconLock } from '@/components/icons';
 
 interface CrewListItem {
   id: string;
@@ -242,7 +243,7 @@ function EventCard({
               share. A small eyebrow badge, not a disclaimer banner. */}
           {data.recommendation && (
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--v2-brand)', background: 'rgba(255,47,126,0.1)', padding: '3px 8px', borderRadius: 100, marginBottom: 8 }}>
-              <span>✨</span><span>Plot</span>
+              <IconSpark size={11} /><span>Plot</span>
             </div>
           )}
           <div className="v2-display" style={{ fontSize: 15, marginBottom: 4 }}>{data.plan.title}</div>
@@ -258,9 +259,10 @@ function EventCard({
           )}
           {/* The actual life-cycle line — different words at each stage, not the same "X/Y in"
               counter throughout. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+            {locked && <IconLock size={12} style={{ flexShrink: 0, color: 'var(--v2-green)' }} />}
             <span style={{ fontSize: 12, fontWeight: 700, color: locked ? 'var(--v2-green)' : 'var(--v2-ink)' }}>
-              {locked ? '🔒 Locked in' : planStageCopy(data.plan.status, data.pulse, proposerName)}
+              {locked ? 'Locked in' : planStageCopy(data.plan.status, data.pulse, proposerName)}
             </span>
           </div>
         </div>
@@ -326,9 +328,10 @@ function EventCard({
           onClick={() => onLock(data.plan.id)}
           disabled={locking}
           className="v2-tap-feedback"
-          style={{ display: 'block', width: '100%', padding: '10px 0', border: 'none', borderTop: '1px solid var(--v2-line)', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand)' }}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', padding: '10px 0', border: 'none', borderTop: '1px solid var(--v2-line)', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand)' }}
         >
-          {locking ? 'Locking in…' : '🔒 Lock it in'}
+          {!locking && <IconLock size={13} />}
+          {locking ? 'Locking in…' : 'Lock it in'}
         </button>
       )}
     </div>
@@ -465,9 +468,10 @@ function PollCard({ poll, messageId, onVote, members, onLockOption, locking, jus
           onClick={() => onLockOption(leading)}
           disabled={locking}
           className="v2-tap-feedback"
-          style={{ display: 'block', width: '100%', padding: '9px 0', border: 'none', borderTop: '1px solid var(--v2-line)', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand)' }}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', padding: '9px 0', border: 'none', borderTop: '1px solid var(--v2-line)', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand)' }}
         >
-          {locking ? 'Locking in…' : `🔒 Lock in "${leading}"`}
+          {!locking && <IconLock size={13} />}
+          {locking ? 'Locking in…' : `Lock in "${leading}"`}
         </button>
       )}
     </div>
@@ -1179,8 +1183,11 @@ export default function CrewPage() {
                   </div>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
-                    <div className="v2-dim" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {c.upcomingPlan ? `📅 ${c.upcomingPlan.title}` : c.activePlan ? `🗳️ ${c.activePlan.title}` : c.latestMessage ? messagePreview(c.latestMessage.body) : 'Say hi'}
+                    <div className="v2-dim" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, overflow: 'hidden' }}>
+                      {c.upcomingPlan ? <IconCalendar size={11} style={{ flexShrink: 0 }} /> : c.activePlan ? <IconPoll size={11} style={{ flexShrink: 0 }} /> : null}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {c.upcomingPlan ? c.upcomingPlan.title : c.activePlan ? c.activePlan.title : c.latestMessage ? messagePreview(c.latestMessage.body) : 'Say hi'}
+                      </span>
                     </div>
                   </div>
                 </Link>
@@ -1215,7 +1222,9 @@ export default function CrewPage() {
               background: upcomingPlan ? 'rgba(27,122,77,0.1)' : 'rgba(185,131,42,0.16)',
             }}
           >
-            <span style={{ fontSize: 15 }}>{upcomingPlan ? '📅' : '🗳️'}</span>
+            <span style={{ color: upcomingPlan ? '#1b7a4d' : '#8a5f1f', flexShrink: 0 }}>
+              {upcomingPlan ? <IconCalendar size={15} /> : <IconPoll size={15} />}
+            </span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <span style={{ fontSize: 13.5, fontWeight: 700 }}>{context.title}</span>
               {activePlan === context && <span className="v2-muted" style={{ fontSize: 12 }}> · {context.votes.filter((v) => v.vote === 'IN').length}/{context.members.length} in</span>}
@@ -1413,11 +1422,11 @@ export default function CrewPage() {
             <div className="v2-eyebrow" style={{ marginBottom: 14 }}>Add to {crew.name}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {[
-                { icon: '✨', label: 'Suggest something', desc: 'Plot picks a few — tap the one you want', action: () => openAction('suggest'), disabled: false },
-                { icon: '📍', label: 'Share a place', desc: 'Browse and send something specific', action: () => openAction('share'), disabled: false },
-                { icon: '🗳️', label: 'Poll the group', desc: 'Ask a question, watch it settle', action: () => openAction('poll'), disabled: false },
-                { icon: '📅', label: 'Check availability', desc: "When's everyone actually free", action: () => openAction('availability'), disabled: false },
-                { icon: '📌', label: 'Log a plan', desc: "Already know what you're doing", action: () => openAction('manual'), disabled: false },
+                { Icon: IconSpark, tint: 'rgba(255,47,126,0.12)', ink: 'var(--v2-brand)', label: 'Suggest something', desc: 'Plot picks a few — tap the one you want', action: () => openAction('suggest'), disabled: false },
+                { Icon: IconPlace, tint: 'rgba(47,138,255,0.12)', ink: '#2f8aff', label: 'Share a place', desc: 'Browse and send something specific', action: () => openAction('share'), disabled: false },
+                { Icon: IconPoll, tint: 'rgba(124,92,252,0.12)', ink: '#7c5cfc', label: 'Poll the group', desc: 'Ask a question, watch it settle', action: () => openAction('poll'), disabled: false },
+                { Icon: IconCalendar, tint: 'rgba(52,211,153,0.14)', ink: '#1b8a5c', label: 'Check availability', desc: "When's everyone actually free", action: () => openAction('availability'), disabled: false },
+                { Icon: IconFlag, tint: 'rgba(255,197,61,0.16)', ink: '#8a5f1f', label: 'Log a plan', desc: "Already know what you're doing", action: () => openAction('manual'), disabled: false },
               ].map((item) => (
                 <button
                   key={item.label}
@@ -1426,7 +1435,9 @@ export default function CrewPage() {
                   className="v2-card"
                   style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', border: 'none', textAlign: 'left', cursor: item.disabled ? 'default' : 'pointer', width: '100%', opacity: item.disabled ? 0.6 : 1 }}
                 >
-                  <span style={{ fontSize: 22 }}>{item.icon}</span>
+                  <span style={{ flexShrink: 0, width: 38, height: 38, borderRadius: 12, background: item.tint, color: item.ink, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <item.Icon size={19} />
+                  </span>
                   <div>
                     <div style={{ fontWeight: 800, fontSize: 14.5 }}>{item.label}</div>
                     <div className="v2-muted" style={{ fontSize: 12 }}>{item.desc}</div>

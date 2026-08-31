@@ -177,24 +177,29 @@ export default function BookingPage() {
                 <div className="v2-eyebrow">Rewind</div>
                 <p className="v2-display" style={{ margin: '4px 0 14px', fontSize: 17 }}>Would the Crew do this again?</p>
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                  {/* A four-level sentiment scale as plain text + a filled-dot intensity marker,
+                      not emoji standing in for the rating — see docs/DECISIONS.md#plot-iconography. */}
                   {([
-                    ['love', '😍', 'Love it'],
-                    ['like', '🙂', 'Liked it'],
-                    ['meh', '😐', 'Meh'],
-                    ['no', '👎', 'Not for us'],
-                  ] as const).map(([value, emoji, label]) => (
+                    ['love', 4, 'Love it'],
+                    ['like', 3, 'Liked it'],
+                    ['meh', 2, 'Meh'],
+                    ['no', 1, 'Not for us'],
+                  ] as const).map(([value, level, label]) => (
                     <button
                       key={value}
                       onClick={() => submitRewind(value)}
                       disabled={rewindSubmitting}
                       style={{
-                        display: 'flex', flexDirection: 'column', gap: 4, padding: '10px 8px', flex: 1,
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '10px 6px', flex: 1,
                         border: 'none', borderRadius: 14, background: 'var(--v2-bg-deep)', cursor: 'pointer',
                       }}
-                      aria-label={label}
                     >
-                      <span style={{ fontSize: 18 }}>{emoji}</span>
-                      <span style={{ fontSize: 9, fontWeight: 700 }}>{label}</span>
+                      <span style={{ display: 'flex', gap: 2 }}>
+                        {[1, 2, 3, 4].map((i) => (
+                          <span key={i} style={{ width: 5, height: 5, borderRadius: '50%', background: i <= level ? 'var(--v2-brand)' : 'var(--v2-line)' }} />
+                        ))}
+                      </span>
+                      <span style={{ fontSize: 10, fontWeight: 700 }}>{label}</span>
                     </button>
                   ))}
                 </div>

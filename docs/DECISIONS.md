@@ -1386,3 +1386,55 @@ reason/controls — only the Crew chat surface does; the brief's emphasis is squ
 way. Travel radius defaults to the average of members' own TasteProfile radius until a Crew
 explicitly picks a chip — there's no fifth "auto" chip shown as selected for that state, which
 is honest (nothing was explicitly chosen) rather than a UI a Crew never asked for.
+
+#### plot-iconography — a real icon system, not generic system emoji
+
+Real, direct complaint: the product read as "template-like, generic, AI-generated" — most
+visibly because ordinary system emoji (✨📍🗳️📅📌🔒🎉💬🔥🧭 etc.) were standing in for real
+product concepts throughout the chrome (the composer's action-sheet menu, Crew status lines,
+the landing page's "how it works" steps, empty states, error pages, the booking Rewind rating).
+Emoji a user types inside their own chat message is untouched — that's real user content, not
+iconography — and so is `REACTION_CHOICES` (👍❤️😂🎉), since those glyphs ARE the reaction
+feature itself, not a stand-in for something else.
+
+Built one small, coherent icon set instead (`components/icons.tsx`): nine line icons, 20px
+viewBox, 1.75 stroke, round caps/joins throughout — purpose-drawn for what they represent in
+Plot's own loop (a spark for a found idea, a pin for a place, stacked bars for a poll, a marked
+calendar for availability, a flag for a logged plan, a padlock for committed, a speech bubble
+for a conversation, a folded map / stacked rows for the map-list toggle, a flame for "tonight").
+Swapped in everywhere emoji were doing iconography's job: the composer menu (now tinted icon
+chips, not bare glyphs), the "✨ Plot" recommendation badge, Lock It In buttons, Crew/Home status
+lines, the landing page's three-step "how it works" cards, Explore's map/list toggle and
+location-change button, Plans' "Tonight" badge and Directions shortcut. Empty/error states
+(crews-list, plans-list, global error, 404) had their decorative emoji removed outright rather
+than icon-replaced — a plain, confident headline reads better than a icon that has nothing real
+to represent, matching the brief's own "not a gimmick" guidance. The Rewind rating (four emoji
+faces) became a plain text label + a four-dot intensity marker, the same honest-scale idea
+without borrowing someone else's emoji set as the visual language. `✓` (a plain Unicode
+checkmark, already the established confirmation marker throughout the app) is kept — it's
+typography, not category iconography, and redrawing it as another SVG would add inconsistency,
+not remove it.
+
+Verified via a script sweep across every `.tsx`/`.ts` file in `apps/web/src` (Unicode ranges
+U+1F000–U+1FFFF, U+2600–U+27BF, U+2B00–U+2BFF) confirming zero remaining generic emoji outside
+the two deliberate exceptions above — then confirmed live: real screenshots of the landing
+page's step icons, the composer's redesigned menu, a real Crew's empty-chat starters, and the
+Crews list empty state, all rendered with the new icon system, not emoji.
+
+#### explore-personalisation — the real "my preferences don't do anything" bug
+
+A second real bug found while investigating the emoji work's own visibility complaint: 
+`listExploreExperiences` (services/explore.ts), which backs both the Explore page and Home's
+"nearby suggestions" strip, took only a city — no user, no taste signal at all. Two users with
+completely different onboarding taste profiles in the same city saw byte-identical results in
+the same chronological order. This is the concrete mechanism behind the earlier "onboarding
+preferences didn't visibly affect anything" complaint, for the single-user discovery surfaces
+specifically (the Crew auto-recommendation engine was already personalised — see
+docs/DECISIONS.md#crew-auto-recommendations).
+
+Fixed by reordering (not filtering) results by the viewer's own `TasteProfile.categoryAffinity`
+— higher-affinity categories sort first within the existing date window; ties (including "no
+signal for this category") keep chronological order via a stable sort, so "happening soon"
+still surfaces rather than a total taste-only reshuffle. Nothing is hidden from a member's own
+browsing — Explore stays fully explorable either way. Reuses `categoryToTasteKey` (exported from
+services/match.ts) rather than a second mapping table.

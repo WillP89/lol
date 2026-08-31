@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { IconCompass } from '@/components/icons';
 
 /**
  * Next's default 404 is a bare white page with no relation to the rest of the app — a jarring
@@ -10,7 +11,7 @@ export default function NotFound() {
     <div className="v2">
       <div className="v2-page" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100vh', textAlign: 'center', alignItems: 'center' }}>
         <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 900, letterSpacing: '-0.02em', fontSize: 20, marginBottom: 20 }}>Plot</div>
-        <div style={{ fontSize: 40, marginBottom: 10 }}>🧭</div>
+        <IconCompass size={36} style={{ color: 'var(--v2-ink-dim)', marginBottom: 12 }} />
         <h1 className="v2-display" style={{ fontSize: 21, marginBottom: 8 }}>Nothing here.</h1>
         <p className="v2-muted" style={{ marginBottom: 22, maxWidth: 260 }}>
           This link might be old, or the Plan/Crew it pointed to isn&rsquo;t around anymore.

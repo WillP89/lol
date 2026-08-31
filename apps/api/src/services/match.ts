@@ -308,7 +308,7 @@ function medianOf(values: number[]): number {
  *  "clubbing", "live music"), which don't line up 1:1 with the Experience.category enum — this
  *  maps enum values to the closest onboarding key. A real mapping table grows with the taxonomy;
  *  this is deliberately a small, visible function rather than buried inline. */
-function categoryToTasteKey(category: string): string {
+export function categoryToTasteKey(category: string): string {
   const map: Record<string, string> = {
     LIVE_MUSIC: 'live_music',
     CLUBBING: 'clubbing',

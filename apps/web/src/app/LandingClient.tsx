@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useScrollReveal } from '@/lib/useScrollReveal';
+import { IconChat, IconPoll, IconLock } from '@/components/icons';
 
 /**
  * The interactive body of the landing page — split out from page.tsx so the server component
@@ -93,12 +94,14 @@ export default function LandingClient() {
         </h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 24 }}>
           {[
-            ['💬', 'Talk', 'Someone throws an idea into the group — a gig, a pub, a place they found.'],
-            ['🗳️', 'Decide', 'The Crew votes right there — in, maybe, or can’t make it. You watch it converge.'],
-            ['🔒', 'Go', 'Lock it in. It becomes a real Plan — on Home, on Plans, in everyone’s pocket.'],
-          ].map(([icon, title, desc], i) => (
+            { Icon: IconChat, tint: 'rgba(47,138,255,0.12)', ink: '#2f8aff', title: 'Talk', desc: 'Someone throws an idea into the group — a gig, a pub, a place they found.' },
+            { Icon: IconPoll, tint: 'rgba(124,92,252,0.12)', ink: '#7c5cfc', title: 'Decide', desc: 'The Crew votes right there — in, maybe, or can’t make it. You watch it converge.' },
+            { Icon: IconLock, tint: 'rgba(52,211,153,0.14)', ink: '#1b8a5c', title: 'Go', desc: 'Lock it in. It becomes a real Plan — on Home, on Plans, in everyone’s pocket.' },
+          ].map(({ Icon, tint, ink, title, desc }, i) => (
             <div key={title} className="v2-reveal v2-card" style={{ padding: '24px 22px', ['--reveal-i' as string]: i + 1 }}>
-              <div style={{ fontSize: 26, marginBottom: 12 }}>{icon}</div>
+              <div style={{ width: 44, height: 44, borderRadius: 13, background: tint, color: ink, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+                <Icon size={22} />
+              </div>
               <div className="v2-display" style={{ fontSize: 17, marginBottom: 6 }}>{title}</div>
               <div className="v2-muted" style={{ fontSize: 13.5, lineHeight: 1.55 }}>{desc}</div>
             </div>
