@@ -100,7 +100,7 @@ export default function HomePage() {
       .then((res) => setUpcoming(res.plans))
       .catch(() => {});
     api
-      .get<{ experiences: Experience[] }>('/explore/experiences?city=London')
+      .get<{ experiences: Experience[] }>('/explore/experiences') // no hardcoded city — resolves to this viewer's own home city server-side
       .then((res) => setIdeas(res.experiences.slice(0, 6)))
       .catch(() => {});
     api
@@ -181,7 +181,121 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* NEXT UP — the one big, confident module on the page. */}
+          {/* YOUR PEOPLE — social-first: this is the first real content on the page, not
+              discovery. A row of people, not a row of cards — a coloured ring (the Crew's own
+              identity) around a stacked-avatar bubble, name below, the way Stories rows work. */}
+          {crews && crews.length > 0 && (
+            <div style={{ marginBottom: 30 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Your people</div>
+                <Link href="/crews" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>See all</Link>
+              </div>
+              <div style={{ display: 'flex', gap: 18, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
+                {crews.slice(0, 6).map((crew) => (
+                  <Link key={crew.id} href={`/crews/${crew.id}`} className="fade-up" style={{ flex: '0 0 auto', width: 76, textAlign: 'center' }}>
+                    <div
+                      style={{
+                        width: 68,
+                        height: 68,
+                        borderRadius: '50%',
+                        margin: '0 auto 8px',
+                        padding: 3,
+                        background: `conic-gradient(${crewRing(crew.id)}, ${crewRing(crew.id)}cc, ${crewRing(crew.id)})`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'var(--v2-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 3 }}>
+                        <div className="stack">
+                          {crew.members.slice(0, 3).map((m) => (
+                            <div
+                              key={m.user.id}
+                              style={{
+                                width: 20, height: 20, borderRadius: '50%', marginLeft: -6, fontSize: 8, fontWeight: 800, color: '#fff',
+                                background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--v2-surface)',
+                              }}
+                            >
+                              {initials(m.user.displayName, m.user.email)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crew.name}</div>
+                    {crew.latestMessage ? (
+                      <div className="v2-dim" style={{ fontSize: 10, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {messagePreview(crew.latestMessage.body)}
+                      </div>
+                    ) : (
+                      <div className="v2-dim" style={{ fontSize: 10, marginTop: 1 }}>Say hi</div>
+                    )}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* NEEDS YOU */}
+          {needsAttention.length > 0 && (
+            <div style={{ marginBottom: 30 }}>
+              <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Needs you</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {needsAttention.map((c) => (
+                  <Link
+                    key={c.id}
+                    href={`/plans/${c.activePlan!.publicSlug}`}
+                    className="v2-card fade-up"
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '15px 18px' }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>{c.activePlan!.title}</div>
+                      <div className="v2-muted" style={{ fontSize: 12.5, marginTop: 2 }}>
+                        {c.name} · {c.activePlan!.inCount}/{c.activePlan!.totalMembers} voted
+                      </div>
+                    </div>
+                    <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--v2-brand-ink)', background: 'var(--v2-brand)', padding: '9px 18px', borderRadius: 100 }}>
+                      Vote
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* IN THE GROUPS — a real activity feed (who shared/said what, and where), the social
+              signal a "what are my people up to?" Home actually needs before any hero card. */}
+          {recentActivity.length > 0 && (
+            <div style={{ marginBottom: 32 }}>
+              <div className="v2-eyebrow" style={{ marginBottom: 10 }}>In the groups</div>
+              <div className="v2-card" style={{ padding: '4px 18px' }}>
+                {recentActivity.map((c, i) => (
+                  <div key={c.id} style={{ display: 'flex', gap: 12, padding: '13px 0', borderBottom: i < recentActivity.length - 1 ? '1px solid var(--v2-line)' : 'none' }}>
+                    <div
+                      style={{
+                        flexShrink: 0, width: 34, height: 34, borderRadius: '50%', fontSize: 12, fontWeight: 800, color: '#fff',
+                        background: avatarColor(c.latestMessage!.authorName), display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    >
+                      {c.latestMessage!.authorName.charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13.5 }}>
+                        <strong>{c.latestMessage!.authorName}</strong> <span className="v2-muted">in {c.name}</span>
+                      </div>
+                      <div className="v2-muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
+                        {messagePreview(c.latestMessage!.body)}
+                      </div>
+                    </div>
+                    <div className="v2-dim" style={{ flexShrink: 0, fontSize: 11, paddingTop: 2 }}>{timeAgo(c.latestMessage!.createdAt)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* NEXT UP — the one big, confident module further down: what's already decided, not
+              what you might do. */}
           {nextPlan && (
             <Link
               href={`/plans/${nextPlan.publicSlug}`}
@@ -232,121 +346,30 @@ export default function HomePage() {
             </Link>
           )}
 
-          {/* NEEDS YOU */}
-          {needsAttention.length > 0 && (
-            <div style={{ marginBottom: 30 }}>
-              <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Needs you</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {needsAttention.map((c) => (
-                  <Link
-                    key={c.id}
-                    href={`/plans/${c.activePlan!.publicSlug}`}
-                    className="v2-card fade-up"
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '15px 18px' }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 15 }}>{c.activePlan!.title}</div>
-                      <div className="v2-muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-                        {c.name} · {c.activePlan!.inCount}/{c.activePlan!.totalMembers} voted
-                      </div>
-                    </div>
-                    <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--v2-brand-ink)', background: 'var(--v2-brand)', padding: '9px 18px', borderRadius: 100 }}>
-                      Vote
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* YOUR CREWS — a row of people, not a row of cards: a coloured ring (the Crew's own
-              identity) around a stacked-avatar bubble, name below, the way Stories rows work. */}
-          {crews && crews.length > 0 && (
-            <div style={{ marginBottom: 32 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
-                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Your Crews</div>
-                <Link href="/crews" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>See all</Link>
-              </div>
-              <div style={{ display: 'flex', gap: 18, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
-                {crews.slice(0, 6).map((crew) => (
-                  <Link key={crew.id} href={`/crews/${crew.id}`} className="fade-up" style={{ flex: '0 0 auto', width: 76, textAlign: 'center' }}>
-                    <div
-                      style={{
-                        width: 68,
-                        height: 68,
-                        borderRadius: '50%',
-                        margin: '0 auto 8px',
-                        padding: 3,
-                        background: `conic-gradient(${crewRing(crew.id)}, ${crewRing(crew.id)}cc, ${crewRing(crew.id)})`,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'var(--v2-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 3 }}>
-                        <div className="stack">
-                          {crew.members.slice(0, 3).map((m) => (
-                            <div
-                              key={m.user.id}
-                              style={{
-                                width: 20, height: 20, borderRadius: '50%', marginLeft: -6, fontSize: 8, fontWeight: 800, color: '#fff',
-                                background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--v2-surface)',
-                              }}
-                            >
-                              {initials(m.user.displayName, m.user.email)}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 11.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crew.name}</div>
-                    {crew.latestMessage ? (
-                      <div className="v2-dim" style={{ fontSize: 10, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {messagePreview(crew.latestMessage.body)}
-                      </div>
-                    ) : (
-                      <div className="v2-dim" style={{ fontSize: 10, marginTop: 1 }}>Say hi</div>
-                    )}
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* IDEAS FOR YOU — an asymmetric editorial grid, not a row of equal squares: one large
-              feature card plus two smaller ones stacked beside it. */}
+          {/* FOR YOUR CREWS — a few genuinely useful suggestions, deliberately small and last:
+              discovery feeds the social loop, it doesn't lead the page. Not an event catalogue —
+              three compact rows, not a big image grid. */}
           {ideas && ideas.length > 0 && (
-            <div style={{ marginBottom: 30 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
-                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Ideas for tonight</div>
-                <Link href="/explore" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>Explore</Link>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>For your Crews</div>
+                <Link href="/explore" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>Discover</Link>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 12 }}>
-                {ideas.slice(0, 3).map((exp, i) => {
+              <div style={{ display: 'flex', gap: 10, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
+                {ideas.slice(0, 4).map((exp) => {
                   const price = formatPriceFrom(exp.priceMinMinor, exp.currency);
                   return (
                     <Link
                       key={exp.id}
                       href="/explore"
                       className="fade-up"
-                      style={{
-                        gridColumn: i === 0 ? '1' : '2',
-                        gridRow: i === 0 ? '1 / span 2' : i === 1 ? '1' : '2',
-                        position: 'relative',
-                        borderRadius: 'var(--v2-r-md)',
-                        overflow: 'hidden',
-                        minHeight: i === 0 ? 240 : 114,
-                        boxShadow: 'var(--v2-shadow-sm)',
-                        background: v2Art(exp.imageUrl, exp.category),
-                      }}
+                      style={{ flex: '0 0 auto', width: 140, borderRadius: 'var(--v2-r-sm)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)' }}
                     >
-                      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(21,11,44,0) 40%, rgba(21,11,44,0.82) 100%)' }} />
-                      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: i === 0 ? '16px' : '11px 12px' }}>
-                        <div style={{ fontWeight: 800, fontSize: i === 0 ? 17 : 12.5, color: '#fff', lineHeight: 1.25, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                          {exp.name}
-                        </div>
-                        <div style={{ fontSize: i === 0 ? 12.5 : 10.5, color: 'rgba(255,255,255,0.78)', fontWeight: 600 }}>
-                          {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+                      <div style={{ height: 84, background: v2Art(exp.imageUrl, exp.category) }} />
+                      <div style={{ padding: '8px 10px', background: 'var(--v2-surface)' }}>
+                        <div style={{ fontWeight: 700, fontSize: 11.5, lineHeight: 1.3, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
+                        <div className="v2-dim" style={{ fontSize: 10 }}>
+                          {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
                           {price && ` · ${price}`}
                         </div>
                       </div>
@@ -354,23 +377,6 @@ export default function HomePage() {
                   );
                 })}
               </div>
-            </div>
-          )}
-
-          {recentActivity.length > 0 && (
-            <div>
-              <div className="v2-eyebrow" style={{ marginBottom: 8 }}>Recent activity</div>
-              {recentActivity.map((c) => (
-                <div key={c.id} style={{ display: 'flex', gap: 10, padding: '10px 0', fontSize: 13, borderBottom: '1px solid var(--v2-line)' }}>
-                  <div className="v2-dim" style={{ flexShrink: 0, width: 26, fontSize: 11, paddingTop: 1 }}>{timeAgo(c.latestMessage!.createdAt)}</div>
-                  <div style={{ minWidth: 0 }}>
-                    <strong>{c.latestMessage!.authorName}</strong> <span className="v2-muted">in {c.name}</span>
-                    <div className="v2-muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {messagePreview(c.latestMessage!.body)}
-                    </div>
-                  </div>
-                </div>
-              ))}
             </div>
           )}
         </div>

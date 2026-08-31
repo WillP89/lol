@@ -62,7 +62,14 @@ export async function computePlanPulse(planId: string): Promise<PlanPulse> {
 async function createPlanForCrew(
   crewId: string,
   proposedByUserId: string,
-  data: { title: string; experienceId?: string; sourceOptionId?: string; status: PlanStatusValue },
+  data: {
+    title: string;
+    experienceId?: string;
+    sourceOptionId?: string;
+    status: PlanStatusValue;
+    manualVenueName?: string;
+    manualStartsAt?: Date;
+  },
 ): Promise<Plan> {
   const members = await prisma.crewMember.findMany({ where: { crewId, status: 'ACTIVE' } });
 
@@ -74,6 +81,8 @@ async function createPlanForCrew(
       experienceId: data.experienceId,
       sourceOptionId: data.sourceOptionId,
       status: data.status,
+      manualVenueName: data.manualVenueName,
+      manualStartsAt: data.manualStartsAt,
       members: { create: members.map((m) => ({ userId: m.userId })) },
     },
     include: { experience: true },
@@ -85,11 +94,12 @@ async function createPlanForCrew(
     planId: plan.id,
   });
 
-  // Sending an event to the Crew is meaningless if nothing tells the Crew — post it into chat
-  // so "talk it over" has somewhere to happen. Only for a real experience (not a vague
-  // IDEA-status soft plan with nothing attached yet). Chat posting failing should never take
-  // the Plan itself down with it — the Plan exists either way, so log and move on.
-  if (data.experienceId) {
+  // Sending something to the Crew is meaningless if nothing tells the Crew — post it into chat
+  // so "talk it over" has somewhere to happen. Only when there's an actual thing attached (a
+  // real Experience, or a manual venue/time) — not a vague IDEA-status soft plan with nothing
+  // on it yet. Chat posting failing should never take the Plan itself down with it — the Plan
+  // exists either way, so log and move on.
+  if (data.experienceId || data.manualVenueName) {
     await sendCrewMessage(crewId, proposedByUserId, `📍 Sent "${plan.title}" to the Crew — /plans/${plan.publicSlug}`).catch(() => {});
   }
 
@@ -116,6 +126,24 @@ export async function sendExperienceToCrew(crewId: string, experienceId: string,
 
 export async function createSoftPlan(crewId: string, userId: string, title: string): Promise<Plan> {
   return createPlanForCrew(crewId, userId, { title, status: 'IDEA' });
+}
+
+/**
+ * A Plan with no Experience behind it at all — "Pub Saturday", "Dinner at Sarah's" — the
+ * common case for most real plans, which never come from a ticketed inventory. See
+ * docs/DECISIONS.md#manual-plans.
+ */
+export async function createManualPlanForCrew(
+  crewId: string,
+  userId: string,
+  data: { title: string; venueName?: string; startsAt?: Date },
+): Promise<Plan> {
+  return createPlanForCrew(crewId, userId, {
+    title: data.title,
+    status: 'SHARED',
+    manualVenueName: data.venueName,
+    manualStartsAt: data.startsAt,
+  });
 }
 
 /**
@@ -183,6 +211,25 @@ function voteToEnum(v: VoteValue | 'in' | 'maybe' | 'out'): VoteValue {
 }
 function enumToVote(v: VoteValue): 'in' | 'maybe' | 'out' {
   return v === 'IN' ? 'in' : v === 'MAYBE' ? 'maybe' : 'out';
+}
+
+/**
+ * "Lock it in" — the payoff moment the whole decision loop exists for: an idea becoming a
+ * commitment. Deliberately a direct, explicit status transition to BOOKED, not something that
+ * only happens as a side effect of creating a real Booking record — a manual Plan ("Pub
+ * Saturday") has nothing to book but still needs to be lockable. A ticketed Plan can still go
+ * on to a real Booking afterward (see services/booking.ts); this just marks the group's actual
+ * decision. Posts a system message so the moment shows up in the conversation itself, the same
+ * way a Plan being sent does. See docs/DECISIONS.md#decision-objects.
+ */
+export async function lockPlan(planId: string, userId: string): Promise<Plan> {
+  const plan = await prisma.plan.findUniqueOrThrow({ where: { id: planId } });
+  if (plan.status === 'BOOKED' || plan.status === 'COMPLETED' || plan.status === 'CANCELLED') return plan;
+
+  const updated = await prisma.plan.update({ where: { id: planId }, data: { status: 'BOOKED' } });
+  await track('PlanLocked', { planId, crewId: plan.crewId, userId }, { userId, crewId: plan.crewId, planId });
+  await sendCrewMessage(plan.crewId, userId, `🔒 "${plan.title}" was locked in — see you there.`).catch(() => {});
+  return updated;
 }
 
 export async function getPlanById(planId: string) {

@@ -128,7 +128,10 @@ export default function CrewsPage() {
     setCreating(true);
     setError(null);
     try {
-      const res = await api.post<{ crew: { id: string } }>('/crews', { name: name.trim(), defaultCity: 'London' });
+      // No hardcoded city — a Crew without its own defaultCity falls back to whoever asks
+      // Find Us Something's own home city at request time (see services/match.ts), not a
+      // baked-in London assumption from whoever happened to create the Crew.
+      const res = await api.post<{ crew: { id: string } }>('/crews', { name: name.trim() });
       setNewCrewId(res.crew.id);
       const invite = await api.post<{ inviteUrl: string }>(`/crews/${res.crew.id}/invites`, { channel: 'link' });
       setInviteUrl(invite.inviteUrl);

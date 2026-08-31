@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import { TabBarV2 } from '@/components/TabBarV2';
 import { BottomSheet } from '@/components/BottomSheet';
+import { LocationSearch } from '@/components/LocationSearch';
 import { v2Art } from '@/lib/v2Art';
 import { formatPriceRange } from '@/lib/formatPrice';
 import type { ExploreExperience } from './ExploreMap';
@@ -14,7 +15,9 @@ import type { ExploreExperience } from './ExploreMap';
 // Leaflet touches `window` at module load — client-side only.
 const ExploreMapV2 = dynamic(() => import('./ExploreMapV2'), { ssr: false, loading: () => <p className="v2-muted">Loading map…</p> });
 
-const LONDON_CENTER: [number, number] = [51.5074, -0.1278];
+// A genuinely UK-central fallback (Birmingham), used only until the real city-resolved centre
+// comes back from the API — never a London assumption. See docs/DECISIONS.md#uk-wide-location.
+const UK_FALLBACK_CENTER: [number, number] = [52.4862, -1.8904];
 
 interface CrewSummary {
   id: string;
@@ -96,19 +99,31 @@ export default function ExplorePage() {
   const [pickingCrew, setPickingCrew] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
 
+  // No hardcoded city — the backend resolves this viewer's own home city (or a genuinely
+  // UK-central fallback) when none is requested; `cityCenter` comes back alongside it so the
+  // map has somewhere real to sit even with zero results for that city. Switching city here
+  // re-fetches against the chosen one. See docs/DECISIONS.md#uk-wide-location.
+  const [city, setCity] = useState<string | null>(null);
+  const [cityCenter, setCityCenter] = useState<[number, number]>(UK_FALLBACK_CENTER);
+  const [pickingCity, setPickingCity] = useState(false);
+
   useEffect(() => {
     api
-      .get<{ experiences: ExploreExperience[]; dataSource: 'live' | 'mock' }>('/explore/experiences?city=London')
+      .get<{ experiences: ExploreExperience[]; dataSource: 'live' | 'mock'; city: string; cityLat: number; cityLng: number }>(
+        `/explore/experiences${city ? `?city=${encodeURIComponent(city)}` : ''}`,
+      )
       .then((res) => {
         setExperiences(res.experiences);
         setDataSource(res.dataSource);
+        setCity(res.city);
+        setCityCenter([res.cityLat, res.cityLng]);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Could not load Explore.'));
     api
       .get<{ crews: CrewSummary[] }>('/crews')
       .then((res) => setCrews(res.crews))
       .catch(() => {});
-  }, []);
+  }, [city]);
 
   const searched = useMemo(() => {
     if (!experiences) return [];
@@ -121,11 +136,11 @@ export default function ExplorePage() {
   const rest = hero ? searched.filter((e) => e.id !== hero.id) : searched;
 
   const center = useMemo<[number, number]>(() => {
-    if (!searched.length) return LONDON_CENTER;
+    if (!searched.length) return cityCenter;
     const avgLat = searched.reduce((sum, e) => sum + e.venue.latitude, 0) / searched.length;
     const avgLng = searched.reduce((sum, e) => sum + e.venue.longitude, 0) / searched.length;
     return [avgLat, avgLng];
-  }, [searched]);
+  }, [searched, cityCenter]);
 
   const [isDesktop, setIsDesktop] = useState(false);
   useEffect(() => {
@@ -162,8 +177,28 @@ export default function ExplorePage() {
 
   const discovery = (
     <div>
-      <h1 className="v2-display" style={{ fontSize: 32, marginBottom: 6 }}>Explore London</h1>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
+        <h1 className="v2-display" style={{ fontSize: 32 }}>Discover {city ?? ''}</h1>
+        <button
+          onClick={() => setPickingCity(true)}
+          style={{ flexShrink: 0, marginTop: 8, border: 'none', background: 'var(--v2-bg-deep)', borderRadius: 100, padding: '7px 14px', fontSize: 12.5, fontWeight: 700, color: 'var(--v2-ink-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+        >
+          📍 Change
+        </button>
+      </div>
       <p className="v2-muted" style={{ fontSize: 14.5, marginBottom: 20 }}>Real things happening near you, picked for tonight.</p>
+      {pickingCity && (
+        <div className="fade-up" style={{ marginBottom: 18 }}>
+          <LocationSearch
+            placeholder="Search a UK town or city…"
+            onSelect={(place) => {
+              setCity(place.name);
+              setCityCenter([place.lat, place.lng]);
+              setPickingCity(false);
+            }}
+          />
+        </div>
+      )}
       <div className="v2-search" style={{ marginBottom: 22 }}>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--v2-ink-dim)', flexShrink: 0 }}>
           <circle cx="11" cy="11" r="7" />

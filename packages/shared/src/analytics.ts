@@ -28,9 +28,18 @@ export const AnalyticsEvents = {
   // Crew lifecycle
   CrewCreated: 'CrewCreated',
   CrewInviteSent: 'CrewInviteSent',
+  // The invite-preview moment (before auth) and the moment it actually converts into
+  // membership — two different funnel steps with a real drop-off between them, worth telling
+  // apart from CrewJoined (which fires for any join, invite or not).
+  InviteOpened: 'InviteOpened',
+  InviteAccepted: 'InviteAccepted',
   CrewJoined: 'CrewJoined',
   CrewLeft: 'CrewLeft',
   CrewMessageSent: 'CrewMessageSent',
+  ReactionAdded: 'ReactionAdded',
+  PollCreated: 'PollCreated',
+  PollVoted: 'PollVoted',
+  AvailabilitySubmitted: 'AvailabilitySubmitted',
 
   // Match (Discover -> Match)
   FindUsSomethingOpened: 'FindUsSomethingOpened',
@@ -38,6 +47,8 @@ export const AnalyticsEvents = {
   RecommendationOpened: 'RecommendationOpened',
   RecommendationDismissed: 'RecommendationDismissed',
   SuggestionsSentToChat: 'SuggestionsSentToChat',
+  ItemViewed: 'ItemViewed',
+  ItemSharedToCrew: 'ItemSharedToCrew',
 
   // Agree (Plan / consensus)
   SentToCrew: 'SentToCrew',
@@ -54,6 +65,10 @@ export const AnalyticsEvents = {
 
   // Post-plan
   PlanCompleted: 'PlanCompleted',
+  // The moment consensus becomes commitment — "Saturday's looking good" turning into "Lock it
+  // in" — distinct from PlanReady (which just means the threshold was crossed automatically).
+  PlanLocked: 'PlanLocked',
+  CalendarAdded: 'CalendarAdded',
   RewindSubmitted: 'RewindSubmitted',
   CrewSecondPlan: 'CrewSecondPlan',
 
@@ -77,9 +92,15 @@ export interface AnalyticsEventPayloads {
 
   CrewCreated: { crewId: string; userId: string; memberCount: number };
   CrewInviteSent: { crewId: string; channel: 'link' | 'whatsapp' | 'imessage' | 'sms' | 'other' };
+  InviteOpened: { inviteCode: string; authenticated: boolean };
+  InviteAccepted: { crewId: string; userId: string };
   CrewJoined: { crewId: string; userId: string; viaInvite: boolean };
   CrewLeft: { crewId: string; userId: string };
   CrewMessageSent: { crewId: string; userId: string };
+  ReactionAdded: { crewId: string; messageId: string; emoji: string; userId: string };
+  PollCreated: { crewId: string; messageId: string; kind: 'GENERAL' | 'AVAILABILITY'; optionCount: number };
+  PollVoted: { crewId: string; messageId: string; option: string };
+  AvailabilitySubmitted: { crewId: string; userId: string };
 
   FindUsSomethingOpened: { crewId: string; userId: string };
   RecommendationShown: { crewId: string; planRecommendationId: string; optionCount: number };
@@ -88,6 +109,8 @@ export interface AnalyticsEventPayloads {
   // The core-loop action: "find something" and post it straight into the Crew's chat in one
   // tap, rather than reviewing options on a separate results screen first.
   SuggestionsSentToChat: { crewId: string; count: number };
+  ItemViewed: { experienceId: string; source: 'explore' | 'home' | 'chat' };
+  ItemSharedToCrew: { crewId: string; experienceId: string };
 
   SentToCrew: { crewId: string; planId: string; source: 'find_us_something' | 'individual_send' };
   PlanCardViewed: { planId: string; viewerUserId?: string; authenticated: boolean };
@@ -101,6 +124,8 @@ export interface AnalyticsEventPayloads {
   BookingFailed: { planId: string; reason: string };
 
   PlanCompleted: { planId: string; crewId: string };
+  PlanLocked: { planId: string; crewId: string; userId: string };
+  CalendarAdded: { planId: string; userId?: string };
   RewindSubmitted: { planId: string; crewId: string; userId: string; rating: 'love' | 'like' | 'meh' | 'no' };
   CrewSecondPlan: { crewId: string; daysSinceFirstPlan: number };
 

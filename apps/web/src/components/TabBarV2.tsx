@@ -25,7 +25,7 @@ const TABS = [
   },
   {
     href: '/explore',
-    label: 'Explore',
+    label: 'Discover',
     icon: (
       <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="11" cy="11" r="7" />

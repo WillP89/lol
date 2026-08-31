@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { MIN_PUBLISHABLE_QUALITY_SCORE } from './qualityScoring';
 import { getMemberAvailability } from './availability';
 import { ensureInventory } from './inventorySync';
+import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { track } from './analytics';
 import { sendExperienceToCrew } from './plan';
 import type { Experience, TasteProfile, Plan } from '@prisma/client';
@@ -57,17 +58,20 @@ export async function findUsSomething(
   crewId: string,
   requestedByUserId: string,
 ): Promise<{ recommendationId: string; options: MatchOption[] }> {
-  const [members, dna, crew] = await Promise.all([
+  const [members, dna, crew, requester] = await Promise.all([
     prisma.crewMember.findMany({
       where: { crewId, status: 'ACTIVE' },
       include: { user: { include: { tasteProfile: true } } },
     }),
     prisma.crewDNA.findUnique({ where: { crewId } }),
     prisma.crew.findUnique({ where: { id: crewId }, select: { defaultCity: true } }),
+    prisma.user.findUnique({ where: { id: requestedByUserId }, select: { profile: { select: { homeCity: true } } } }),
   ]);
 
-  // Self-heals an unseeded city on first use — see ensureInventory's own comment.
-  await ensureInventory(crew?.defaultCity ?? 'London');
+  // Self-heals an unseeded city on first use (see ensureInventory's own comment) — the Crew's
+  // own city if set, else whoever asked's home city, else a genuinely UK-central fallback
+  // (never a hardcoded London assumption — see docs/DECISIONS.md#uk-wide-location).
+  await ensureInventory(crew?.defaultCity ?? requester?.profile?.homeCity ?? UK_FALLBACK_CENTER.name);
 
   const userIds = members.map((m) => m.userId);
   const tasteProfiles = members

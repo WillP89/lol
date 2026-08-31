@@ -13,6 +13,13 @@ const SwipeSchema = z.object({
   energyPreference: z.enum(['LOW', 'MEDIUM', 'HIGH']),
 });
 
+const ProfileSchema = z.object({
+  displayName: z.string().trim().min(1).max(80).optional(),
+  homeCity: z.string().trim().min(1).max(120).optional(),
+  homeLat: z.number().optional(),
+  homeLng: z.number().optional(),
+});
+
 const LocationSchema = z.object({
   prefs: z
     .array(
@@ -38,8 +45,36 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
         createdAt: true,
         tasteProfile: true,
         locationPrefs: { orderBy: { createdAt: 'asc' } },
+        profile: true,
       },
     });
+    return reply.send({ user });
+  });
+
+  // Name + home location — deliberately separate from the taste/swipe wizard (which is about
+  // discovery preferences); this is core identity, set once in onboarding and editable from
+  // Profile. Upserts Profile since a brand new user has none yet.
+  app.post('/users/me/profile', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const parsed = ProfileSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
+    const { displayName, homeCity, homeLat, homeLng } = parsed.data;
+
+    if (displayName !== undefined) {
+      await prisma.user.update({ where: { id: request.user.id }, data: { displayName } });
+    }
+    if (homeCity !== undefined || homeLat !== undefined || homeLng !== undefined) {
+      await prisma.profile.upsert({
+        where: { userId: request.user.id },
+        update: {
+          ...(homeCity !== undefined && { homeCity }),
+          ...(homeLat !== undefined && { homeLat }),
+          ...(homeLng !== undefined && { homeLng }),
+        },
+        create: { userId: request.user.id, homeCity: homeCity ?? null, homeLat: homeLat ?? null, homeLng: homeLng ?? null },
+      });
+    }
+    const user = await prisma.user.findUnique({ where: { id: request.user.id }, select: { id: true, displayName: true, email: true, profile: true } });
     return reply.send({ user });
   });
 

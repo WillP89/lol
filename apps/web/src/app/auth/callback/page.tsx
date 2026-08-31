@@ -4,6 +4,17 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 
+// The magic-link token is single-use — this page's effect can genuinely run more than once for
+// the exact same token: React 18 dev-mode StrictMode double-invokes effects, AND clicking a
+// plain `<a>` into this route from elsewhere in the app (e.g. the "sent" state on /auth) is a
+// Next.js App Router client-side transition that mounts a fresh component instance, so a
+// component-scoped guard (useRef/useState) doesn't survive it — a *second*, genuinely new
+// instance still fires its own first call. Only something that survives across mounts within
+// the same page load works: a module-level record of tokens already requested. The first call
+// consumes the token; without this, any repeat call legitimately 401s ("already used") and the
+// whole sign-in stalls here. See docs/DECISIONS.md#auth-callback-dedup.
+const requestedTokens = new Set<string>();
+
 function CallbackInner() {
   const router = useRouter();
   const params = useSearchParams();
@@ -11,6 +22,10 @@ function CallbackInner() {
 
   useEffect(() => {
     const token = params.get('token');
+    if (token) {
+      if (requestedTokens.has(token)) return;
+      requestedTokens.add(token);
+    }
     const next = params.get('next');
     if (!token) {
       setError('Missing token.');

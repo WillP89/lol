@@ -14,6 +14,8 @@ import { rewindRoutes } from './routes/rewind';
 import { adminRoutes } from './routes/admin';
 import { feedbackRoutes } from './routes/feedback';
 import { exploreRoutes } from './routes/explore';
+import { locationRoutes } from './routes/locations';
+import { analyticsClientRoutes } from './routes/analyticsClient';
 
 /**
  * Builds the Fastify app without calling `listen()` — kept separate from server.ts so
@@ -57,6 +59,8 @@ export function buildApp() {
   app.register(rewindRoutes);
   app.register(feedbackRoutes);
   app.register(exploreRoutes);
+  app.register(locationRoutes);
+  app.register(analyticsClientRoutes);
   app.register(adminRoutes, { prefix: '/admin' });
 
   return app;

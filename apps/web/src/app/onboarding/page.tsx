@@ -3,38 +3,37 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
+import { LocationSearch, type UkPlaceResult } from '@/components/LocationSearch';
 
-const CATEGORIES = ['live_music', 'clubbing', 'restaurant', 'comedy', 'art_culture', 'sport', 'day_activity'];
-const AREAS = ['Shoreditch', 'Soho', 'Clapham', 'Brixton', 'Camden', 'Hackney'];
+const INTERESTS = [
+  'Live music', 'Food', 'Pubs & drinks', 'Comedy', 'Sport', 'Festivals',
+  'Cinema', 'Theatre', 'Days out', 'Family', 'Outdoors', 'Markets', 'Something different',
+];
 
 interface ExistingProfile {
-  tasteProfile: {
-    categoryAffinity: Record<string, number>;
-    budgetMaxMinor: number;
-    energyPreference: 'LOW' | 'MEDIUM' | 'HIGH';
-  } | null;
-  locationPrefs: { kind: string; label: string }[];
+  displayName: string | null;
+  tasteProfile: { categoryAffinity: Record<string, number> } | null;
+  profile: { homeCity: string | null; homeLat: number | null; homeLng: number | null } | null;
 }
 
+/**
+ * Onboarding V2 — three real questions (name, where you're based, what you're into), not a
+ * profile form. "Where are you based?" replaced the old hardcoded London-neighbourhood chip
+ * picker entirely — see docs/DECISIONS.md#uk-wide-location. Interests are a simple tap-to-
+ * include chip set, not a yes/maybe/no swipe deck — see docs/DECISIONS.md#v2-art-direction for
+ * why the whole wizard reads as "setting up a social app," not a form with a progress bar.
+ */
 function OnboardingWizard() {
   const router = useRouter();
-  // Carries an invite (or anywhere else that required a profile first) through onboarding —
-  // finishing lands you back on the invite instead of the generic Crews list.
   const next = useSearchParams().get('next');
 
-  // Whether an existing profile has loaded yet, and whether this is a first-time run (fresh
-  // wizard) or a returning user editing in place (pre-filled, `editing: true`, "Save" instead
-  // of "This is scarily accurate", returns to /profile instead of /crews when done).
   const [loaded, setLoaded] = useState(false);
-  const [existing, setExisting] = useState<ExistingProfile | null>(null);
   const [editing, setEditing] = useState(false);
-
   const [step, setStep] = useState(0);
-  const [homeArea, setHomeArea] = useState('Clapham');
-  const [favAreas, setFavAreas] = useState<string[]>(['Shoreditch']);
-  const [taste, setTaste] = useState<Record<string, 'yes' | 'maybe' | 'no'>>({});
-  const [budgetMax, setBudgetMax] = useState(6000);
-  const [energy, setEnergy] = useState<'LOW' | 'MEDIUM' | 'HIGH'>('MEDIUM');
+
+  const [name, setName] = useState('');
+  const [place, setPlace] = useState<UkPlaceResult | null>(null);
+  const [interests, setInterests] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -42,58 +41,41 @@ function OnboardingWizard() {
     api
       .get<{ user: ExistingProfile }>('/users/me')
       .then((res) => {
-        setExisting(res.user);
-        if (res.user.tasteProfile) {
-          // Pre-fill the wizard with what's already there, so Edit is a tweak, not a restart.
-          const home = res.user.locationPrefs.find((p) => p.kind === 'HOME');
-          const favs = res.user.locationPrefs.filter((p) => p.kind === 'FAVOURITE').map((p) => p.label);
-          if (home) setHomeArea(home.label);
-          if (favs.length) setFavAreas(favs);
-          const affinityToChoice = (v: number): 'yes' | 'maybe' | 'no' => (v > 0.3 ? 'yes' : v < -0.3 ? 'no' : 'maybe');
-          const tasteFromAffinity = Object.fromEntries(
-            Object.entries(res.user.tasteProfile.categoryAffinity).map(([k, v]) => [k, affinityToChoice(v)]),
-          );
-          setTaste(tasteFromAffinity);
-          setBudgetMax(res.user.tasteProfile.budgetMaxMinor);
-          setEnergy(res.user.tasteProfile.energyPreference);
-          // Returning user — /profile is the real "here's what Plot knows about you" surface
-          // now, so this page's only job is the editable wizard, pre-filled, not a second
-          // read-only summary duplicating it.
+        if (res.user.displayName) setName(res.user.displayName);
+        if (res.user.profile?.homeCity) {
+          setPlace({ name: res.user.profile.homeCity, region: '', lat: res.user.profile.homeLat ?? 0, lng: res.user.profile.homeLng ?? 0 });
           setEditing(true);
+        }
+        if (res.user.tasteProfile) {
+          const picked = Object.entries(res.user.tasteProfile.categoryAffinity)
+            .filter(([, v]) => v > 0)
+            .map(([k]) => k);
+          if (picked.length) setInterests(picked);
         }
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
   }, []);
 
-  function toggleFavArea(area: string) {
-    setFavAreas((prev) => (prev.includes(area) ? prev.filter((a) => a !== area) : [...prev, area]));
+  function toggleInterest(slug: string) {
+    setInterests((prev) => (prev.includes(slug) ? prev.filter((i) => i !== slug) : [...prev, slug]));
   }
 
   async function finish() {
     setSubmitting(true);
     setError(null);
     try {
-      await api.post('/users/me/locations', {
-        prefs: [
-          { kind: 'HOME', label: homeArea },
-          ...favAreas.map((label) => ({ kind: 'FAVOURITE' as const, label })),
-        ],
+      await api.post('/users/me/profile', {
+        displayName: name.trim(),
+        ...(place ? { homeCity: place.name, homeLat: place.lat, homeLng: place.lng } : {}),
       });
-      const swipes = Object.entries(taste).map(([category, choice]) => ({ category, choice }));
       await api.post('/users/me/taste', {
-        swipes: swipes.length ? swipes : [{ category: 'live_music', choice: 'maybe' }],
-        budget: { minMinor: 1500, maxMinor: budgetMax, currency: 'GBP' },
-        travelRadiusMeters: 8000,
-        energyPreference: energy,
+        swipes: (interests.length ? interests : ['live_music']).map((category) => ({ category: category.toLowerCase().replace(/[^a-z]+/g, '_'), choice: 'yes' as const })),
+        budget: { minMinor: 1500, maxMinor: 6000, currency: 'GBP' },
+        travelRadiusMeters: 24000, // ~15 miles — a real "worth travelling for" radius, not a dense-city-block assumption
+        energyPreference: 'MEDIUM' as const,
       });
-      if (existing?.tasteProfile) {
-        // Editing an existing profile — /profile is where "here's what Plot knows about you"
-        // actually lives now, so saving returns there instead of leaving you stranded mid-wizard.
-        router.replace(next || '/profile');
-      } else {
-        router.replace(next || '/home');
-      }
+      router.replace(next || '/home');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong.');
       setSubmitting(false);
@@ -102,139 +84,107 @@ function OnboardingWizard() {
 
   if (!loaded) {
     return (
-      <div className="page" style={{ paddingTop: 40, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="card" style={{ height: 90, opacity: 0.5 }} />
-        <div className="card" style={{ height: 60, opacity: 0.5 }} />
+      <div className="v2">
+        <div className="v2-page" style={{ paddingTop: 40 }}>
+          <div style={{ height: 90, borderRadius: 20, background: 'var(--v2-bg-deep)' }} />
+        </div>
       </div>
     );
   }
 
-  return (
-    <div className="page" style={{ paddingTop: 40 }}>
-      {editing ? (
-        <button className="btn btn-ghost" onClick={() => router.push('/profile')} style={{ marginBottom: 14, width: 'auto', padding: '8px 0' }}>
-          ← Back to profile
-        </button>
-      ) : (
-        <>
-          <div className="eyebrow">Step {step + 1} of 3</div>
-          <div style={{ display: 'flex', gap: 5, marginBottom: 20 }}>
-            {[0, 1, 2].map((s) => (
-              <div key={s} style={{ flex: 1, height: 3, borderRadius: 3, background: s <= step ? 'var(--ink-gold)' : 'var(--ink-border)' }} />
-            ))}
-          </div>
-        </>
-      )}
+  const steps = editing ? [0, 1, 2] : [0, 1, 2]; // Name, Location, Interests
+  const canAdvance = step === 0 ? name.trim().length > 0 : step === 1 ? place !== null : true;
 
-      {step === 0 && (
-        <>
-          <h1 style={{ fontSize: 24, marginBottom: 8 }}>Where do you spend your time?</h1>
-          <p className="muted" style={{ marginBottom: 16 }}>Not just a city — this shapes everything we suggest.</p>
-          <div style={{ fontSize: 11, color: 'var(--ink-text-dim)', textTransform: 'uppercase', marginBottom: 8 }}>Home area</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
-            {AREAS.map((a) => (
-              <button key={a} type="button" className={`chip ${homeArea === a ? 'selected' : ''}`} onClick={() => setHomeArea(a)}>
-                {a}
-              </button>
-            ))}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--ink-text-dim)', textTransform: 'uppercase', marginBottom: 8 }}>Favourite areas</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 24 }}>
-            {AREAS.map((a) => (
-              <button key={a} type="button" className={`chip ${favAreas.includes(a) ? 'selected' : ''}`} onClick={() => toggleFavArea(a)}>
-                {a}
-              </button>
-            ))}
-          </div>
-          {editing ? (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={finish} disabled={submitting}>
-                {submitting ? 'Saving…' : 'Save'}
-              </button>
-              <button className="btn btn-primary" onClick={() => setStep(1)} style={{ flex: 1 }}>
-                Continue
-              </button>
+  return (
+    <div className="v2" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div className="v2-page" style={{ paddingTop: 0, paddingBottom: 0 }}>
+        <div style={{ display: 'flex', gap: 5, marginBottom: 28 }}>
+          {steps.map((s) => (
+            <div key={s} style={{ flex: 1, height: 3.5, borderRadius: 3, background: s <= step ? 'var(--v2-brand)' : 'var(--v2-bg-deep)' }} />
+          ))}
+        </div>
+
+        {/* One shared stacking context for the whole step (content + Continue/Back), keyed by
+            step so the fade replays on every transition — deliberately NOT one .fade-up per
+            step-content block with the buttons as a separate later sibling: a `.fade-up`'s
+            `transform: translateY(0)` end-state creates its own stacking context, which would
+            trap LocationSearch's dropdown z-index inside it and let the Continue button (a
+            later, unrelated sibling) paint on top and steal its clicks. */}
+        <div className="fade-up" key={step}>
+        {step === 0 && (
+          <input
+              autoFocus
+              style={{ width: '100%', padding: '15px 18px', borderRadius: 16, border: 'none', outline: 'none', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)', fontSize: 15.5, fontFamily: 'inherit', color: 'var(--v2-ink)', marginBottom: 22 }}
+              placeholder="Will"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={80}
+            />
+        )}
+
+        {step === 1 && (
+          <>
+            <h1 className="v2-display" style={{ fontSize: 27, marginBottom: 8 }}>Where are you based?</h1>
+            <p className="v2-muted" style={{ marginBottom: 22 }}>Not just a city — this shapes what Plot finds for you. Works anywhere in the UK.</p>
+            <LocationSearch placeholder="Stafford" initialValue={place?.name ?? ''} onSelect={setPlace} />
+          </>
+        )}
+
+        {step === 2 && (
+          <>
+            <h1 className="v2-display" style={{ fontSize: 27, marginBottom: 8 }}>What are you into?</h1>
+            <p className="v2-muted" style={{ marginBottom: 22 }}>Pick a few — you can change these anytime.</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+              {INTERESTS.map((label) => {
+                const slug = label.toLowerCase().replace(/[^a-z]+/g, '_');
+                const selected = interests.includes(slug);
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => toggleInterest(slug)}
+                    style={{
+                      padding: '10px 16px', borderRadius: 100, border: 'none', cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
+                      background: selected ? 'var(--v2-brand)' : 'var(--v2-surface)',
+                      color: selected ? '#fff' : 'var(--v2-ink-muted)',
+                      boxShadow: selected ? 'none' : 'var(--v2-shadow-sm)',
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
-          ) : (
-            <button className="btn btn-primary" onClick={() => setStep(1)}>
-              Continue
+          </>
+        )}
+
+        {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginTop: 16 }}>{error}</div>}
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 26 }}>
+          {step > 0 && (
+            <button className="v2-btn v2-btn-ghost" onClick={() => setStep((s) => s - 1)} style={{ flex: '0 0 auto', padding: '15px 20px' }}>
+              ← Back
             </button>
           )}
-        </>
-      )}
-
-      {step === 1 && (
-        <>
-          <h1 style={{ fontSize: 24, marginBottom: 8 }}>Build your taste</h1>
-          <p className="muted" style={{ marginBottom: 16 }}>React fast — first instinct.</p>
-          {CATEGORIES.map((cat) => (
-            <div key={cat} className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12 }}>
-              <span style={{ textTransform: 'capitalize' }}>{cat.replace('_', ' ')}</span>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {(['no', 'maybe', 'yes'] as const).map((choice) => (
-                  <button
-                    key={choice}
-                    type="button"
-                    className={`chip ${taste[cat] === choice ? 'selected' : ''}`}
-                    onClick={() => setTaste((prev) => ({ ...prev, [cat]: choice }))}
-                    style={{ padding: '6px 10px' }}
-                  >
-                    {choice}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-          <div style={{ fontSize: 11, color: 'var(--ink-text-dim)', textTransform: 'uppercase', margin: '18px 0 8px' }}>Usual energy</div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-            {(['LOW', 'MEDIUM', 'HIGH'] as const).map((e) => (
-              <button key={e} type="button" className={`chip ${energy === e ? 'selected' : ''}`} onClick={() => setEnergy(e)}>
-                {e}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={() => setStep(0)}>
-              ← Back
-            </button>
-            <button className="btn btn-primary" onClick={() => setStep(2)} style={{ flex: 1 }}>
+          {step < 2 ? (
+            <button className="v2-btn v2-btn-brand" disabled={!canAdvance} onClick={() => setStep((s) => s + 1)} style={{ flex: 1, padding: '15px 20px' }}>
               Continue
             </button>
-          </div>
-        </>
-      )}
-
-      {step === 2 && (
-        <>
-          <h1 style={{ fontSize: 24, marginBottom: 8 }}>Budget sweet spot</h1>
-          <p className="muted" style={{ marginBottom: 16 }}>Per event, roughly. £{(budgetMax / 100).toFixed(0)} max.</p>
-          <input
-            type="range"
-            min={1500}
-            max={15000}
-            step={500}
-            value={budgetMax}
-            onChange={(e) => setBudgetMax(Number(e.target.value))}
-            style={{ width: '100%', marginBottom: 24 }}
-          />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={() => setStep(1)}>
-              ← Back
+          ) : (
+            <button className="v2-btn v2-btn-brand" disabled={submitting} onClick={finish} style={{ flex: 1, padding: '15px 20px' }}>
+              {submitting ? 'Setting up…' : editing ? 'Save' : "Let's go"}
             </button>
-            <button className="btn btn-primary" onClick={finish} disabled={submitting} style={{ flex: 1 }}>
-              {submitting ? (editing ? 'Saving…' : 'Building your Plot…') : editing ? 'Save' : 'This is scarily accurate'}
-            </button>
-          </div>
-          {error && <div className="error">{error}</div>}
-        </>
-      )}
+          )}
+        </div>
+        </div>
+      </div>
     </div>
   );
 }
 
 export default function OnboardingPage() {
   return (
-    <Suspense fallback={<div className="page" style={{ paddingTop: 40 }}><p className="muted">Loading…</p></div>}>
+    <Suspense fallback={<div className="v2" style={{ minHeight: '100vh' }} />}>
       <OnboardingWizard />
     </Suspense>
   );

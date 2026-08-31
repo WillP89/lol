@@ -6,12 +6,14 @@ import {
   createPlanFromRecommendationOption,
   sendExperienceToCrew,
   createSoftPlan,
+  createManualPlanForCrew,
   submitVote,
   getPlanBySlug,
   getPlanById,
   computePlanPulse,
   markCompleted,
   cancelPlan,
+  lockPlan,
 } from '../services/plan';
 import { track } from '../services/analytics';
 
@@ -25,6 +27,27 @@ export async function planRoutes(app: FastifyInstance): Promise<void> {
     if (!(await isCrewMember(crewId, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
 
     const plan = await createPlanFromRecommendationOption(crewId, parsed.data.optionId, request.user.id);
+    return reply.code(201).send({ plan });
+  });
+
+  app.post('/crews/:crewId/plans/manual', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { crewId } = request.params as { crewId: string };
+    const Schema = z.object({
+      title: z.string().trim().min(1).max(120),
+      venueName: z.string().trim().min(1).max(160).optional(),
+      startsAt: z.string().datetime().optional(),
+    });
+    const parsed = Schema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+    if (!(await isCrewMember(crewId, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+
+    const plan = await createManualPlanForCrew(crewId, request.user.id, {
+      title: parsed.data.title,
+      venueName: parsed.data.venueName,
+      startsAt: parsed.data.startsAt ? new Date(parsed.data.startsAt) : undefined,
+    });
+    await track('SentToCrew', { crewId, planId: plan.id, source: 'individual_send' }, { userId: request.user.id, crewId, planId: plan.id });
     return reply.code(201).send({ plan });
   });
 
@@ -107,6 +130,19 @@ export async function planRoutes(app: FastifyInstance): Promise<void> {
     if (!(await isCrewMember(plan.crewId, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
     const pulse = await computePlanPulse(id);
     return reply.send({ plan, pulse });
+  });
+
+  // "Lock it in" — see services/plan.ts#lockPlan's own comment for why this is a direct status
+  // transition, not something that only happens as a side effect of booking.
+  app.post('/plans/:id/lock', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    const plan = await getPlanById(id);
+    if (!plan) return reply.code(404).send({ error: 'not_found' });
+    if (!(await isCrewMember(plan.crewId, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+
+    const locked = await lockPlan(id, request.user.id);
+    return reply.send({ plan: locked });
   });
 
   app.post('/plans/:id/complete', async (request, reply) => {

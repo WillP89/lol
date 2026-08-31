@@ -50,8 +50,18 @@ const messageAuthorSelect = {
   createdAt: true,
   author: { select: { id: true, displayName: true, email: true } },
   reactions: { select: { emoji: true, userId: true } },
+  poll: {
+    select: {
+      id: true,
+      question: true,
+      options: true,
+      kind: true,
+      votes: { select: { userId: true, option: true } },
+    },
+  },
 } as const;
 
+type RawPoll = { id: string; question: string; options: unknown; kind: string; votes: { userId: string; option: string }[] };
 type RawMessage = {
   id: string;
   authorId: string;
@@ -59,11 +69,34 @@ type RawMessage = {
   createdAt: Date;
   author: { id: string; displayName: string | null; email: string };
   reactions: RawReaction[];
+  poll: RawPoll | null;
 };
 
+/** A poll's own conversational object — one native decision object with live tallies, not a
+ * separate "results" screen. Each option's count plus which one (if any) the viewer picked. */
+function summarisePoll(poll: RawPoll | null, viewerId: string) {
+  if (!poll) return null;
+  const options = poll.options as string[];
+  const counts = Object.fromEntries(options.map((o) => [o, 0])) as Record<string, number>;
+  let myVote: string | null = null;
+  for (const v of poll.votes) {
+    if (counts[v.option] !== undefined) counts[v.option] += 1;
+    if (v.userId === viewerId) myVote = v.option;
+  }
+  return {
+    id: poll.id,
+    question: poll.question,
+    options,
+    kind: poll.kind,
+    counts,
+    totalVotes: poll.votes.length,
+    myVote,
+  };
+}
+
 function withReactionSummary(message: RawMessage, viewerId: string) {
-  const { reactions, ...rest } = message;
-  return { ...rest, reactions: aggregateReactions(reactions, viewerId) };
+  const { reactions, poll, ...rest } = message;
+  return { ...rest, reactions: aggregateReactions(reactions, viewerId), poll: summarisePoll(poll, viewerId) };
 }
 
 /**
@@ -143,8 +176,79 @@ export async function toggleReaction(crewId: string, messageId: string, userId: 
       update: { emoji },
       create: { messageId, userId, emoji },
     });
+    await track('ReactionAdded', { crewId, messageId, emoji, userId }, { userId, crewId });
   }
 
   const reactions = await prisma.messageReaction.findMany({ where: { messageId }, select: { emoji: true, userId: true } });
   return aggregateReactions(reactions, userId);
+}
+
+const MAX_POLL_OPTIONS = 6;
+
+/**
+ * A poll (or an availability check-in — same mechanic, `kind: 'AVAILABILITY'`) lives ON a
+ * CrewMessage, one-to-one — a native conversational object, not a separate feature bolted next
+ * to chat. See docs/DECISIONS.md#decision-objects.
+ */
+export async function createPoll(
+  crewId: string,
+  authorId: string,
+  question: string,
+  options: string[],
+  kind: 'GENERAL' | 'AVAILABILITY' = 'GENERAL',
+) {
+  if (!(await isCrewMember(crewId, authorId))) {
+    throw new ChatError('Not a member of this Crew.', 'not_a_member');
+  }
+  const trimmedQuestion = question.trim();
+  const cleanOptions = [...new Set(options.map((o) => o.trim()).filter(Boolean))].slice(0, MAX_POLL_OPTIONS);
+  if (!trimmedQuestion || cleanOptions.length < 2) {
+    throw new ChatError('A poll needs a question and at least two options.', 'invalid_body');
+  }
+
+  const message = await prisma.crewMessage.create({
+    data: {
+      crewId,
+      authorId,
+      body: trimmedQuestion,
+      poll: { create: { question: trimmedQuestion, options: cleanOptions, kind } },
+    },
+    select: messageAuthorSelect,
+  });
+
+  await track('CrewMessageSent', { crewId, userId: authorId }, { userId: authorId, crewId });
+  await track('PollCreated', { crewId, messageId: message.id, kind, optionCount: cleanOptions.length }, { userId: authorId, crewId });
+
+  return withReactionSummary(message, authorId);
+}
+
+/** Re-voting replaces the previous option (one live choice per person), same toggle-and-replace
+ * semantics as reactions — except voting the SAME option again does nothing (a poll vote isn't
+ * a toggle-off the way a reaction is; "I changed my mind back" just re-picks the same answer). */
+export async function votePoll(crewId: string, messageId: string, userId: string, option: string) {
+  if (!(await isCrewMember(crewId, userId))) {
+    throw new ChatError('Not a member of this Crew.', 'not_a_member');
+  }
+  const message = await prisma.crewMessage.findUnique({ where: { id: messageId }, select: { crewId: true, poll: true } });
+  if (!message || message.crewId !== crewId || !message.poll) {
+    throw new ChatError('Poll not found in this Crew.', 'not_found');
+  }
+  const options = message.poll.options as string[];
+  if (!options.includes(option)) {
+    throw new ChatError('Not a valid option for this poll.', 'invalid_body');
+  }
+
+  await prisma.messagePollVote.upsert({
+    where: { pollId_userId: { pollId: message.poll.id, userId } },
+    update: { option },
+    create: { pollId: message.poll.id, userId, option },
+  });
+
+  await track('PollVoted', { crewId, messageId, option }, { userId, crewId });
+
+  const votes = await prisma.messagePollVote.findMany({ where: { pollId: message.poll.id }, select: { userId: true, option: true } });
+  return summarisePoll(
+    { id: message.poll.id, question: message.poll.question, options: message.poll.options, kind: message.poll.kind, votes },
+    userId,
+  );
 }

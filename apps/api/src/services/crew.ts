@@ -43,6 +43,38 @@ export async function joinCrewByInviteCode(userId: string, inviteCode: string) {
 }
 
 /**
+ * The pre-auth invite preview — "Will invited you to Weekend Crew, 6 people are already here"
+ * — needs to render BEFORE anyone signs in, so this is deliberately public: no membership
+ * check, no `requireUser`. Returns the absolute minimum that's safe to show a stranger (name,
+ * member count, first-initial avatars) — never message content, never the full member list
+ * with emails. See docs/DECISIONS.md#invite-preview.
+ */
+export async function getCrewPreviewByInviteCode(inviteCode: string) {
+  const crew = await prisma.crew.findUnique({
+    where: { inviteCode },
+    select: {
+      id: true,
+      name: true,
+      archivedAt: true,
+      members: {
+        where: { status: 'ACTIVE' },
+        select: { user: { select: { displayName: true, email: true } } },
+        orderBy: { joinedAt: 'asc' },
+        take: 6,
+      },
+      _count: { select: { members: true } },
+    },
+  });
+  if (!crew || crew.archivedAt) return null;
+
+  return {
+    name: crew.name,
+    memberCount: crew._count.members,
+    memberInitials: crew.members.map((m) => (m.user.displayName?.trim() || m.user.email).charAt(0).toUpperCase()),
+  };
+}
+
+/**
  * The three extra pieces of context that turn a Crew from "a name in a list" into something
  * that answers "what's actually going on here?" without opening it — see docs/DECISIONS.md
  * #home-surface. Three cheap, independent queries per Crew rather than one large join: at
@@ -133,8 +165,8 @@ export async function listUpcomingPlansForUser(userId: string) {
       publicSlug: plan.publicSlug,
       title: plan.title,
       crew: plan.crew,
-      startsAt: plan.experience?.startsAt ?? null,
-      venueName: plan.experience?.venue?.name ?? null,
+      startsAt: plan.experience?.startsAt ?? plan.manualStartsAt ?? null,
+      venueName: plan.experience?.venue?.name ?? plan.manualVenueName ?? null,
       venueCity: plan.experience?.venue?.city ?? null,
       category: plan.experience?.category ?? null,
       imageUrl: plan.experience?.imageUrl ?? null,

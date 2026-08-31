@@ -342,3 +342,112 @@ message was rendering with its raw internal `/plans/slug` suffix intact, which o
 something to chat's own link-detection regex and reads as a raw URL fragment everywhere else.
 `lib/messagePreview.ts#messagePreview` strips it down to the human part ("📍 Sent X to the
 Crew") for every non-chat surface.
+
+## #social-first-architecture
+
+Product correction, not another visual pass: Plot was drifting toward "a weaker event platform
+with group chat attached" — Home led with discovery, Explore was the implicit centre of
+gravity, and the loop from "someone suggests something" to "we're actually going" ran through
+too many separate screens. The core entity is the Crew deciding something together, not the
+Experience; discovery feeds that loop, it doesn't lead it. Concretely: Home's section order is
+now Your People → Needs You → In The Groups (activity feed) → Next Up → For your Crews (small,
+last); the nav's `Explore` became `Discover` and stayed exactly where it was in priority (fourth
+of five, after Crews); the Crew composer got a `+` action sheet as the one entry point into
+every way of adding something to a conversation (suggest, share, poll, check availability, log
+a plan) instead of "leave the Crew, open Explore, come back." Discovery (map, Ticketmaster/mock
+providers, category art) is unchanged underneath — this was a re-composition of what leads,
+not a rebuild of what exists.
+
+## #decision-objects
+
+Polls and availability check-ins are native conversational objects (`MessagePoll`, one-to-one
+with a `CrewMessage`, `kind: GENERAL | AVAILABILITY` — the same mechanic, a different label and
+option set), not a bolted-on feature with its own screen. A poll renders inline in the
+conversation with live tally bars and one-tap voting (`MessagePollVote`, unique per
+`(pollId, userId)`, re-voting replaces rather than accumulates — the same semantics
+`MessageReaction` already used). Once anyone's voted, the leading option gets its own
+`Lock in "<option>"` button right on the poll card: tapping it creates a manual Plan titled
+`<question> — <option>` and locks it in one motion, so "we decided" becomes "we're doing this"
+without a separate "now go make a Plan" step. Reused the poll mechanic for availability rather
+than building a second object type — a "when works?" check-in is structurally identical to a
+poll over dates.
+
+## #manual-plans
+
+`Plan.experienceId` was already nullable, but nothing actually created a Plan without one —
+every real-world plan that isn't a ticketed event ("Pub Saturday", "Dinner at Sarah's", a poll
+answered and locked) had nowhere to go. Added `Plan.manualVenueName`/`manualStartsAt` (both
+nullable) rather than forcing a synthetic Experience/Venue row for something with no real
+coordinates: a Plan now reads either its `experience` relation or these two fields, never both.
+Every surface that renders a Plan's venue/date (`listUpcomingPlansForUser`, the public Plan
+Card at `/plans/[slug]`, Home's hero) falls back to the manual fields — the public Plan Card
+specifically didn't crash on a null `experience` (it was already guarded), but it silently
+showed no date/venue at all for a manual Plan until this fix, which is its own real gap
+(discovered by actually creating and viewing one, not by code review).
+
+## #lock-it-in
+
+`derivePulseStatus`'s own comment referenced a `markBooked` function that was never actually
+implemented — there was no code path that transitioned a Plan to `BOOKED` except as a side
+effect of creating a real `Booking` record, which meant a Plan with nothing to book (a manual
+plan, a locked poll) could never reach "confirmed" at all. Added `lockPlan(planId, userId)`: a
+direct, explicit status transition to `BOOKED`, independent of booking, posting a system
+message ("🔒 ... was locked in — see you there.") into the conversation so the moment shows up
+where the decision happened. `POST /plans/:id/lock`, membership-checked like every other Plan
+route. A ticketed Plan can still go on to a real Booking afterward; this just marks the group's
+actual decision.
+
+## #invite-preview
+
+Tapping an invite link used to auto-attempt joining immediately, which 401s for anyone not
+already signed in and silently redirects straight to a generic `/auth` login wall — no context
+about what they're joining. `GET /crews/preview/:code` is deliberately public (no `requireUser`)
+and returns the minimum safe to show a stranger — Crew name, member count, first-initial
+avatars, never message content or emails — so `/crews/join/[code]` can show "You're invited to
+Weekend Crew — 6 people are already here" and a real "Join Crew" button before any auth wall.
+Auth's `next` param already carried an invite through sign-in; it now also carries through
+onboarding (a brand-new user completes name/location/interests before landing back on the
+invite, not on generic Home). The one gap this surfaced: returning to the invite page already
+authenticated (post-onboarding) showed the same "tap to join" screen again instead of
+completing automatically — fixed with a second effect that auto-joins on mount if a session
+already exists, so the explicit tap is only ever required once, for a first-time unauthenticated
+visitor.
+
+## #auth-callback-dedup
+
+Found via actually clicking through the invite→auth→callback flow in a browser (not API-only
+testing): the magic-link token is single-use, and `/auth/callback`'s effect can genuinely fire
+its API call more than once for the exact same token — React 18 dev-mode StrictMode
+double-invokes effects, and separately, a same-origin `<a href>` into this route from elsewhere
+in the app is a Next.js App Router client-side transition that mounts a fresh component
+instance, so a component-scoped guard (`useRef`) doesn't survive it. Fixed with a module-level
+`Set<string>` of tokens already requested, keyed by the token itself — the only thing that
+survives both a StrictMode replay and a genuine remount within the same page load. Real users
+never hit the in-app "Continue" link this bug lives on anyway (a magic link is always opened
+fresh from an email client, which is the path already confirmed working); the dev-only
+"Continue" shortcut this session used for testing was the actual trigger. Fixed regardless,
+since it's a real latent bug and the fix is free.
+
+## #uk-wide-location
+
+Audited for London defaults per the brief and found several: Explore's city query defaulted to
+`'London'` server-side, Home's "ideas" fetch and new-Crew creation hardcoded `?city=London` /
+`defaultCity: 'London'` client-side, and `findUsSomething`'s inventory sync fell back to
+`'London'` when a Crew had no `defaultCity`. All now resolve through the same chain — the
+Crew's own city, else whoever's asking's home city (`Profile.homeCity`, set in onboarding), else
+a genuinely UK-central fallback point (Birmingham, not London) — never a bare hardcoded city
+name. `data/ukPlaces.ts` is a small curated gazetteer (real towns/cities, real approximate
+coordinates — public geographic facts, not fabricated inventory) backing `/locations/search`,
+since this environment's egress proxy blocks the geocoding APIs (Google Places, Mapbox, OS
+Names) a real deployment would use instead — swapping one in means replacing
+`searchUkPlaces`'s implementation, not the `/locations/search` contract. The mock
+ticketing/restaurant providers are now genuinely city-aware: London keeps its existing venue
+set, Stafford/Stone/Cannock/Stoke-on-Trent get a second, equally real Staffordshire set (real
+venue names and coordinates — Trentham Gardens, Victoria Hall, The Sugarmill, Katie
+Fitzgerald's, The Moat House, Twelve, etc.), and any other requested city gets an honest empty
+result rather than another city's data silently relabelled under the wrong name (a real bug
+caught before shipping: `ProviderListing`'s `(providerId, providerListingId)` unique key would
+have let a Stafford sync overwrite a London listing that happened to share the same lineup
+index, if the mock `externalId`s hadn't been made city-scoped). Real UK-wide event coverage
+(gigs/festivals/restaurants beyond this curated sample) requires a live provider key — see
+CREDENTIAL BLOCKERS.

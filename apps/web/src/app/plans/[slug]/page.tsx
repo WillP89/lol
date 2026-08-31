@@ -13,6 +13,10 @@ interface PlanCardResponse {
     status: string;
     crew: { name: string };
     experience: { name: string; category: string; venue: { name: string; city: string } | null; startsAt: string; priceMinMinor: number | null } | null;
+    // A Plan with no Experience at all ("Pub Saturday", a poll locked straight to a Plan) still
+    // has somewhere and (optionally) somewhen — see docs/DECISIONS.md#manual-plans.
+    manualVenueName: string | null;
+    manualStartsAt: string | null;
   };
   pulse: { inCount: number; maybeCount: number; outCount: number; totalMembers: number; level: number; status: string };
 }
@@ -34,11 +38,15 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 
   const { plan, pulse } = data;
   const title = `${plan.title} — ${plan.crew.name} on Plot`;
-  const description = plan.experience
-    ? `${new Date(plan.experience.startsAt).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}${
-        plan.experience.venue ? ` · ${plan.experience.venue.name}` : ''
+  const when = plan.experience?.startsAt ?? plan.manualStartsAt;
+  const where = plan.experience?.venue?.name ?? plan.manualVenueName;
+  const description = when
+    ? `${new Date(when).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}${
+        where ? ` · ${where}` : ''
       } · ${pulse.inCount}/${pulse.totalMembers} are in. Are you?`
-    : `${plan.crew.name} are deciding. Are you in?`;
+    : where
+      ? `${where} · ${pulse.inCount}/${pulse.totalMembers} are in. Are you?`
+      : `${plan.crew.name} are deciding. Are you in?`;
 
   return {
     title,
@@ -65,11 +73,20 @@ export default async function PlanCardPage({ params }: { params: { slug: string 
       <div className="eyebrow">{plan.crew.name}</div>
       <h1 style={{ fontSize: 26, marginBottom: 8 }}>{plan.title}</h1>
 
-      {plan.experience && (
+      {(plan.experience || plan.manualVenueName || plan.manualStartsAt) && (
         <p className="muted" style={{ marginBottom: 20 }}>
-          {new Date(plan.experience.startsAt).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
-          {plan.experience.venue && ` · ${plan.experience.venue.name}, ${plan.experience.venue.city}`}
-          {formatPriceFrom(plan.experience.priceMinMinor) && ` · ${formatPriceFrom(plan.experience.priceMinMinor)}`}
+          {plan.experience ? (
+            <>
+              {new Date(plan.experience.startsAt).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
+              {plan.experience.venue && ` · ${plan.experience.venue.name}, ${plan.experience.venue.city}`}
+              {formatPriceFrom(plan.experience.priceMinMinor) && ` · ${formatPriceFrom(plan.experience.priceMinMinor)}`}
+            </>
+          ) : (
+            <>
+              {plan.manualStartsAt && new Date(plan.manualStartsAt).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
+              {plan.manualVenueName && `${plan.manualStartsAt ? ' · ' : ''}${plan.manualVenueName}`}
+            </>
+          )}
         </p>
       )}
 

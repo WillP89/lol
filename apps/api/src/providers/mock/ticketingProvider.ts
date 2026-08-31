@@ -37,6 +37,33 @@ const LONDON_VENUES = [
   { name: 'The Jazz Cafe', lat: 51.5399, lng: -0.1425, area: 'Camden' },
 ];
 
+// Real Staffordshire-area venues (same "coherent sample tuple, honest fallback art" pattern as
+// London's set above — see the beta's actual test group, docs/DECISIONS.md#uk-wide-location) —
+// not the Ticketmaster/DICE coverage a live key would give, but real places with real
+// coordinates, not London data relabelled. Same length/order as LONDON_VENUES so the lineup
+// arrays below can index into either set.
+const STAFFORDSHIRE_VENUES = [
+  { name: 'Victoria Hall', lat: 53.0233, lng: -2.1727, area: 'Hanley, Stoke-on-Trent' },
+  { name: 'The Sugarmill', lat: 53.0245, lng: -2.1785, area: 'Hanley, Stoke-on-Trent' },
+  { name: 'Trentham Gardens', lat: 52.9727, lng: -2.1857, area: 'Trentham' },
+  { name: 'Bet365 Stadium', lat: 52.9883, lng: -2.1751, area: 'Stoke-on-Trent' },
+  { name: 'Stafford Gatehouse Theatre', lat: 52.8063, lng: -2.1177, area: 'Stafford' },
+  { name: "Katie Fitzgerald's", lat: 52.8047, lng: -2.1213, area: 'Stafford' },
+  { name: 'The Place', lat: 52.6913, lng: -2.0303, area: 'Cannock' },
+  { name: 'Stafford County Showground', lat: 52.8355, lng: -2.1064, area: 'Stafford' },
+];
+
+// city -> venue set, matched case-insensitively. Any city not in here gets an honest empty
+// catalogue rather than London (or Staffordshire) data mislabelled under the wrong city — see
+// docs/DECISIONS.md#uk-wide-location.
+const CITY_VENUES: Record<string, typeof LONDON_VENUES> = {
+  london: LONDON_VENUES,
+  stafford: STAFFORDSHIRE_VENUES,
+  'stoke-on-trent': STAFFORDSHIRE_VENUES,
+  cannock: STAFFORDSHIRE_VENUES,
+  stone: STAFFORDSHIRE_VENUES,
+};
+
 function seededRandom(seed: number): () => number {
   let s = seed;
   return () => {
@@ -72,11 +99,18 @@ const COMEDY_LINEUP: { name: string; venue: number }[] = [
   { name: 'Saturday Night Stand-Up Social', venue: 4 },
 ];
 
-function generateMockCatalogue(): MockTicketingRaw[] {
+function generateMockCatalogue(city: string): MockTicketingRaw[] {
+  const venues = CITY_VENUES[city.trim().toLowerCase()];
+  if (!venues) return []; // honest: no sample coverage here rather than another city's data
+
+  const citySlug = city.trim().toLowerCase().replace(/\s+/g, '-');
   const rand = seededRandom(42);
+  // externalId is scoped by city — the same lineup index means a different real listing per
+  // city (different venue/coordinates), so it must not collide with another city's row under
+  // ProviderListing's (providerId, providerListingId) unique key.
   const entries: { id: string; name: string; venue: (typeof LONDON_VENUES)[number]; cat: ExperienceCategory; sub: string[] }[] = [
-    ...CLUBBING_LIVE_LINEUP.map((a, i) => ({ id: `mock-tkt-${i}`, name: a.name, venue: LONDON_VENUES[a.venue], cat: a.cat as ExperienceCategory, sub: a.sub })),
-    ...COMEDY_LINEUP.map((c, i) => ({ id: `mock-tkt-comedy-${i}`, name: c.name, venue: LONDON_VENUES[c.venue], cat: 'COMEDY' as ExperienceCategory, sub: ['stand_up'] })),
+    ...CLUBBING_LIVE_LINEUP.map((a, i) => ({ id: `mock-tkt-${citySlug}-${i}`, name: a.name, venue: venues[a.venue], cat: a.cat as ExperienceCategory, sub: a.sub })),
+    ...COMEDY_LINEUP.map((c, i) => ({ id: `mock-tkt-${citySlug}-comedy-${i}`, name: c.name, venue: venues[c.venue], cat: 'COMEDY' as ExperienceCategory, sub: ['stand_up'] })),
   ];
 
   return entries.map(({ id, name, venue, cat, sub }, i) => {
@@ -123,11 +157,11 @@ export const mockTicketingProvider: ProviderAdapter = {
     return { status: 'ACTIVE', checkedAt: new Date() };
   },
 
-  async fetchListings(_params: FetchListingsParams): Promise<RawListing[]> {
+  async fetchListings(params: FetchListingsParams): Promise<RawListing[]> {
     return withRetry(async (signal) => {
       await new Promise((resolve) => setTimeout(resolve, 40));
       if (signal.aborted) throw new Error('aborted');
-      return generateMockCatalogue().map((item) => ({ externalId: item.id, raw: item }));
+      return generateMockCatalogue(params.city).map((item) => ({ externalId: item.id, raw: item }));
     });
   },
 

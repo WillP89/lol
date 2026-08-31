@@ -53,6 +53,7 @@ model User {
   crewMemberships       CrewMember[]
   crewMessages          CrewMessage[]
   messageReactions      MessageReaction[]
+  messagePollVotes      MessagePollVote[]
   calendarConnections   CalendarConnection[]
   availabilityWindows   AvailabilityWindow[]
   planMemberships       PlanMember[]
@@ -87,6 +88,11 @@ model Profile {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   avatarUrl String?
   homeCity  String?
+  // Coordinates for `homeCity`, set together from the onboarding location search (see
+  // docs/DECISIONS.md#uk-wide-location) — the UK-wide replacement for the old assumption that
+  // everyone is in London. Nullable: a user can exist without ever having set one.
+  homeLat   Float?
+  homeLng   Float?
   bio       String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -331,8 +337,45 @@ model CrewMessage {
   createdAt DateTime @default(now())
 
   reactions MessageReaction[]
+  poll      MessagePoll?
 
   @@index([crewId, createdAt])
+}
+
+/// A poll (or an availability check-in, `kind: AVAILABILITY` — same mechanic, a different set of
+/// options and a different label in the UI) lives ON a CrewMessage, one-to-one — it's a native
+/// conversational object, not a separate feature bolted next to chat. See
+/// docs/DECISIONS.md#decision-objects.
+model MessagePoll {
+  id        String   @id @default(uuid())
+  messageId String   @unique
+  message   CrewMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  question  String
+  options   Json // string[]
+  kind      PollKind @default(GENERAL)
+  createdAt DateTime @default(now())
+
+  votes MessagePollVote[]
+}
+
+enum PollKind {
+  GENERAL
+  AVAILABILITY
+}
+
+/// One vote per user per poll — re-voting replaces the previous option, it doesn't accumulate a
+/// second row (the same toggle-and-replace semantics as MessageReaction).
+model MessagePollVote {
+  id        String      @id @default(uuid())
+  pollId    String
+  poll      MessagePoll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  option    String
+  createdAt DateTime    @default(now())
+
+  @@unique([pollId, userId])
+  @@index([pollId])
 }
 
 /// One reaction per user per message — tapping a different emoji replaces it, tapping the
@@ -487,6 +530,7 @@ enum ExperienceCategory {
   FESTIVAL
   DAY_ACTIVITY
   COMMUNITY
+  CUSTOM
 }
 
 enum BookingStatus {
@@ -558,6 +602,12 @@ model Plan {
   proposedByUserId String
   publicSlug       String                    @unique @default(cuid())
   readyThreshold   Float                     @default(0.6) // fraction of members voting "in" to reach LIKELY
+  // A Plan with no `experience` at all — "Pub Saturday", "Dinner at Sarah's" — is not a
+  // degraded/incomplete Plan, it's the common case for most real plans, which never come from
+  // a ticketed inventory. Populated only when experienceId is null; the UI reads whichever pair
+  // is present. See docs/DECISIONS.md#manual-plans.
+  manualVenueName String?
+  manualStartsAt  DateTime?
   createdAt        DateTime                  @default(now())
   updatedAt        DateTime                  @updatedAt
   completedAt      DateTime?
