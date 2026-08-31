@@ -112,7 +112,7 @@ export function VoteForm({
               Not for me
             </button>
           </div>
-          {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginTop: 10 }}>{error}</div>}
+          {error && <div style={{ color: 'var(--v2-error)', fontSize: 13, marginTop: 10 }}>{error}</div>}
         </>
       )}
     </div>

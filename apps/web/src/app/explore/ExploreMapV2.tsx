@@ -19,11 +19,14 @@ import type { ExploreExperience } from './ExploreMap';
 // traffic, not a pilot-scale one.
 function pinIcon(selected: boolean) {
   const size = selected ? 26 : 16;
+  // Neutral black pins at rest (Apple Maps' own convention); the selected pin switches to the
+  // same signature pink used for the selected card's ring, so list and map visibly agree on
+  // which one is highlighted.
   return L.divIcon({
     className: '',
     html: selected
-      ? `<span style="display:block;width:${size}px;height:${size}px;border-radius:50%;background:#ff4a1f;box-shadow:0 0 0 7px rgba(255,74,31,.22),0 4px 14px rgba(26,21,16,.35);border:3px solid #fff;"></span>`
-      : `<span style="display:block;width:${size}px;height:${size}px;border-radius:50%;background:#ff4a1f;box-shadow:0 2px 8px rgba(26,21,16,.25);border:2.5px solid #fff;"></span>`,
+      ? `<span style="display:block;width:${size}px;height:${size}px;border-radius:50%;background:#ff2f7e;box-shadow:0 0 0 7px rgba(255,47,126,.22),0 4px 14px rgba(12,12,13,.35);border:3px solid #fff;"></span>`
+      : `<span style="display:block;width:${size}px;height:${size}px;border-radius:50%;background:#0c0c0d;box-shadow:0 2px 8px rgba(12,12,13,.25);border:2.5px solid #fff;"></span>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   });

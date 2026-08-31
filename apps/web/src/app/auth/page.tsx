@@ -46,7 +46,7 @@ function AuthForm() {
   return (
     <div className="v2" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <div className="v2-page" style={{ paddingTop: 0, paddingBottom: 0 }}>
-        <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontStyle: 'italic', fontWeight: 700, fontSize: 22, marginBottom: 32 }}>Plot</div>
+        <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 900, fontSize: 22, letterSpacing: '-0.02em', marginBottom: 32 }}>Plot</div>
 
         {!sent ? (
           <div className="fade-up">
@@ -65,7 +65,7 @@ function AuthForm() {
               <button className="v2-btn v2-btn-brand" disabled={loading || !email} type="submit" style={{ padding: '16px 22px', fontSize: 15.5 }}>
                 {loading ? 'Sending…' : 'Send my link'}
               </button>
-              {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13 }}>{error}</div>}
+              {error && <div style={{ color: 'var(--v2-error)', fontSize: 13 }}>{error}</div>}
             </form>
           </div>
         ) : (

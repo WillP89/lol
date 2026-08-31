@@ -22,7 +22,7 @@ interface ProfileUser {
 }
 
 // Same palette as Home V2's avatar colours — one shared identity system across the app.
-const AVATAR_COLORS = ['#ff4a1f', '#b9832a', '#1b7a4d', '#0f766e', '#c2410c'];
+const AVATAR_COLORS = ['#ff2f7e', '#7c5cfc', '#2f8aff', '#ffc53d', '#34d399', '#ff7a3d'];
 function avatarColor(seed: string) {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % AVATAR_COLORS.length;
@@ -96,7 +96,7 @@ export default function ProfilePage() {
     return (
       <div className="v2">
         <div className="v2-page v2-page-wide" style={{ paddingTop: 28, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {error ? <div style={{ color: 'var(--v2-brand)' }}>{error}</div> : <div style={{ height: 120, borderRadius: 'var(--v2-r-lg)', background: 'var(--v2-bg-deep)' }} />}
+          {error ? <div style={{ color: 'var(--v2-error)' }}>{error}</div> : <div style={{ height: 120, borderRadius: 'var(--v2-r-lg)', background: 'var(--v2-bg-deep)' }} />}
         </div>
       </div>
     );
@@ -131,7 +131,7 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
+          {error && <div style={{ color: 'var(--v2-error)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
           <div className="v2-card" style={{ padding: '18px 20px', marginBottom: 14 }}>
             <div className="v2-eyebrow">Areas</div>
@@ -186,14 +186,14 @@ export default function ProfilePage() {
               <button
                 onClick={() => setDangerAction('deactivate')}
                 disabled={busy}
-                style={{ padding: '12px 16px', borderRadius: 100, border: 'none', background: 'var(--v2-bg-deep)', color: 'var(--v2-brand)', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}
+                style={{ padding: '12px 16px', borderRadius: 100, border: 'none', background: 'var(--v2-bg-deep)', color: 'var(--v2-error)', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}
               >
                 Deactivate account
               </button>
               <button
                 onClick={() => setDangerAction('delete')}
                 disabled={busy}
-                style={{ padding: '12px 16px', borderRadius: 100, border: 'none', background: 'var(--v2-bg-deep)', color: 'var(--v2-brand)', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}
+                style={{ padding: '12px 16px', borderRadius: 100, border: 'none', background: 'var(--v2-bg-deep)', color: 'var(--v2-error)', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}
               >
                 Delete account
               </button>

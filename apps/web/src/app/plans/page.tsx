@@ -52,7 +52,7 @@ export default function PlansPage() {
             <p className="v2-muted" style={{ fontSize: 14.5 }}>What&rsquo;s actually locked in.</p>
           </div>
 
-          {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
+          {error && <div style={{ color: 'var(--v2-error)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
           {plans === null && !error && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

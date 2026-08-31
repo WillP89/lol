@@ -63,7 +63,7 @@ function CallbackInner() {
     <>
       {error ? (
         <>
-          <div style={{ color: 'var(--v2-brand)', fontSize: 13.5 }}>{error}</div>
+          <div style={{ color: 'var(--v2-error)', fontSize: 13.5 }}>{error}</div>
           <a className="v2-btn v2-btn-brand" href="/auth" style={{ marginTop: 16 }}>
             Try again
           </a>

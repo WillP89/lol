@@ -19,7 +19,7 @@ interface CrewSummary {
 
 // Same palette as Home V2's avatar/ring colours — one shared identity system across the app,
 // not a different set of colours per screen for the same people and Crews.
-const AVATAR_COLORS = ['#ff4a1f', '#b9832a', '#1b7a4d', '#0f766e', '#c2410c'];
+const AVATAR_COLORS = ['#ff2f7e', '#7c5cfc', '#2f8aff', '#ffc53d', '#34d399', '#ff7a3d'];
 
 function initials(displayName: string | null, email: string) {
   const source = displayName?.trim() || email;
@@ -206,7 +206,7 @@ export default function CrewsPage() {
             </button>
           </div>
 
-          {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
+          {error && <div style={{ color: 'var(--v2-error)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
           {crews === null && !error && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

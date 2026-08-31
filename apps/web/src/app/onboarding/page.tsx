@@ -98,7 +98,7 @@ function OnboardingWizard() {
   return (
     <div className="v2" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <div className="v2-page" style={{ paddingTop: 0, paddingBottom: 0 }}>
-        <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontStyle: 'italic', fontWeight: 700, fontSize: 20, marginBottom: 26 }}>Plot</div>
+        <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 900, letterSpacing: '-0.02em', fontSize: 20, marginBottom: 26 }}>Plot</div>
         <div style={{ display: 'flex', gap: 5, marginBottom: 28 }}>
           {steps.map((s) => (
             <div key={s} style={{ flex: 1, height: 3.5, borderRadius: 3, background: s <= step ? 'var(--v2-brand)' : 'var(--v2-bg-deep)' }} />
@@ -160,7 +160,7 @@ function OnboardingWizard() {
           </>
         )}
 
-        {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginTop: 16 }}>{error}</div>}
+        {error && <div style={{ color: 'var(--v2-error)', fontSize: 13, marginTop: 16 }}>{error}</div>}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 26 }}>
           {step > 0 && (

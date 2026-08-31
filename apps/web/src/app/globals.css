@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;0,9..144,900;1,9..144,500&family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,600;0,700;0,800;0,900;1,700;1,900&family=Inter:wght@400;500;600;700;800&display=swap');
 
 * {
   box-sizing: border-box;
@@ -40,57 +40,71 @@ body {
 }
 
 /* ==========================================================================
-   PLOT DESIGN SYSTEM (reset) — Home, Explore, Crew/Chat, Entry/Auth, and
-   every other screen. This replaces the previous "v2" aesthetic outright —
-   dark plum panels, glass/blur chrome, film grain, perpetual ambient drift,
-   and coral-as-brand are gone. None of those were the problem to fix with a
-   nicer version of themselves; the direction itself was wrong, so it isn't
-   iterated here, it's replaced.
+   PLOT DESIGN SYSTEM (reset 2) — built directly off three named references
+   (see docs/DECISIONS.md#plot-design-reset-2), not abstract "premium" vocab:
+   Partiful for FEEL, Geneva for social STRUCTURE, Apple Invites for the
+   execution QUALITY BAR. Not a restyle of the previous attempt — the actual
+   colour convention was inverted.
 
-   New foundation:
-   — Warm porcelain ground, true near-black warm ink for text and dark
-     surfaces (no purple anywhere in the system).
-   — ONE confident brand colour: a warm flame-orange-red, used deliberately
-     (primary actions, the one accent that means "this matters"), not
-     smeared across every surface as a decorative wash.
-   — Fraunces (a real display serif, not another geometric grotesque) for
-     every heading and hero moment — the single biggest lever for reading as
-     an editorial, considered, expensive product rather than a SaaS
-     dashboard; Inter stays for UI text and body copy, where a serif would
-     hurt legibility and density.
-   — Decoration is gone as a default. No card, panel or button carries a
-     gradient, blur or animation unless a specific interaction earns it
-     (the lock-in moment, a sheet's open transition). Quality now has to
-     come from composition, type scale, imagery and spacing instead.
+   The one fact this pass is built on: Partiful's own UI runs on black as
+   its primary action colour — filled black buttons, black text, black
+   borders — not a bright brand hue. Colour lives in imagery, gradients and
+   avatar identity, not in chrome. Every earlier attempt here (coral, then
+   flame-orange) put a bright colour ON the buttons and chrome instead,
+   which is very plainly why it kept reading as "a SaaS product with a
+   colour," not as Partiful. This system inverts that: white canvas, near-
+   black as the one UI action colour, and a small "confetti" palette used
+   ONLY for imagery/avatars/celebration/decorative accents — never as a
+   button fill.
 
-   Still scoped under `.v2` — that class name is internal plumbing referenced
-   by every page file; renaming it would be a mechanical, purely cosmetic
-   diff across dozens of files with zero effect on what actually renders, so
-   it stays as-is while everything it contains changes. See
-   docs/DECISIONS.md#plot-design-reset.
+   Archivo (black weight, tight tracking, large sizes) replaces Fraunces —
+   Partiful's own type system pairs a bold grotesque display face with a
+   grotesque UI face, no serif anywhere. Inter stays for UI text.
+
+   Still scoped under `.v2` — internal plumbing referenced by every page
+   file; renaming it is a purely mechanical diff with zero visual effect, so
+   it stays while everything it contains changes again.
    ========================================================================== */
 .v2 {
-  --v2-bg: #faf7f2;
-  --v2-bg-deep: #efe8db;
+  --v2-bg: #f6f6f4;
+  --v2-bg-deep: #ebeae7;
   --v2-surface: #ffffff;
-  --v2-ink: #16130f;
-  --v2-ink-muted: #6b6152;
-  --v2-ink-dim: #a89c87;
+  --v2-ink: #0c0c0d;
+  --v2-ink-muted: #68666a;
+  --v2-ink-dim: #a5a3a1;
 
-  --v2-brand: #ff4a1f;
-  --v2-brand-ink: #fff6f0;
+  /* The primary UI action colour — buttons, the "mine" chat bubble, primary CTA text/links.
+     Near-true black, not a hue. See the file-level comment above. */
+  --v2-brand: #0c0c0d;
+  --v2-brand-ink: #ffffff;
 
-  /* The dark surface — desktop nav rail, "mine" chat bubbles, dark buttons. A true warm
-     near-black, not a colour-as-mood-lighting panel. */
-  --v2-plum: #18140f;
-  --v2-plum-ink: #f6f1e8;
+  /* Same near-black — dark photo-card scrims, the odd deliberately-dark surface. Kept as its
+     own token (rather than merged into --v2-brand) only because call sites already reference
+     it by name; value is intentionally the same colour. */
+  --v2-plum: #101012;
+  --v2-plum-ink: #ffffff;
 
+  /* The ONE signature accent — a vivid pink, used sparingly for identity moments (an unread
+     dot, an eyebrow label, a selection ring, the "needs you" stripe, one coloured word in a
+     headline) — never as a button fill. */
+  --v2-pop: #ff2f7e;
+  --v2-error: #d92d20;
   --v2-gold: #b9832a;
   --v2-green: #1b7a4d;
 
-  --v2-line: rgba(22, 19, 15, 0.09);
-  --v2-shadow-sm: 0 1px 2px rgba(22, 19, 15, 0.04), 0 6px 16px -8px rgba(22, 19, 15, 0.12);
-  --v2-shadow-lg: 0 4px 10px rgba(22, 19, 15, 0.05), 0 20px 40px -16px rgba(22, 19, 15, 0.24);
+  /* The confetti set — event/plan fallback art and avatar-ring identity draw from this, cycled
+     per person/Crew, so the app carries genuine multi-colour energy without any single hue
+     being "the brand colour" painted across chrome. */
+  --v2-confetti-1: #ff2f7e;
+  --v2-confetti-2: #7c5cfc;
+  --v2-confetti-3: #2f8aff;
+  --v2-confetti-4: #ffc53d;
+  --v2-confetti-5: #34d399;
+  --v2-confetti-6: #ff7a3d;
+
+  --v2-line: rgba(12, 12, 13, 0.1);
+  --v2-shadow-sm: 0 1px 2px rgba(12, 12, 13, 0.05), 0 6px 16px -8px rgba(12, 12, 13, 0.14);
+  --v2-shadow-lg: 0 4px 10px rgba(12, 12, 13, 0.06), 0 20px 40px -16px rgba(12, 12, 13, 0.26);
   --v2-r-lg: 20px;
   --v2-r-md: 14px;
   --v2-r-sm: 10px;
@@ -127,15 +141,14 @@ body {
   .v2-lock-dot { display: none; }
 }
 
-/* Fraunces (a real display serif) for every heading and hero moment, not another geometric
-   grotesque — the single biggest lever for "editorial and considered" over "SaaS dashboard".
-   Negative tracking stays light (a serif's own letterforms already carry rhythm; Bricolage-style
-   -0.03em was tuned for a grotesque and crowds Fraunces' curves at display sizes). */
+/* Archivo at black (900) weight with tight tracking for every heading and hero moment — the
+   confident, statement-making display type Partiful's own system uses (a bold custom grotesque
+   for headlines, up to ~112px, tight tracking), not a serif. */
 .v2 h1, .v2 h2, .v2 h3, .v2-display {
-  font-family: 'Fraunces', Georgia, serif;
-  letter-spacing: -0.01em;
-  font-weight: 700;
-  line-height: 1.08;
+  font-family: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.02em;
+  font-weight: 900;
+  line-height: 1.0;
 }
 .v2 a { color: inherit; text-decoration: none; }
 .v2 button { font-family: inherit; }
@@ -145,8 +158,11 @@ body {
   color: var(--v2-ink-muted);
   letter-spacing: -0.01em;
 }
-.v2-muted { color: var(--v2-ink-muted); }
-.v2-dim { color: var(--v2-ink-dim); }
+/* `.v2 ` prefix (not just the bare class) for the same reason as `.v2-btn-*` above — these
+   land on `<Link>`s constantly (Home/Crews/Explore "See all", "Discover", back links) and a
+   bare single-class selector loses to `.v2 a { color: inherit }`'s class+type specificity. */
+.v2 .v2-muted { color: var(--v2-ink-muted); }
+.v2 .v2-dim { color: var(--v2-ink-dim); }
 
 /* BottomSheet — mobile keeps the native bottom-sheet shape (full width, rounded top corners
    only, flush to the bottom edge). Desktop switches to a centred dialog: rounded on every
@@ -190,17 +206,35 @@ body {
 .v2-btn:active { transform: scale(0.96); }
 .v2-btn:disabled { opacity: 0.5; cursor: default; }
 .v2-btn:disabled:active { transform: none; }
-.v2-btn-brand { background: var(--v2-brand); color: var(--v2-brand-ink); box-shadow: 0 10px 24px -8px rgba(255, 74, 31, 0.5); }
-.v2-btn-dark { background: var(--v2-plum); color: var(--v2-plum-ink); }
-.v2-btn-ghost { background: var(--v2-surface); color: var(--v2-ink); box-shadow: var(--v2-shadow-sm); }
+/* Real bug, caught via a fresh screenshot: `.v2 a { color: inherit }` above is (class + type) =
+   higher specificity than a bare `.v2-btn-brand` (class only), so it was winning on any button
+   rendered as a Link/`<a>` — inheriting the page's own ink colour instead of the button's own
+   `color`. Harmless while the button fill was a light/mid tone (dark-on-colour still read), but
+   invisible now that `--v2-brand` is near-black: black text on a black button. Prefixing with
+   `.v2 ` doubles these to two classes, which beats `.v2 a`'s one-class-one-type regardless of
+   element — the correct, general fix, not a one-off override on the buttons that happened to be
+   links. */
+.v2 .v2-btn-brand { background: var(--v2-brand); color: var(--v2-brand-ink); box-shadow: 0 10px 24px -8px rgba(12, 12, 13, 0.35); transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease; }
+.v2 .v2-btn-dark { background: var(--v2-plum); color: var(--v2-plum-ink); }
+.v2 .v2-btn-ghost { background: var(--v2-surface); color: var(--v2-ink); box-shadow: var(--v2-shadow-sm); }
 /* Only real pointer devices get a hover treatment — `:hover` sticking after a tap on touch is
    what made buttons/cards read as unresponsive rather than tactile on mobile, which is most of
-   this app's actual usage. */
+   this app's actual usage. A small lift, not just a brightness tweak — the button should feel
+   like it's physically responding to the cursor being over it. */
 @media (hover: hover) {
-  .v2-btn-brand:hover:not(:disabled) { filter: brightness(1.06); }
+  .v2-btn-brand:hover:not(:disabled) { filter: brightness(1.06); transform: translateY(-2px); box-shadow: 0 14px 28px -8px rgba(12, 12, 13, 0.45); }
   .v2-btn-dark:hover:not(:disabled) { filter: brightness(1.15); }
   .v2-btn-ghost:hover:not(:disabled) { background: var(--v2-bg-deep); }
 }
+
+/* Landing page's collage of plan-card tiles — each sits at its own resting tilt (--tilt/--lift,
+   set inline per card) and straightens flat + lifts toward the cursor on hover, the one
+   playful, tactile "this app moves" moment on the entrance screen. */
+.v2-collage-card { transition: transform 0.35s cubic-bezier(.2,.8,.2,1), box-shadow 0.35s ease; }
+@media (hover: hover) {
+  .v2-collage-card:hover { transform: rotate(0deg) translateY(calc(var(--lift, 0px) - 10px)) scale(1.05) !important; box-shadow: 0 24px 44px -12px rgba(12, 12, 13, 0.4); }
+}
+.v2-collage-card:active { transform: rotate(var(--tilt, 0deg)) translateY(var(--lift, 0px)) scale(0.97); }
 
 .v2-card {
   background: var(--v2-surface);
@@ -230,8 +264,9 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
 .v2-hoverable { transition: transform 0.15s ease, box-shadow 0.15s ease; }
 .v2-hoverable:active { transform: scale(0.98); }
 
-/* ---- Mobile: icon-only floating pill, no text labels (contrast the old bar's orange text
-   labels) — a small dot under the active icon carries state instead. ---- */
+/* ---- Mobile: icon-only floating pill, no text labels — a small pink dot under the active
+   icon carries state instead. Apple-Invites-plain: a solid white pill with a hairline border
+   and a soft shadow, not a glass material — the chrome should get out of the way, not perform. */
 .v2-nav-bottom {
   position: fixed;
   left: 50%;
@@ -240,12 +275,8 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   display: flex;
   align-items: center;
   gap: 4px;
-  /* Frosted glass, not a flat white pill — the floating nav sitting over live content below it
-     is exactly the moment a real material read (iOS-native, not "a div with a shadow") lands. */
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(20px) saturate(1.6);
-  -webkit-backdrop-filter: blur(20px) saturate(1.6);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: var(--v2-surface);
+  border: 1px solid var(--v2-line);
   padding: 8px;
   border-radius: 100px;
   box-shadow: var(--v2-shadow-lg);
@@ -261,7 +292,7 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   position: relative;
   color: var(--v2-ink-dim);
 }
-.v2-nav-bottom .v2-tab.active { color: var(--v2-plum); background: var(--v2-bg-deep); }
+.v2-nav-bottom .v2-tab.active { color: var(--v2-ink); background: var(--v2-bg-deep); }
 .v2-nav-bottom .v2-tab .v2-dot {
   position: absolute;
   bottom: 5px;
@@ -270,12 +301,15 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: var(--v2-brand);
+  background: var(--v2-pop);
   opacity: 0;
 }
 .v2-nav-bottom .v2-tab.active .v2-dot { opacity: 1; }
 
-/* ---- Desktop: a slim colour-blocked icon rail, not a wide labelled list. ---- */
+/* ---- Desktop: a slim, light icon rail — white, not a dark colour-blocked panel. The dark
+   gradient rail from the previous pass was itself part of what read as "generic dark app
+   chrome"; Partiful/Apple both stay light throughout, reserving black for actual ink (icons,
+   the active pill, text) rather than covering a quarter of the screen in it. ---- */
 .v2-nav-rail { display: none; }
 @media (min-width: 900px) {
   .v2-nav-rail {
@@ -289,23 +323,21 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
     bottom: 0;
     width: 84px;
     padding: 22px 0;
-    /* A subtle vertical depth gradient plus an inner-edge highlight — a true near-black ink
-       throughout, no purple stop hiding in the middle of it. */
-    background: linear-gradient(165deg, #221b14 0%, var(--v2-plum) 55%, #100d09 100%);
-    box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.06);
+    background: var(--v2-surface);
+    border-right: 1px solid var(--v2-line);
     z-index: 40;
   }
   .v2-nav-rail .v2-rail-mark {
     width: 40px;
     height: 40px;
     border-radius: 12px;
-    background: var(--v2-brand);
-    color: var(--v2-brand-ink);
+    background: var(--v2-ink);
+    color: #fff;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'Fraunces', Georgia, serif;
-    font-weight: 800;
+    font-family: 'Archivo', sans-serif;
+    font-weight: 900;
     font-size: 18px;
     margin-bottom: 20px;
   }
@@ -316,10 +348,12 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
     display: flex;
     align-items: center;
     justify-content: center;
-    color: rgba(246, 238, 255, 0.5);
+    color: var(--v2-ink-dim);
   }
-  .v2-nav-rail .v2-tab.active { background: rgba(255, 255, 255, 0.1); color: var(--v2-plum-ink); }
-  .v2-nav-rail .v2-tab:hover { background: rgba(255, 255, 255, 0.06); }
+  .v2-nav-rail .v2-tab.active { background: var(--v2-ink); color: #fff; }
+  @media (hover: hover) {
+    .v2-nav-rail .v2-tab:not(.active):hover { background: var(--v2-bg-deep); color: var(--v2-ink); }
+  }
   .v2-nav-rail .v2-rail-spacer { flex: 1; }
   .v2-nav-rail .v2-rail-avatar {
     width: 38px;
@@ -330,7 +364,7 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
     justify-content: center;
     font-weight: 800;
     font-size: 13px;
-    background: var(--v2-gold);
+    background: var(--v2-confetti-4);
     color: #2b1a00;
   }
 
@@ -469,7 +503,7 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
 
 /* Content-type differentiation on the feed — "Needs you" gets a warm left accent so it reads as
    a different kind of module from a plain activity row, not an identical white box repeated. */
-.v2-needs-you-card { border-left: 3px solid var(--v2-brand); }
+.v2-needs-you-card { border-left: 3px solid var(--v2-pop); }
 
 /* A wider desktop reading column for list-shaped pages (Crews, Plans, Profile) that aren't
    Home's full split-rail composition — same "tiny strip in a huge viewport" problem, a smaller
@@ -534,7 +568,7 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   background: var(--v2-bg-deep);
 }
 .v2-pulse-flame.on {
-  background: var(--v2-brand);
+  background: var(--v2-pop);
 }
 
 /* Leaflet's stock light zoom control needs a little polish to match the new system. */

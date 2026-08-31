@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 
-const AVATAR_COLORS = ['#ff4a1f', '#0f766e', '#1b7a4d', '#b9832a', '#c2410c'];
+const AVATAR_COLORS = ['#7c5cfc', '#2f8aff', '#34d399', '#ffc53d', '#ff7a3d', '#ff2f7e'];
 
 interface Preview {
   name: string;
@@ -107,7 +107,7 @@ export default function JoinCrewPage() {
             <button className="v2-btn v2-btn-brand" onClick={join} disabled={joining} style={{ width: '100%', padding: '16px 22px', fontSize: 15.5 }}>
               {joining ? 'Joining…' : 'Join Crew'}
             </button>
-            {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginTop: 12 }}>{error}</div>}
+            {error && <div style={{ color: 'var(--v2-error)', fontSize: 13, marginTop: 12 }}>{error}</div>}
           </div>
         )}
 

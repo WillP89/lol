@@ -67,7 +67,7 @@ function Card({
         padding: 0,
         textAlign: 'left',
         cursor: 'pointer',
-        boxShadow: selected ? '0 0 0 3px var(--v2-brand), var(--v2-shadow-sm)' : 'var(--v2-shadow-sm)',
+        boxShadow: selected ? '0 0 0 3px var(--v2-pop), var(--v2-shadow-sm)' : 'var(--v2-shadow-sm)',
         background: v2Art(exp.imageUrl, exp.category),
       }}
     >
@@ -312,7 +312,7 @@ export default function ExplorePage() {
   return (
     <div className="v2">
       <div className="v2-shell-desktop">
-        {error && <div className="v2-page" style={{ paddingBottom: 0, color: 'var(--v2-brand)' }}>{error}</div>}
+        {error && <div className="v2-page" style={{ paddingBottom: 0, color: 'var(--v2-error)' }}>{error}</div>}
 
         <div className="v2-explore-split">
           <div className="v2-explore-col">

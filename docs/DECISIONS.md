@@ -856,3 +856,70 @@ Crew and Explore.
 - No further motion system beyond what already existed (lock-burst, sheet transitions, list
   stagger) — deliberately not expanded, per "motion should be functional... avoid decorative
   perpetual animation unless there is a very strong reason."
+
+## #plot-design-reset-2
+
+The first reset (above) was itself rejected outright: "visually its fucking shite... this hasn't
+changed at all." Rather than guess a third visual direction blind, asked for and got three named
+references with explicit roles instead of vague "premium" adjectives — Partiful for FEEL, Geneva
+for social STRUCTURE, Apple Invites for the execution QUALITY BAR — and built directly off that,
+not off another round of my own taste.
+
+**The one fact this pass is built on**: Partiful's own UI runs on near-black as its primary
+action colour — filled black buttons, black text, black borders — not a bright brand hue; colour
+lives in imagery, gradients and avatar identity, not in chrome. Every attempt before this one put
+a bright colour ON the buttons and chrome instead (coral, then flame-orange), which is very
+plainly why it kept reading as "a SaaS product with a colour," never as Partiful. This system
+inverts that:
+
+- **Palette** — white/near-white canvas (`#f6f6f4`), true near-black ink as the ONE UI action
+  colour (buttons, the "mine" chat bubble, primary CTA text/links), and a small "confetti" set
+  (pink/violet/blue/yellow/green/orange) used ONLY for imagery, avatar-ring identity, category
+  art gradients, and the lock-in celebration — never as a button fill. One signature accent
+  (`--v2-pop`, a vivid pink) carries the brand thread in small identity moments — an unread dot,
+  an eyebrow label, a selection ring, the "needs you" stripe, one coloured word in a headline.
+- **Type** — Archivo at black (900) weight, tight tracking, for every heading/hero moment,
+  replacing the previous pass's Fraunces serif. Partiful's own system pairs a bold grotesque
+  display face with a grotesque UI face — no serif anywhere.
+- **Event/plan fallback art** — full-bleed vivid gradient washes per category (confetti-palette
+  colour → near-black), directly matching Partiful's own "purple-to-pink hero" convention,
+  replacing the muted ink-to-category-tone duotone from the previous pass.
+- **A real collage device on the entrance screen** — three small rotated "plan card" tiles
+  (Partiful's own invite-card pattern, scaled down), each straightening + lifting toward the
+  cursor on hover — the one genuinely playful, tactile motion moment on the page, not a
+  decorative background effect.
+- **Light chrome throughout** — the dark-plum desktop nav rail from every previous pass is gone;
+  the rail and the mobile nav pill are both white/near-white now, matching Partiful/Apple's own
+  restraint (colour and dark surfaces are content decisions, not chrome decisions).
+
+**Two real bugs found and fixed while building this, not after shipping:**
+- A genuine CSS specificity bug, invisible until the palette flip made it catastrophic: `.v2 a
+  { color: inherit }` (one class + one type = higher specificity than a bare single-class
+  `.v2-btn-brand`) was silently winning on every button rendered as a `<Link>`, inheriting the
+  page's own ink colour instead of the button's intended text colour. Harmless while the button
+  fill was a mid tone (dark-on-colour still read); invisible black-on-black now that the primary
+  action colour is near-black. Confirmed via `getComputedStyle` before and after. Fixed generally
+  — prefixed every affected rule (`.v2-btn-brand/dark/ghost`, `.v2-muted`, `.v2-dim`) with `.v2 `
+  so two classes beats `.v2 a`'s class+type, rather than patching the one button that happened to
+  surface it.
+- Home's floating nav pill sat directly over the "Next up" hero card's caption at the initial
+  (unscrolled) viewport position on mobile — turned out to be correct, expected behaviour for a
+  fixed-position element over a page taller than the viewport (the card is reachable, just below
+  the fold at rest), not a real bug; documented here since it looked like one on first
+  screenshot and is worth not re-litigating.
+
+**Verified with a fresh two-independent-session friend test** (desktop + mobile, separate
+browser contexts) after the palette flip: signup, invite, join, chat both directions, an
+availability poll, a vote from the second user, lock-in (confetti now genuinely multi-hue), and
+the resulting Plan appearing on Home's "Next up"/activity feed and the Crews list, all with the
+new button-text bug already fixed and confirmed correct throughout.
+
+**Real events / real photos remain blocked on live provider credentials** (Ticketmaster and/or
+Eventbrite API keys — see `providers/registry.ts`), not on anything in this pass: with no key
+configured, `providerRegistry` falls back to the mock ticketing provider, which has no real
+`imageUrl`s to show — the gradient art *is* the fallback for exactly that case, not a design
+choice being made in place of real photography. The "Book for the Crew" deep-link flow (services/
+booking.ts) is fully implemented and already wired from the Plan Card — it opens the real
+provider's checkout once a real event (with a real booking URL) exists, which likewise needs a
+live provider key to ever be non-mock. This is an external blocker, not unfinished work; document
+it and continue.

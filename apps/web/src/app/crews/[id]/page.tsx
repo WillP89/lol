@@ -104,7 +104,7 @@ interface DayAvailability {
 }
 
 const ACTIVE_DECISION_STATUSES = new Set(['SHARED', 'GATHERING_INTEREST', 'LIKELY', 'READY']);
-const AVATAR_COLORS = ['#ff4a1f', '#0f766e', '#1b7a4d', '#b9832a', '#c2410c'];
+const AVATAR_COLORS = ['#7c5cfc', '#2f8aff', '#34d399', '#ffc53d', '#ff7a3d', '#ff2f7e'];
 function avatarColor(seed: string) {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % AVATAR_COLORS.length;
@@ -176,7 +176,7 @@ function PollCard({ poll, onVote, voting, onLockOption, locking }: {
   const leading = poll.totalVotes > 0 ? poll.options.reduce((a, b) => (poll.counts[b] > poll.counts[a] ? b : a)) : null;
   return (
     <div className="fade-up" style={{ width: 260, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)', padding: '14px 14px 10px' }}>
-      <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--v2-brand)', marginBottom: 6 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--v2-pop)', marginBottom: 6 }}>
         {poll.kind === 'AVAILABILITY' ? 'When works?' : 'Poll'}
       </div>
       <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10 }}>{poll.question}</div>
@@ -192,7 +192,7 @@ function PollCard({ poll, onVote, voting, onLockOption, locking }: {
               disabled={voting}
               style={{ position: 'relative', textAlign: 'left', border: 'none', borderRadius: 10, overflow: 'hidden', cursor: 'pointer', padding: '9px 12px', background: 'var(--v2-bg-deep)' }}
             >
-              <div style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: mine ? 'rgba(255,74,31,0.22)' : 'rgba(26,21,16,0.06)', transition: 'width 0.3s ease' }} />
+              <div style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: mine ? 'rgba(255,47,126,0.18)' : 'rgba(12,12,13,0.06)', transition: 'width 0.3s ease' }} />
               <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: mine ? 800 : 600 }}>
                 <span>{mine ? '✓ ' : ''}{option}</span>
                 {poll.totalVotes > 0 && <span className="v2-muted">{count}</span>}
@@ -236,8 +236,8 @@ function ReactionRow({
           className="v2-chip-toggle"
           style={{
             display: 'flex', alignItems: 'center', gap: 3, fontSize: 11.5, padding: '2px 8px', borderRadius: 100, border: 'none', cursor: 'pointer',
-            background: r.reactedByMe ? 'rgba(255,74,31,0.12)' : 'var(--v2-bg-deep)',
-            color: r.reactedByMe ? 'var(--v2-brand)' : 'var(--v2-ink-muted)',
+            background: r.reactedByMe ? 'rgba(255,47,126,0.14)' : 'var(--v2-bg-deep)',
+            color: r.reactedByMe ? 'var(--v2-pop)' : 'var(--v2-ink-muted)',
           }}
         >
           <span>{r.emoji}</span><span>{r.count}</span>
@@ -256,7 +256,10 @@ function ReactionRow({
   );
 }
 
-const LOCK_BURST_COLORS = ['var(--v2-brand)', 'var(--v2-gold)', 'var(--v2-plum)', 'var(--v2-green)'];
+const LOCK_BURST_COLORS = [
+  'var(--v2-confetti-1)', 'var(--v2-confetti-2)', 'var(--v2-confetti-3)',
+  'var(--v2-confetti-4)', 'var(--v2-confetti-5)', 'var(--v2-confetti-6)',
+];
 
 /** The "Lock it in" celebration — a small, quick burst of dots, not confetti-everywhere. See
  * globals.css's .v2-lock-dot for the animation itself; this just seeds a handful of them at
@@ -599,7 +602,7 @@ export default function CrewPage() {
     return (
       <div className="v2">
         <div className="v2-page" style={{ paddingTop: 28 }}>
-          {error ? <div style={{ color: 'var(--v2-brand)' }}>{error}</div> : <div style={{ height: 60, borderRadius: 16, background: 'var(--v2-bg-deep)' }} />}
+          {error ? <div style={{ color: 'var(--v2-error)' }}>{error}</div> : <div style={{ height: 60, borderRadius: 16, background: 'var(--v2-bg-deep)' }} />}
         </div>
       </div>
     );
@@ -751,7 +754,7 @@ export default function CrewPage() {
             })}
           </div>
 
-          {error && <div style={{ color: 'var(--v2-brand)', fontSize: 12.5, marginBottom: 6 }}>{error}</div>}
+          {error && <div style={{ color: 'var(--v2-error)', fontSize: 12.5, marginBottom: 6 }}>{error}</div>}
 
           {!solo && (
             <form onSubmit={send} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

@@ -110,7 +110,7 @@ export default function BookingPage() {
       <div className="v2">
         <div className="v2-page" style={{ paddingTop: 28 }}>
           {error ? (
-            <div style={{ color: 'var(--v2-brand)' }}>{error}</div>
+            <div style={{ color: 'var(--v2-error)' }}>{error}</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ height: 88, borderRadius: 'var(--v2-r-lg)', background: 'var(--v2-bg-deep)' }} />
@@ -210,7 +210,7 @@ export default function BookingPage() {
             </button>
           </>
         )}
-        {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginTop: 12 }}>{error}</div>}
+        {error && <div style={{ color: 'var(--v2-error)', fontSize: 13, marginTop: 12 }}>{error}</div>}
       </div>
     </div>
   );

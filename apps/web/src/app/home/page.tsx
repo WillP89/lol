@@ -42,9 +42,9 @@ interface Experience {
   venue: { name: string };
 }
 
-const AVATAR_COLORS = ['#ff4a1f', '#b9832a', '#1b7a4d', '#0f766e', '#c2410c'];
+const AVATAR_COLORS = ['#ff2f7e', '#7c5cfc', '#2f8aff', '#ffc53d', '#34d399', '#ff7a3d'];
 // One ring tint per Crew (hashed) — the identity marker for the Crew-bubble row below.
-const CREW_RINGS = ['#ff4a1f', '#0f766e', '#1b7a4d', '#b9832a', '#c2410c'];
+const CREW_RINGS = ['#7c5cfc', '#2f8aff', '#34d399', '#ffc53d', '#ff7a3d', '#ff2f7e'];
 
 function initials(displayName: string | null, email: string) {
   return (displayName?.trim() || email).slice(0, 1).toUpperCase();
@@ -138,7 +138,7 @@ export default function HomePage() {
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 26 }}>
             <div>
               <h1 className="v2-display" style={{ fontSize: 38, marginBottom: 6 }}>
-                {greeting()}{firstName && <><br /><span style={{ fontStyle: 'italic', color: 'var(--v2-brand)' }}>{firstName}</span></>}
+                {greeting()}{firstName && <><br /><span style={{ fontStyle: 'italic', color: 'var(--v2-pop)' }}>{firstName}</span></>}
               </h1>
               <p className="v2-muted" style={{ fontSize: 14.5 }}>Here&rsquo;s what your people are up to.</p>
             </div>
@@ -164,7 +164,7 @@ export default function HomePage() {
             </Link>
           </div>
 
-          {error && <div style={{ color: 'var(--v2-brand)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
+          {error && <div style={{ color: 'var(--v2-error)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
           {loading && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
