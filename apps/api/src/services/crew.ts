@@ -111,7 +111,11 @@ async function crewSummaryExtras(crewId: string, requestingUserId: string) {
       include: { votes: true, members: true },
     }),
     prisma.plan.findFirst({
-      where: { crewId, status: 'BOOKED' },
+      // LOCKED, not just BOOKED — a manual plan ("Pub Saturday") stays LOCKED forever (nothing
+      // to book) and a ticketed one starts LOCKED before any real payment happens (see
+      // services/plan.ts#lockPlan). Both are equally "the Crew is actually doing this" for
+      // Home/Crews-list display purposes; BOOKED is reserved for confirmed real transactions.
+      where: { crewId, status: { in: ['LOCKED', 'BOOKED'] } },
       orderBy: { createdAt: 'desc' },
       include: { experience: { include: { venue: true } } },
     }),
@@ -162,15 +166,19 @@ export async function listCrewsForUser(userId: string) {
 }
 
 /**
- * Every confirmed (BOOKED) Plan across every Crew the user belongs to, soonest first — the
- * data behind the standalone "Plans" destination (brief: "confirmed plans should not disappear
- * inside chat"). A Plan can go BOOKED without ever having an Experience attached (a soft plan
- * booked by hand) — those are kept, just with `startsAt: null`, sorted after ones with a real
- * date rather than dropped.
+ * Every confirmed Plan (LOCKED or BOOKED) across every Crew the user belongs to, soonest first —
+ * the data behind the standalone "Plans" destination (brief: "confirmed plans should not
+ * disappear inside chat"). LOCKED means the Crew's decision is final (see
+ * services/plan.ts#lockPlan); BOOKED additionally means a real payment/booking transaction
+ * happened. Both belong here — a manual plan ("Pub Saturday") never becomes BOOKED (nothing to
+ * book) and would otherwise never appear on this page at all, which is the majority of real
+ * plans. A Plan can be confirmed without ever having an Experience attached (a soft plan decided
+ * by hand) — those are kept, just with `startsAt: null`, sorted after ones with a real date
+ * rather than dropped.
  */
 export async function listUpcomingPlansForUser(userId: string) {
   const plans = await prisma.plan.findMany({
-    where: { status: 'BOOKED', crew: { members: { some: { userId, status: 'ACTIVE' } } } },
+    where: { status: { in: ['LOCKED', 'BOOKED'] }, crew: { members: { some: { userId, status: 'ACTIVE' } } } },
     include: { crew: { select: { id: true, name: true } }, experience: { include: { venue: true } }, votes: true, members: true },
     orderBy: { updatedAt: 'desc' },
   });

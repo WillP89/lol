@@ -17,6 +17,11 @@ interface PlanDetail {
     members: { user: { id: string; displayName: string | null; email: string } }[];
     bookings: { id: string; status: string; externalUrl: string | null }[];
   };
+  // Whether a real ticketing provider is connected at all (a deployment-wide fact, not a
+  // per-plan one — see routes/plans.ts's own comment). Without this, tapping "Book" on a
+  // sample-data plan silently opened a dead `.invalid` tab with zero explanation — this is what
+  // lets the page tell the difference and say so honestly instead.
+  dataSource: 'live' | 'mock';
 }
 
 export default function BookingPage() {
@@ -122,8 +127,15 @@ export default function BookingPage() {
     );
   }
 
-  const { plan } = data;
-  const isBooked = plan.status === 'BOOKED' || Boolean(existingBooking && existingBooking.status === 'CONFIRMED');
+  const { plan, dataSource } = data;
+  const reallyBooked = plan.status === 'BOOKED' || Boolean(existingBooking && existingBooking.status === 'CONFIRMED');
+  // Real fix for the actual bug reported: Lock It In used to set status straight to BOOKED,
+  // which made this page claim "✓ Booked — Added to everyone's calendar" for a plan nobody had
+  // paid for or booked anywhere, AND made real ticketed booking unreachable (see
+  // docs/DECISIONS.md#booking-status-split). Now three genuinely different situations get three
+  // genuinely different, honest screens:
+  const hasRealTicket = Boolean(plan.experience) && dataSource === 'live';
+  const isManualOrSample = !reallyBooked && !hasRealTicket;
 
   return (
     <div className="v2">
@@ -135,15 +147,18 @@ export default function BookingPage() {
       <div className="v2-page" style={{ paddingTop: 12, maxWidth: 480 }}>
         <div style={{ height: 100, margin: '0 -20px 22px', background: v2Art(null, plan.experience?.category), borderRadius: 0 }} />
 
-        <div className="v2-eyebrow">Book for the Crew</div>
+        <div className="v2-eyebrow">{hasRealTicket && !reallyBooked ? 'Book for the Crew' : 'The plan'}</div>
         <h1 className="v2-display" style={{ fontSize: 24, marginBottom: 8 }}>{plan.title}</h1>
         {plan.experience?.venue && <p className="v2-muted" style={{ marginBottom: 20, fontSize: 14 }}>{plan.experience.venue.name}</p>}
 
         <div className="v2-card" style={{ padding: '16px 18px', marginBottom: 16 }}>
           <div className="v2-muted" style={{ marginBottom: 4, fontSize: 13 }}>
-            {inVoterIds.length} of {plan.members.length} paying now
+            {inVoterIds.length} of {plan.members.length} {hasRealTicket ? 'paying now' : 'going'}
           </div>
-          {plan.experience?.priceMinMinor !== null && plan.experience?.priceMinMinor !== undefined && (
+          {/* The price/total framing only makes sense when there's a real transaction to total
+              up — showing "£140 total" above a plan nobody is actually being charged for reads
+              as a lie the product is telling, not a feature. */}
+          {hasRealTicket && plan.experience?.priceMinMinor !== null && plan.experience?.priceMinMinor !== undefined && (
             <div className="v2-display" style={{ fontSize: 22, color: 'var(--v2-brand)' }}>
               £{((plan.experience.priceMinMinor * inVoterIds.length) / 100).toFixed(2)} total
             </div>
@@ -186,16 +201,39 @@ export default function BookingPage() {
               </>
             )}
           </div>
-        ) : isBooked ? (
+        ) : reallyBooked ? (
           <>
             <div className="v2-card" style={{ padding: '16px 18px', marginBottom: 10 }}>
               <div className="v2-eyebrow" style={{ color: 'var(--v2-green)' }}>✓ Booked</div>
-              <p style={{ margin: '4px 0 0' }}>The Crew is going. Added to everyone&rsquo;s calendar.</p>
+              <p style={{ margin: '4px 0 0' }}>The Crew&rsquo;s tickets are confirmed.</p>
             </div>
             <button className="v2-btn v2-btn-ghost" style={{ width: '100%' }} onClick={markAsDone} disabled={markingDone}>
               {markingDone ? 'Marking…' : 'Already happened? Mark as done →'}
             </button>
           </>
+        ) : isManualOrSample ? (
+          !plan.experience ? (
+            // A manual plan ("Pub Saturday") — this is the CORRECT, final state, not a lesser
+            // one. There's genuinely nothing to book; the Crew already decided.
+            <div className="v2-card" style={{ padding: '20px 18px', textAlign: 'center' }}>
+              <div style={{ fontSize: 26, marginBottom: 8 }}>✓</div>
+              <p className="v2-display" style={{ margin: '0 0 4px', fontSize: 16 }}>You&rsquo;re confirmed</p>
+              <p className="v2-muted" style={{ margin: 0, fontSize: 13.5 }}>No ticket needed for this one — just show up.</p>
+            </div>
+          ) : (
+            // A real Experience, but Plot has no live ticketing provider connected — the
+            // honest reason "Book" used to silently open a dead `.invalid` tab. Say so, rather
+            // than pretending a real checkout exists.
+            <div className="v2-card" style={{ padding: '18px 18px', textAlign: 'left' }}>
+              <div className="v2-eyebrow" style={{ marginBottom: 6 }}>Sample event</div>
+              <p style={{ margin: '0 0 4px', fontSize: 14, lineHeight: 1.5 }}>
+                This is demo data — Plot isn&rsquo;t connected to a real ticket provider yet, so there&rsquo;s no real checkout to send you to.
+              </p>
+              <p className="v2-muted" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5 }}>
+                Once a live provider (Ticketmaster/Eventbrite) is connected, this becomes a real &ldquo;Book for the Crew&rdquo; button.
+              </p>
+            </div>
+          )
         ) : !booking ? (
           <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={startBooking} disabled={busy || inVoterIds.length === 0}>
             {busy ? 'Starting…' : 'Book for the Crew →'}

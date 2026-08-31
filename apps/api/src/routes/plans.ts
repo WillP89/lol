@@ -16,6 +16,7 @@ import {
   lockPlan,
 } from '../services/plan';
 import { track } from '../services/analytics';
+import { hasLiveProvider } from '../providers/registry';
 
 export async function planRoutes(app: FastifyInstance): Promise<void> {
   app.post('/crews/:crewId/plans/from-option', async (request, reply) => {
@@ -129,7 +130,14 @@ export async function planRoutes(app: FastifyInstance): Promise<void> {
     if (!plan) return reply.code(404).send({ error: 'not_found' });
     if (!(await isCrewMember(plan.crewId, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
     const pulse = await computePlanPulse(id);
-    return reply.send({ plan, pulse });
+    // The booking page needs to know whether this Plan's Experience has a real, live-provider
+    // booking URL behind it or just sample data (mockTicketingProvider's deliberate
+    // `.invalid` placeholder — see docs/DECISIONS.md#booking-status-split) — without this, the
+    // booking flow would silently open a dead tab with zero explanation instead of an honest
+    // "sample data" message. `dataSource` on the response, not on Experience itself: whether a
+    // provider is live is a deployment-wide fact (is TICKETMASTER_API_KEY set at all), not a
+    // per-row property to store and risk going stale.
+    return reply.send({ plan, pulse, dataSource: hasLiveProvider ? 'live' : 'mock' });
   });
 
   // "Lock it in" — see services/plan.ts#lockPlan's own comment for why this is a direct status

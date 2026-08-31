@@ -628,6 +628,14 @@ enum PlanStatusValue {
   GATHERING_INTEREST
   LIKELY
   READY
+  // The Crew has committed — "Lock it in" was tapped. Distinct from BOOKED: this means the
+  // *decision* is final, not that a real payment/booking transaction happened. A manual plan
+  // ("Pub Saturday") has nothing to book and stays here forever, correctly. A ticketed plan
+  // moves LOCKED -> BOOKED only once a real deep-link booking is actually confirmed (see
+  // services/booking.ts#confirmDeepLinkBooking). Previously Lock It In set status straight to
+  // BOOKED, which made the booking page claim "✓ Booked — Added to everyone's calendar" for a
+  // plan nobody had paid for or booked anywhere — see docs/DECISIONS.md#booking-status-split.
+  LOCKED
   BOOKED
   COMPLETED
   CANCELLED

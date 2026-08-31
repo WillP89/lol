@@ -1131,3 +1131,61 @@ elements revealed) — traced to the test script scrolling `window` while Explor
 inner scroll container (`.v2-explore-col`); scrolling the actual container correctly revealed
 8/8. Not a product bug — real user scrolling (mouse wheel/trackpad over that pane) scrolls the
 real container, which IntersectionObserver already tracks correctly.
+
+#### booking-status-split — the real bug behind "booking doesn't take me anywhere"
+
+Direct user report: "the event booking is not working it does not take me to the event booking
+link." Investigated rather than assumed, and it wasn't one bug — it was an architecture gap that
+produced two:
+
+**Root cause**: `lockPlan()` ("Lock it in", the primary decision-locking action used throughout
+the app) set `plan.status` straight to `BOOKED`. But `BOOKED` was also the status the *real*
+deep-link payment flow (`confirmDeepLinkBooking`) sets once an actual external checkout is
+confirmed. Conflating them meant: (1) locking ANY plan in chat — including a plain "Pub
+Saturday" with nothing to pay for — made the booking page immediately show **"✓ Booked — Added
+to everyone's calendar"**, a claim that was false on both counts (no payment ever happened, no
+calendar integration exists at all); and (2) the real payment/booking flow became unreachable
+from the normal Lock It In path entirely, since the page already believed the plan was "done."
+
+**Fix**: added a `LOCKED` status to `PlanStatusValue` (migration
+`20260831194807_add_plan_locked_status`, applied automatically on deploy via
+`scripts/migrate-and-start.sh`) — `LOCKED` means "the Crew's decision is final"; `BOOKED` is now
+reserved exclusively for a real, confirmed deep-link booking transaction. `lockPlan()` sets
+`LOCKED`; `confirmDeepLinkBooking()` still sets `BOOKED`, unchanged. Every other read site
+(`derivePulseStatus`'s terminal-state guard, Home/Crews' `upcomingPlan`/`listUpcomingPlansForUser`
+queries, the Crew chat `EventCard`'s locked/lockable checks and plan-card refresh logic, the
+public Plan Card's `VoteForm`, the booking page itself) updated to treat `LOCKED` and `BOOKED`
+as the two different things they now actually are.
+
+**The booking page itself now shows one of four genuinely different, honest states** instead of
+one flat button that either silently opened a dead tab or lied about being done:
+1. A manual plan (no Experience attached — the common case) → "You're confirmed — no ticket
+   needed for this one, just show up." Correct final state, not a lesser one.
+2. A ticketed plan but no live provider connected (mock/sample data — the ONLY case reachable in
+   this pilot right now, since no `TICKETMASTER_API_KEY`/`EVENTBRITE_API_KEY` is configured) →
+   an honest "Sample event — Plot isn't connected to a real ticket provider yet" card explaining
+   exactly why, instead of silently opening `https://example-provider.invalid/...` (a
+   deliberate dead placeholder — see `mockTicketingProvider.mapToCanonical`) with zero
+   explanation, which is what "does not take me to the event booking link" actually was.
+3. A ticketed plan with a live provider connected → the real, unchanged deep-link flow (open
+   checkout in a new tab, "I've completed checkout" → `confirmDeepLinkBooking` → real `BOOKED`).
+4. Already really booked → "✓ Booked" with the false calendar claim removed.
+
+**A second, closely-related real bug found and fixed in the same pass, via a fresh live test
+(not assumed)**: `createPlanForCrew`'s chat-announcement gate checked `data.manualVenueName`
+specifically instead of `data.status !== 'IDEA'`. A manual plan logged with only a title and no
+venue/time filled in (an entirely normal thing to do — "Pub Saturday", venue TBC) created a real
+Plan row but posted nothing to chat at all — the plan existed in the database but was invisible
+to the group. Same failure class as the booking bug: something happens with zero visible
+feedback. Fixed to check the actual status field.
+
+**Verified end to end with real Playwright runs, not asserted**: (1) a ticketed mock-data plan
+shared and locked via chat → navigated to its booking page → confirmed the "Sample event" honest
+message renders and the false "Added to everyone's calendar" text is absent; (2) a manual plan
+with only a title, no venue/date → confirmed it now posts to chat and locks correctly → its
+booking page shows "You're confirmed — no ticket needed." All 62 backend tests updated and
+passing (`social-v2.test.ts`'s lock assertion corrected from `BOOKED` to `LOCKED`;
+`planPulse.test.ts` gained a LOCKED terminal-state case) — the test DB (`plot_test`, separate
+from `plot_dev`) needed the new migration applied by hand in this sandbox since `vitest` doesn't
+run the deploy script; Render's own `migrate-and-start.sh` handles this automatically in
+production on every deploy.

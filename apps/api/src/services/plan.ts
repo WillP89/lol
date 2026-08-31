@@ -23,12 +23,13 @@ export interface PlanPulse {
  * any given vote distribution, computed fresh every time a vote changes. This means the status
  * can never drift out of sync with the votes that supposedly produced it.
  *
- * IDEA and BOOKED/COMPLETED/CANCELLED are NOT derived here — those are set explicitly by
- * createSoftPlan / markBooked / markCompleted / cancelPlan, since they represent actions
- * outside the voting loop (a soft plan with no venue yet, or a booking that already happened).
+ * IDEA and LOCKED/BOOKED/COMPLETED/CANCELLED are NOT derived here — those are set explicitly by
+ * createSoftPlan / lockPlan / confirmDeepLinkBooking / markCompleted / cancelPlan, since they
+ * represent actions outside the voting loop (a soft plan with no venue yet, the Crew committing
+ * regardless of the vote tally, or a booking that already happened).
  */
 export function derivePulseStatus(inFraction: number, currentStatus: PlanStatusValue): PlanStatusValue {
-  if (['BOOKED', 'COMPLETED', 'CANCELLED', 'IDEA'].includes(currentStatus)) return currentStatus;
+  if (['LOCKED', 'BOOKED', 'COMPLETED', 'CANCELLED', 'IDEA'].includes(currentStatus)) return currentStatus;
   if (inFraction >= READY_THRESHOLD) return 'READY';
   if (inFraction >= 0.5) return 'LIKELY';
   if (inFraction > 0) return 'GATHERING_INTEREST';
@@ -95,11 +96,17 @@ async function createPlanForCrew(
   });
 
   // Sending something to the Crew is meaningless if nothing tells the Crew — post it into chat
-  // so "talk it over" has somewhere to happen. Only when there's an actual thing attached (a
-  // real Experience, or a manual venue/time) — not a vague IDEA-status soft plan with nothing
-  // on it yet. Chat posting failing should never take the Plan itself down with it — the Plan
-  // exists either way, so log and move on.
-  if (data.experienceId || data.manualVenueName) {
+  // so "talk it over" has somewhere to happen. Only skip this for a genuinely vague IDEA-status
+  // soft plan with nothing on it yet — everything else (a real Experience, OR a manual plan
+  // with just a title and no venue/time filled in) is a real thing the Crew should see.
+  //
+  // Real bug found via a fresh test (not assumed): this used to check `manualVenueName`
+  // specifically rather than `status`, so logging a manual plan with only a title (no venue, no
+  // time — a completely normal thing to do: "Pub Saturday", venue TBC) created a real Plan row
+  // but silently posted NOTHING to chat. The plan existed in the database but was invisible to
+  // the group — the exact "nothing happens" failure mode, just one screen over from the booking
+  // bug this same pass fixed. See docs/DECISIONS.md#booking-status-split.
+  if (data.status !== 'IDEA') {
     await sendCrewMessage(crewId, proposedByUserId, `📍 Sent "${plan.title}" to the Crew — /plans/${plan.publicSlug}`).catch(() => {});
   }
 
@@ -215,18 +222,22 @@ function enumToVote(v: VoteValue): 'in' | 'maybe' | 'out' {
 
 /**
  * "Lock it in" — the payoff moment the whole decision loop exists for: an idea becoming a
- * commitment. Deliberately a direct, explicit status transition to BOOKED, not something that
- * only happens as a side effect of creating a real Booking record — a manual Plan ("Pub
- * Saturday") has nothing to book but still needs to be lockable. A ticketed Plan can still go
- * on to a real Booking afterward (see services/booking.ts); this just marks the group's actual
- * decision. Posts a system message so the moment shows up in the conversation itself, the same
- * way a Plan being sent does. See docs/DECISIONS.md#decision-objects.
+ * commitment. Transitions to LOCKED, not BOOKED — a real bug found via a fresh live test (not
+ * assumed): setting BOOKED here made the booking page immediately claim "✓ Booked — Added to
+ * everyone's calendar" for a plan nobody had actually paid for or booked anywhere (no calendar
+ * integration exists at all), and made the real deep-link booking flow unreachable from the
+ * normal Lock It In path — see docs/DECISIONS.md#booking-status-split. LOCKED means "the Crew's
+ * decision is final"; BOOKED is now reserved for confirmDeepLinkBooking, i.e. a real booking
+ * transaction actually happened. A manual Plan ("Pub Saturday") has nothing to book and stays
+ * at LOCKED forever, correctly — that's not a lesser state, it's the correct terminal one for a
+ * plan with no ticket to buy. Posts a system message so the moment shows up in the conversation
+ * itself, the same way a Plan being sent does. See docs/DECISIONS.md#decision-objects.
  */
 export async function lockPlan(planId: string, userId: string): Promise<Plan> {
   const plan = await prisma.plan.findUniqueOrThrow({ where: { id: planId } });
-  if (plan.status === 'BOOKED' || plan.status === 'COMPLETED' || plan.status === 'CANCELLED') return plan;
+  if (plan.status === 'LOCKED' || plan.status === 'BOOKED' || plan.status === 'COMPLETED' || plan.status === 'CANCELLED') return plan;
 
-  const updated = await prisma.plan.update({ where: { id: planId }, data: { status: 'BOOKED' } });
+  const updated = await prisma.plan.update({ where: { id: planId }, data: { status: 'LOCKED' } });
   await track('PlanLocked', { planId, crewId: plan.crewId, userId }, { userId, crewId: plan.crewId, planId });
   await sendCrewMessage(plan.crewId, userId, `🔒 "${plan.title}" was locked in — see you there.`).catch(() => {});
   return updated;

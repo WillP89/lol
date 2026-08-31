@@ -77,9 +77,13 @@ export function VoteForm({
         {pulse.status === 'READY' && ' — this one’s happening'}
       </p>
 
-      {pulse.status === 'READY' || pulse.status === 'BOOKED' ? (
+      {pulse.status === 'READY' || pulse.status === 'LOCKED' || pulse.status === 'BOOKED' ? (
         <Link href={`/plans/${slug}/booking`} className="v2-btn v2-btn-brand" style={{ width: '100%' }}>
-          {pulse.status === 'BOOKED' ? 'View booking' : 'Book for the Crew'}
+          {/* The booking page itself decides what's actually true (manual plan, sample data,
+              real booking, already booked) — this link just needs a label that's never wrong.
+              "Book for the Crew" was a lie for a READY-but-not-yet-locked plan; "See the plan"
+              is accurate at every stage. */}
+          {pulse.status === 'BOOKED' ? 'View booking' : 'See the plan →'}
         </Link>
       ) : voted ? (
         <div className="v2-card" style={{ padding: '16px 18px' }}>

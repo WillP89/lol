@@ -135,7 +135,7 @@ const LOCKABLE_STATUSES = new Set(['SHARED', 'GATHERING_INTEREST', 'LIKELY', 'RE
  * The point: the SAME card should not read identically at every stage — "Robin shared this" is a
  * different moment from "3 in · likely happening" is a different moment from "Confirmed". */
 function planStageCopy(status: string, pulse: PlanCardData['pulse'], proposerName: string): string {
-  if (status === 'BOOKED') return 'Confirmed';
+  if (status === 'LOCKED' || status === 'BOOKED') return 'Confirmed';
   if (status === 'READY') return `Ready — ${pulse.inCount}/${pulse.totalMembers} in`;
   if (status === 'LIKELY') return `Likely happening · ${pulse.inCount} in`;
   if (status === 'GATHERING_INTEREST') return `${pulse.inCount} in so far`;
@@ -162,7 +162,7 @@ function EventCard({
 }) {
   const exp = data.plan.experience;
   const lockable = LOCKABLE_STATUSES.has(data.plan.status);
-  const locked = data.plan.status === 'BOOKED' || justLocked;
+  const locked = data.plan.status === 'LOCKED' || data.plan.status === 'BOOKED' || justLocked;
   const proposer = members.find((m) => m.user.id === data.plan.proposedByUserId)?.user;
   const proposerName = proposer ? displayNameOf(proposer.displayName, proposer.email).split(' ')[0] : 'Someone';
   const inVoterIds = data.plan.votes.filter((v) => v.vote === 'IN').map((v) => v.userId);
@@ -558,7 +558,13 @@ export default function CrewPage() {
     const interval = setInterval(() => {
       const current = planCardsRef.current;
       for (const [slug, entry] of Object.entries(current)) {
-        if (entry === 'loading' || entry === 'error' || entry.plan.status === 'BOOKED') continue;
+        if (entry === 'loading' || entry === 'error') continue;
+        // Fully terminal — never worth refetching: a real payment is done (BOOKED), or a
+        // manual plan locked with nothing left that could ever change (LOCKED + no Experience).
+        // A LOCKED plan that DOES have an Experience keeps polling — it can still move to
+        // BOOKED if someone completes a real booking from the booking page.
+        const terminal = entry.plan.status === 'BOOKED' || (entry.plan.status === 'LOCKED' && !entry.plan.experience);
+        if (terminal) continue;
         api.get<PlanCardData>(`/plans/public/${slug}`).then((data) => setPlanCards((prev) => ({ ...prev, [slug]: data }))).catch(() => {});
       }
     }, POLL_INTERVAL_MS);
@@ -578,7 +584,9 @@ export default function CrewPage() {
     const maybeCount = nextVotes.filter((v) => v.vote === 'MAYBE').length;
     const outCount = nextVotes.filter((v) => v.vote === 'OUT').length;
     const level = data.pulse.totalMembers > 0 ? inCount / data.pulse.totalMembers : 0;
-    const status = data.plan.status === 'BOOKED' ? 'BOOKED' : level >= 0.6 ? 'READY' : level >= 0.5 ? 'LIKELY' : level > 0 ? 'GATHERING_INTEREST' : 'SHARED';
+    const status = data.plan.status === 'LOCKED' || data.plan.status === 'BOOKED'
+      ? data.plan.status
+      : level >= 0.6 ? 'READY' : level >= 0.5 ? 'LIKELY' : level > 0 ? 'GATHERING_INTEREST' : 'SHARED';
     setPlanCards((prev) => ({
       ...prev,
       [slug]: { plan: { ...data.plan, votes: nextVotes, status }, pulse: { ...data.pulse, inCount, maybeCount, outCount, level, status } },
@@ -899,7 +907,7 @@ export default function CrewPage() {
 
   const solo = crew.members.length === 1;
   const activePlan = crew.plans.find((p) => ACTIVE_DECISION_STATUSES.has(p.status));
-  const upcomingPlan = crew.plans.find((p) => p.status === 'BOOKED');
+  const upcomingPlan = crew.plans.find((p) => p.status === 'LOCKED' || p.status === 'BOOKED');
   const context = upcomingPlan ?? activePlan;
 
   return (

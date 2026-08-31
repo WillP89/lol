@@ -148,7 +148,12 @@ describe('social v2: invite preview, polls, manual plans, lock-in', () => {
     const lockRes = await app.inject({ method: 'POST', url: `/plans/${plan.id}/lock`, headers: { cookie: will.cookie } });
     expect(lockRes.statusCode).toBe(200);
     const { plan: locked } = lockRes.json() as { plan: { status: string } };
-    expect(locked.status).toBe('BOOKED');
+    // LOCKED, not BOOKED — a real bug this test used to bake in as "correct": Lock It In used
+    // to set status straight to BOOKED, which made the booking page falsely claim a manual
+    // plan (nothing to book, ever) was "✓ Booked — Added to everyone's calendar". LOCKED means
+    // the Crew's decision is final; BOOKED is reserved for a real deep-link booking actually
+    // being confirmed — see docs/DECISIONS.md#booking-status-split.
+    expect(locked.status).toBe('LOCKED');
 
     // Locking should have posted a system moment into the conversation.
     const messagesAfterLock = await app.inject({ method: 'GET', url: `/crews/${crewId}/messages`, headers: { cookie: sam.cookie } });

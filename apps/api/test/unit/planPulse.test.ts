@@ -21,6 +21,10 @@ describe('derivePulseStatus', () => {
   });
 
   test('terminal states are never overridden by vote fraction', () => {
+    // LOCKED (the Crew committed via Lock It In) included alongside the others — a later vote
+    // change must never silently pull a locked decision back into GATHERING_INTEREST etc.
+    expect(derivePulseStatus(1, 'LOCKED')).toBe('LOCKED');
+    expect(derivePulseStatus(0, 'LOCKED')).toBe('LOCKED');
     expect(derivePulseStatus(1, 'BOOKED')).toBe('BOOKED');
     expect(derivePulseStatus(0, 'COMPLETED')).toBe('COMPLETED');
     expect(derivePulseStatus(0.9, 'CANCELLED')).toBe('CANCELLED');
