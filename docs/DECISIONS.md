@@ -272,6 +272,48 @@ doesn't sit there looking broken — see the mock provider fix below. Map stays 
 mode via a segmented Browse/Map control in the header, not a permanently-visible box competing
 with the rails for space.
 
+## #explore-desktop-split
+
+Superseded most of #explore-rails above: the Browse/Map segmented toggle was making desktop
+choose between the discovery list and the map, on a viewport wide enough to show both — most of
+that width just sat empty as page background either way, and demoting the map behind a toggle
+undersold the one feature (real venues, real locations) nothing else in the product does.
+Rebuilt around a real split-view at ≥900px: a discovery column (44% width, 400-580px) and a
+permanently-visible map filling the rest of the viewport, never toggled. `.explore-desktop-split`
+is deliberately NOT nested inside `.page` — that class's 720px reading-width cap is right for a
+column of text, wrong for a map meant to fill the remaining screen. Mobile keeps the segmented
+Browse/Map toggle (there genuinely isn't room for both), but Map mode is now a full-height map
+with the matching event cards as a swipeable strip *overlaid* on its bottom edge (a gradient
+mask, not a second panel splitting the height) — the same card↔marker relationship as
+Citymapper/Uber: a marker tap selects/previews (pans the map, scrolls the strip to match,
+highlights both), a card tap opens the full detail sheet.
+
+Both the mobile map block and the desktop split exist in the DOM at the same time — which of
+them is visible is a pure CSS media-query decision, exactly like the rest of the app's
+mobile/desktop split. That's fine for ordinary markup, but Leaflet doesn't tolerate mounting
+inside a zero-size `display:none` container: it throws (`Invalid LatLng (NaN, NaN)`) while
+measuring its own pixel origin, which is a crash the app's error boundary catches — a real,
+reproducible bug this design pass caught in its own Playwright verification pass, not a
+theoretical one. Fixed by tracking real viewport width in JS (`matchMedia('(min-width: 900px)')`)
+and gating which of the two call sites is actually allowed to mount `<ExploreMap>`, independent
+of which one CSS currently shows — the other renders the same loading/empty states, just never
+Leaflet.
+
+Card imagery: a picsum.photos-seeded "real photo" was tried and dropped (see #image-fallback-
+layering below) — every mock/sample event (and any live-provider event without its own photo)
+now gets `CategoryArt`, a shared designed fallback (gradient wash + a large low-opacity category
+mark bled off one corner + a small uppercase label) instead of an emoji floating alone in a flat
+box. Tiles come in three real sizes (hero/rail/strip), not one repeated card stretched to fit
+different rails.
+
+Sidebar (`TabBar.tsx`, shared by every desktop page, not Explore-specific): a plain stack of
+links read as an admin tool's nav rail because it had no anchor at either end. Added a slim gold
+accent bar on the active row (not just a background tint), a soft chip behind each icon, and — the
+detail that actually matters — a pinned account row at the bottom (avatar + name + "View
+profile", `/users/me`-backed) separated by a rule, the same "your identity always lives in the
+same place" pattern Slack/Discord/Linear/Spotify all use. Hidden below 900px; mobile's bottom bar
+is unchanged.
+
 ## #image-fallback-layering
 
 A photo URL existing and that photo successfully loading are two different things — a slow

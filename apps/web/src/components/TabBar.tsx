@@ -1,7 +1,10 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { api } from '@/lib/api';
+import { displayNameOf } from '@/lib/displayName';
 
 /**
  * The app's primary navigation — a bottom bar on mobile, a left sidebar on desktop (same
@@ -72,6 +75,17 @@ const TABS = [
 
 export function TabBar({ desktopOnly }: { desktopOnly?: boolean } = {}) {
   const pathname = usePathname();
+  // Desktop-only footer identity (see `.tabbar-account` in globals.css, hidden below 900px) —
+  // a bare stack of links read as an admin tool's nav rail exactly because it had no anchor at
+  // either end. A pinned account row at the bottom is the detail every real product sidebar
+  // (Slack, Discord, Linear, Spotify) has that a generic one doesn't.
+  const [me, setMe] = useState<{ displayName: string | null; email: string } | null>(null);
+  useEffect(() => {
+    api
+      .get<{ user: { displayName: string | null; email: string } }>('/users/me')
+      .then((res) => setMe(res.user))
+      .catch(() => {});
+  }, []);
 
   // Chat needs its full-height keyboard-safe layout on mobile — a floating pill nav fixed to
   // the same bottom edge as the composer would sit on top of it. Desktop has no such
@@ -88,11 +102,23 @@ export function TabBar({ desktopOnly }: { desktopOnly?: boolean } = {}) {
         const active = pathname.startsWith(tab.href);
         return (
           <Link key={tab.href} href={tab.href} className={`tab ${active ? 'active' : ''}`}>
-            {tab.icon(active)}
+            <span className="tab-icon">{tab.icon(active)}</span>
             <span>{tab.label}</span>
           </Link>
         );
       })}
+      <div className="tabbar-spacer" />
+      <Link href="/profile" className="tabbar-account">
+        <div className="avatar" style={{ background: 'var(--ink-gold)', width: 30, height: 30, fontSize: 12 }}>
+          {(me ? displayNameOf(me.displayName, me.email) : '·').charAt(0).toUpperCase()}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {me ? displayNameOf(me.displayName, me.email) : 'Loading…'}
+          </div>
+          <div className="muted" style={{ fontSize: 11 }}>View profile</div>
+        </div>
+      </Link>
     </nav>
   );
 }

@@ -22,7 +22,7 @@ interface MockTicketingRaw {
   priceFromMinor: number;
   priceToMinor: number;
   soldOutPct: number; // 0-100
-  imageUrl: string;
+  imageUrl: string | null;
   tags: Record<string, unknown>;
 }
 
@@ -46,17 +46,18 @@ function seededRandom(seed: number): () => number {
 }
 
 /**
- * Each mock listing is a coherent (name, category, venue, image) tuple, not independently
- * randomised fields — a previous version cycled category by `index % 3` against a flat artist
- * list, which produced nonsense like "New Material Night ft. Skepta B2B" (a DJ b2b set labeled
- * as a stand-up comedy show). A picsum.photos seed keyed to the listing id gives every card a
- * real photograph instead of a flat colour block — free, no API key, deterministic per seed
- * (same event always gets the same image, not a new random one per request).
+ * Each mock listing is a coherent (name, category, venue) tuple, not independently randomised
+ * fields — a previous version cycled category by `index % 3` against a flat artist list, which
+ * produced nonsense like "New Material Night ft. Skepta B2B" (a DJ b2b set labeled as a
+ * stand-up comedy show).
+ *
+ * Deliberately no fake `imageUrl` here (a picsum.photos seed was tried and dropped — it does
+ * not reliably load even in production, and a random unrelated stock photo is arguably worse
+ * than an honest category treatment: it's imagery that lies about what the event actually is).
+ * Sample data gets Plot's real, designed category fallback (see categoryStyle.ts); actual event
+ * photography only ever comes from a real connected provider (Ticketmaster once
+ * TICKETMASTER_API_KEY is set — see mapToCanonical in the live adapter), never faked here.
  */
-function mockImageUrl(seed: string): string {
-  return `https://picsum.photos/seed/${seed}/640/480`;
-}
-
 const CLUBBING_LIVE_LINEUP: { name: string; cat: 'CLUBBING' | 'LIVE_MUSIC'; sub: string[]; venue: number }[] = [
   { name: 'Fred again..', cat: 'CLUBBING', sub: ['house', 'techno'], venue: 0 },
   { name: 'Bicep', cat: 'CLUBBING', sub: ['house', 'techno'], venue: 1 },
@@ -101,7 +102,7 @@ function generateMockCatalogue(): MockTicketingRaw[] {
       priceFromMinor: (18 + Math.floor(rand() * 40)) * 100,
       priceToMinor: (45 + Math.floor(rand() * 60)) * 100,
       soldOutPct: Math.floor(rand() * 100),
-      imageUrl: mockImageUrl(id),
+      imageUrl: null,
       tags: {
         energy: cat === 'COMEDY' ? 'medium' : 'high',
         crowd: rand() > 0.5 ? 'mainstream' : 'alternative',

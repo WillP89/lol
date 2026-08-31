@@ -7,12 +7,11 @@ import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import { TabBar } from '@/components/TabBar';
 import { BottomSheet } from '@/components/BottomSheet';
-import { categoryStyle, categoryBackground } from '@/lib/categoryStyle';
+import { CategoryArt } from '@/components/CategoryArt';
 import { formatPriceRange } from '@/lib/formatPrice';
 import type { ExploreExperience } from './ExploreMap';
 
-// Leaflet touches `window` at module load, which breaks Next's server render — load the map
-// client-side only.
+// Leaflet touches `window` at module load, which breaks Next's server render — load client-side only.
 const ExploreMap = dynamic(() => import('./ExploreMap'), { ssr: false, loading: () => <p className="muted">Loading map…</p> });
 
 const LONDON_CENTER: [number, number] = [51.5074, -0.1278];
@@ -25,15 +24,13 @@ interface CrewSummary {
 function formatWhen(startsAt: string) {
   return new Date(startsAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
+function formatShortDate(startsAt: string) {
+  return new Date(startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
 function formatPrice(exp: ExploreExperience) {
   return formatPriceRange(exp.priceMinMinor, exp.priceMaxMinor, exp.currency);
 }
 
-/**
- * "This weekend" always means the *next* Friday-evening-through-Sunday-night window, including
- * the one currently underway if today is already Fri/Sat/Sun — never a weekend that's already
- * passed.
- */
 function weekendWindow(now: Date): [Date, Date] {
   const day = now.getDay();
   const daysSinceFriday = (day - 5 + 7) % 7;
@@ -51,13 +48,8 @@ interface Rail {
   items: ExploreExperience[];
 }
 
-/**
- * Explore's opening state is a set of themed rails, not a single filterable list — a database
- * result view (title + filters + identical rectangles) is exactly what the brief rejected.
- * Each rail is a real editorial question ("what's on tonight", "what won't break the bank"),
- * built by slicing the same fetched set several different ways rather than separate API calls.
- * An event can appear in more than one rail — that's fine, a rail is a lens, not a bucket.
- */
+/** Themed rails, not a single filterable list — each is a different lens over the same fetched
+ * set (an event can legitimately appear in more than one). Only rails with content render. */
 function buildRails(experiences: ExploreExperience[], now: Date): Rail[] {
   const endOfToday = new Date(now);
   endOfToday.setHours(23, 59, 59, 999);
@@ -78,6 +70,81 @@ function buildRails(experiences: ExploreExperience[], now: Date): Rail[] {
   return rails;
 }
 
+/** One tile design, three sizes — variety in rhythm without a different component per context.
+ * 65-75% of every size is the visual; the caption is title/date/price, nothing else. */
+function Tile({
+  exp,
+  size,
+  selected,
+  onClick,
+  id,
+}: {
+  exp: ExploreExperience;
+  size: 'hero' | 'rail' | 'strip';
+  selected?: boolean;
+  onClick: () => void;
+  id?: string;
+}) {
+  const dims = size === 'hero' ? { w: '100%', h: 240 } : size === 'rail' ? { w: 172, h: 172 } : { w: 220, h: 96 };
+  const price = formatPrice(exp);
+  return (
+    <button
+      id={id}
+      onClick={onClick}
+      className="fade-up"
+      style={{
+        flex: size === 'hero' ? '1 1 auto' : '0 0 auto',
+        width: dims.w,
+        display: size === 'strip' ? 'flex' : 'block',
+        borderRadius: 20,
+        overflow: 'hidden',
+        border: 'none',
+        padding: 0,
+        textAlign: 'left',
+        cursor: 'pointer',
+        background: 'var(--ink-surface)',
+        boxShadow: selected ? '0 0 0 2.5px var(--ink-gold), var(--ambient-shadow)' : 'var(--ambient-shadow)',
+        scrollSnapAlign: 'start',
+      }}
+    >
+      <div
+        style={{
+          position: 'relative',
+          width: size === 'strip' ? 96 : '100%',
+          height: size === 'strip' ? '100%' : dims.h,
+          flexShrink: 0,
+          ...(exp.imageUrl ? { backgroundImage: `url("${exp.imageUrl}")`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}),
+        }}
+      >
+        {!exp.imageUrl && <CategoryArt category={exp.category} compact={size !== 'hero'} />}
+      </div>
+      <div style={{ padding: size === 'hero' ? '14px 16px' : size === 'strip' ? '8px 12px' : '9px 11px 12px', flex: size === 'strip' ? 1 : undefined, minWidth: 0 }}>
+        <div
+          style={{
+            fontFamily: size === 'hero' ? 'Fraunces, serif' : undefined,
+            fontWeight: 700,
+            fontSize: size === 'hero' ? 19 : size === 'strip' ? 13 : 13,
+            lineHeight: 1.3,
+            marginBottom: 3,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            display: '-webkit-box',
+            WebkitLineClamp: size === 'strip' ? 1 : 2,
+            WebkitBoxOrient: 'vertical',
+          }}
+        >
+          {exp.name}
+        </div>
+        <div className="muted" style={{ fontSize: size === 'hero' ? 13 : 11 }}>
+          {formatShortDate(exp.startsAt)}
+          {size === 'hero' && ` · ${exp.venue.name}`}
+          {price && ` · ${price}`}
+        </div>
+      </div>
+    </button>
+  );
+}
+
 export default function ExplorePage() {
   const router = useRouter();
   const [experiences, setExperiences] = useState<ExploreExperience[] | null>(null);
@@ -85,12 +152,28 @@ export default function ExplorePage() {
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'browse' | 'map'>('browse');
+  const [query, setQuery] = useState('');
 
-  // The experience someone tapped for a closer look — non-null opens the detail sheet. Sending
-  // it to a Crew is a second step *inside* that same sheet, not a separate sheet stacked on top.
+  // selectedId: the event a marker/card tap has focused (drives map pan + highlight). selected:
+  // the event whose full detail sheet is open — a superset action, always sets selectedId too.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<ExploreExperience | null>(null);
   const [pickingCrew, setPickingCrew] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
+
+  // The mobile map block and the desktop split both exist in markup (see the return below) —
+  // CSS's `display: none` only ever hides one of them, it doesn't unmount it. Leaflet mounted
+  // inside a zero-size hidden container throws ("Invalid LatLng (NaN, NaN)") when it measures
+  // its own pixel origin, so which pane is allowed to actually mount `<ExploreMap>` has to be
+  // driven by the same real viewport check CSS uses, not left to "the DOM node is just hidden."
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 900px)');
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   useEffect(() => {
     api
@@ -106,15 +189,36 @@ export default function ExplorePage() {
       .catch(() => {});
   }, []);
 
+  // A marker tap only previews (selects) — on mobile it should scroll the bottom card strip to
+  // match, since that's the actual "preview" surface there. Tapping the preview card opens detail.
+  useEffect(() => {
+    if (mode !== 'map' || !selectedId) return;
+    document.getElementById(`explore-tile-${selectedId}`)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }, [selectedId, mode]);
+
   const now = useMemo(() => new Date(), []);
-  const rails = useMemo(() => buildRails(experiences ?? [], now), [experiences, now]);
+
+  const searched = useMemo(() => {
+    if (!experiences) return [];
+    const q = query.trim().toLowerCase();
+    if (!q) return experiences;
+    return experiences.filter((e) => e.name.toLowerCase().includes(q) || e.venue.name.toLowerCase().includes(q));
+  }, [experiences, query]);
+
+  const rails = useMemo(() => buildRails(searched, now), [searched, now]);
+  const hero = searched.length ? [...searched].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())[0] : null;
 
   const center = useMemo<[number, number]>(() => {
-    if (!experiences?.length) return LONDON_CENTER;
-    const avgLat = experiences.reduce((sum, e) => sum + e.venue.latitude, 0) / experiences.length;
-    const avgLng = experiences.reduce((sum, e) => sum + e.venue.longitude, 0) / experiences.length;
+    if (!searched.length) return LONDON_CENTER;
+    const avgLat = searched.reduce((sum, e) => sum + e.venue.latitude, 0) / searched.length;
+    const avgLng = searched.reduce((sum, e) => sum + e.venue.longitude, 0) / searched.length;
     return [avgLat, avgLng];
-  }, [experiences]);
+  }, [searched]);
+
+  function openDetail(exp: ExploreExperience) {
+    setSelected(exp);
+    setSelectedId(exp.id);
+  }
 
   function closeSheet() {
     if (sending !== null) return;
@@ -135,11 +239,97 @@ export default function ExplorePage() {
     }
   }
 
+  const discoveryColumn = (
+    <div>
+      {dataSource === 'mock' && (
+        <div className="banner warn" style={{ marginBottom: 16 }}>
+          ⚠️ Sample events — no real event provider is connected yet. What you send to your Crew right now won&rsquo;t be bookable.
+        </div>
+      )}
+
+      {experiences === null && !error && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ height: 240, borderRadius: 20, background: 'var(--ink-surface)', opacity: 0.5 }} />
+          <div style={{ display: 'flex', gap: 10 }}>
+            {[1, 2, 3].map((i) => <div key={i} style={{ height: 172, width: 172, borderRadius: 20, background: 'var(--ink-surface)', opacity: 0.5, flexShrink: 0 }} />)}
+          </div>
+        </div>
+      )}
+
+      {experiences && searched.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '48px 20px' }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>🌤️</div>
+          <p style={{ fontWeight: 700, marginBottom: 4 }}>{query ? 'Nothing matched that search.' : 'Nothing great matched that.'}</p>
+          <p className="muted">{query ? 'Try a different name or venue.' : "Check back soon — London's always got something on."}</p>
+        </div>
+      )}
+
+      {hero && !query && (
+        <div style={{ marginBottom: 26 }}>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>Coming up next</div>
+          <Tile exp={hero} size="hero" selected={hero.id === selectedId} onClick={() => openDetail(hero)} id={`explore-tile-${hero.id}`} />
+        </div>
+      )}
+
+      {rails.map((rail) => (
+        <div key={rail.key} style={{ marginBottom: 26 }}>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>{rail.label}</div>
+          <div style={{ display: 'flex', gap: 12, overflowX: 'auto', margin: '0 -20px', padding: '0 20px 4px', scrollSnapType: 'x proximity' }}>
+            {rail.items.map((exp) => (
+              <Tile key={`${rail.key}-${exp.id}`} exp={exp} size="rail" selected={exp.id === selectedId} onClick={() => openDetail(exp)} id={`explore-tile-${rail.key}-${exp.id}`} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  // A function, not a plain JSX value — the mobile map block and the desktop split both exist
+  // in markup at once (CSS decides which is visible), so each call site has to pass whether
+  // IT is the one actually allowed to mount the real `<ExploreMap>` right now (see `isDesktop`
+  // above). The other call site still renders the same loading/empty states, just never Leaflet.
+  function mapPane(active: boolean) {
+    return (
+      <div style={{ position: 'relative', height: '100%', width: '100%' }}>
+        {experiences ? (
+          searched.length > 0 ? (
+            active ? (
+              <ExploreMap experiences={searched} center={center} selectedId={selectedId} onMarkerClick={(exp) => setSelectedId(exp.id)} />
+            ) : (
+              <div style={{ height: '100%', background: 'var(--ink-surface)' }} />
+            )
+          ) : (
+            <div style={{ height: '100%', background: 'var(--ink-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, textAlign: 'center' }}>
+              <p className="muted">Nothing on the map right now.</p>
+            </div>
+          )
+        ) : (
+          <div style={{ height: '100%', background: 'var(--ink-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <p className="muted">Loading map…</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
-      <nav className="nav">
-        <Link href="/home" className="muted" style={{ fontSize: 13 }}>← Home</Link>
-        <div style={{ display: 'flex', gap: 4, background: 'var(--ink-surface-2)', borderRadius: 100, padding: 3 }}>
+      <nav className="nav" style={{ gap: 12 }}>
+        <Link href="/home" className="muted" style={{ fontSize: 13, flexShrink: 0 }}>← Home</Link>
+        <div style={{ flex: 1, position: 'relative', maxWidth: 340 }}>
+          <input
+            className="field"
+            style={{ width: '100%', padding: '8px 14px', fontSize: 13, borderRadius: 100 }}
+            placeholder="Search events or venues in London…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        {/* Map is always on for desktop (see the split-view below) — this toggle only matters
+            on mobile, where there isn't room to show both at once. Its `display: flex` lives in
+            the stylesheet (not inline) specifically so the desktop media query's `display: none`
+            can actually win — an inline style beats any class rule regardless of specificity. */}
+        <div className="explore-mode-toggle" style={{ flexShrink: 0 }}>
           <button
             onClick={() => setMode('browse')}
             style={{ border: 'none', borderRadius: 100, padding: '5px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: mode === 'browse' ? 'var(--ink-gold)' : 'transparent', color: mode === 'browse' ? 'var(--ink-gold-ink)' : 'var(--ink-text-muted)' }}
@@ -155,123 +345,43 @@ export default function ExplorePage() {
         </div>
       </nav>
 
-      <div className="page" style={{ paddingTop: 16 }}>
-        {error && <div className="error">{error}</div>}
+      {error && (
+        <div className="page" style={{ paddingBottom: 0 }}>
+          <div className="error">{error}</div>
+        </div>
+      )}
 
-        {dataSource === 'mock' && (
-          <div className="banner warn" style={{ marginBottom: 16 }}>
-            ⚠️ Sample events — no real event provider is connected yet. What you send to your Crew right now won&rsquo;t be bookable.
-          </div>
-        )}
-
-        {experiences === null && !error && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ height: 20, width: 100, borderRadius: 6, background: 'var(--ink-surface)', opacity: 0.5 }} />
-            <div style={{ display: 'flex', gap: 10 }}>
-              {[1, 2, 3].map((i) => <div key={i} style={{ height: 180, width: 156, borderRadius: 20, background: 'var(--ink-surface)', opacity: 0.5, flexShrink: 0 }} />)}
-            </div>
-          </div>
-        )}
-
-        {experiences?.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '48px 20px' }}>
-            <div style={{ fontSize: 32, marginBottom: 10 }}>🌤️</div>
-            <p style={{ fontWeight: 700, marginBottom: 4 }}>Nothing great matched that.</p>
-            <p className="muted">Check back soon — London&rsquo;s always got something on.</p>
-          </div>
-        )}
-
-        {mode === 'browse' &&
-          rails.map((rail) => (
-            <div key={rail.key} style={{ marginBottom: 26 }}>
-              <div className="eyebrow" style={{ marginBottom: 10 }}>{rail.label}</div>
-              <div style={{ display: 'flex', gap: 12, overflowX: 'auto', margin: '0 -20px', padding: '0 20px 4px', scrollSnapType: 'x proximity' }}>
-                {rail.items.map((exp) => {
-                  const style = categoryStyle(exp.category);
-                  const price = formatPrice(exp);
-                  return (
-                    <button
-                      key={`${rail.key}-${exp.id}`}
-                      onClick={() => setSelected(exp)}
-                      className="fade-up"
-                      style={{
-                        flex: '0 0 auto',
-                        width: 168,
-                        borderRadius: 20,
-                        overflow: 'hidden',
-                        border: 'none',
-                        padding: 0,
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        background: 'var(--ink-surface)',
-                        boxShadow: 'var(--ambient-shadow)',
-                        scrollSnapAlign: 'start',
-                      }}
-                    >
-                      {/* 65-75% of the tile is image — media, not a record: name/date/price is
-                          the caption, not the point. */}
-                      <div
-                        style={{
-                          height: 168,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: 32,
-                          background: categoryBackground(exp.imageUrl, exp.category),
-                        }}
-                      >
-                        {!exp.imageUrl && style.emoji}
-                      </div>
-                      <div style={{ padding: '9px 11px 12px' }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, lineHeight: 1.3, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                          {exp.name}
-                        </div>
-                        <div className="muted" style={{ fontSize: 11 }}>
-                          {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
-                          {price && ` · ${price}`}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-
+      {/* Mobile: Browse shows the full-width rails; Map is full-height with a swipeable card
+          strip over the bottom, synced to marker selection. Desktop ignores `mode` entirely —
+          both panes are always visible side by side, the real split-view. */}
+      <div className="explore-mobile-browse">
+        {mode === 'browse' && <div className="page" style={{ paddingTop: 16 }}>{discoveryColumn}</div>}
         {mode === 'map' && (
-          <div className="explore-viewport" style={{ borderRadius: 20, overflow: 'hidden', boxShadow: 'var(--ambient-shadow)' }}>
-            {experiences ? (
-              experiences.length > 0 ? (
-                <ExploreMap experiences={experiences} center={center} onSelect={setSelected} />
-              ) : (
-                <div style={{ height: '100%', background: 'var(--ink-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, textAlign: 'center' }}>
-                  <p className="muted">Nothing on the map right now.</p>
-                </div>
-              )
-            ) : (
-              <div style={{ height: '100%', background: 'var(--ink-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <p className="muted">Loading map…</p>
-              </div>
-            )}
+          <div className="explore-mobile-map">
+            {mapPane(!isDesktop)}
+            <div className="explore-map-strip">
+              {searched.map((exp) => (
+                <Tile key={exp.id} exp={exp} size="strip" selected={exp.id === selectedId} onClick={() => openDetail(exp)} id={`explore-tile-${exp.id}`} />
+              ))}
+            </div>
           </div>
         )}
+      </div>
+
+      <div className="explore-desktop-split">
+        <div className="explore-desktop-column">{discoveryColumn}</div>
+        <div className="explore-desktop-map">{mapPane(isDesktop)}</div>
       </div>
 
       <BottomSheet open={selected !== null} onClose={closeSheet}>
         {selected && !pickingCrew && (
           <div>
-            <div
-              style={{
-                margin: '-10px -20px 14px',
-                height: 180,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 44,
-                background: categoryBackground(selected.imageUrl, selected.category),
-              }}
-            >
-              {!selected.imageUrl && categoryStyle(selected.category).emoji}
+            <div style={{ position: 'relative', margin: '-10px -20px 14px', height: 200, overflow: 'hidden' }}>
+              {selected.imageUrl ? (
+                <div style={{ position: 'absolute', inset: 0, backgroundImage: `url("${selected.imageUrl}")`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+              ) : (
+                <CategoryArt category={selected.category} />
+              )}
             </div>
             <div className="eyebrow">{selected.category.replace(/_/g, ' ')}</div>
             <h2 style={{ fontFamily: 'Fraunces, serif', fontSize: 21, marginBottom: 4 }}>{selected.name}</h2>

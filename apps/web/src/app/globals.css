@@ -417,6 +417,17 @@ input.field:focus {
 .tab:active {
   transform: scale(0.94);
 }
+.tab-icon {
+  display: flex;
+}
+
+/* Desktop-only: the pinned account footer at the bottom of the sidebar (see TabBar.tsx) — not
+   rendered visibly on mobile, where the bar has no vertical room for a second row and the "You"
+   tab already covers the same destination. */
+.tabbar-spacer,
+.tabbar-account {
+  display: none;
+}
 
 /* Content needs to clear the floating bar's height + its own bottom offset, not just the old
    flush-bottom bar's height. */
@@ -468,6 +479,7 @@ input.field:focus {
     color: var(--ink-gold);
   }
   .tab {
+    position: relative;
     flex: none;
     flex-direction: row;
     justify-content: flex-start;
@@ -478,6 +490,54 @@ input.field:focus {
     border-radius: 10px;
   }
   .tab:hover {
+    background: var(--ink-surface-2);
+  }
+  /* A slim accent bar on the active row, not just a background tint — the single detail that
+     reads as "an app's navigation rail" rather than "a stack of links in a box" (Notion/Linear
+     both use it). Sits just outside the row itself in the sidebar's own gutter. */
+  .tab.active::before {
+    content: '';
+    position: absolute;
+    left: -14px;
+    top: 8px;
+    bottom: 8px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--ink-gold);
+  }
+  .tab-icon {
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: var(--ink-surface-2);
+    flex-shrink: 0;
+  }
+  .tab.active .tab-icon {
+    background: rgba(255, 171, 46, 0.18);
+  }
+
+  /* The sidebar's identity anchor — pinned to the bottom via the spacer above absorbing all
+     leftover flex space, so it reads as "your account, always in the same place" rather than
+     one more link in the scrolling list. */
+  .tabbar-spacer {
+    display: block;
+    flex: 1;
+  }
+  .tabbar-account {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border-radius: 12px;
+    border-top: 1px solid var(--ink-border);
+    margin-top: 8px;
+    padding-top: 16px;
+    text-decoration: none;
+    color: inherit;
+  }
+  .tabbar-account:hover {
     background: var(--ink-surface-2);
   }
 
@@ -503,17 +563,84 @@ input.field:focus {
   }
 }
 
-/* Explore's map view — a fixed 480px made sense as "most of a phone screen" but wastes most
-   of a desktop viewport's height (brief: "use the extra space intelligently"). Desktop gets a
-   viewport-relative height instead, capped so it doesn't run off-screen on a short window. */
-.explore-viewport {
-  height: 480px;
+/* Explore: mobile gets two real modes (Browse's scrolling rails, or a full-height Map with a
+   swipeable card strip synced to marker selection — see explore/page.tsx) toggled by
+   `.explore-mode-toggle`; desktop drops the toggle entirely for a permanent side-by-side split
+   (`.explore-desktop-split`) — the map is a hero surface there, not a thing you switch to.
+   `--nav-h` approximates the sticky nav's real height (safe-area top inset + padding + one line
+   of content) so both the mobile map pane and the desktop split can size themselves to exactly
+   fill the rest of the viewport, the same estimate the old fixed-height map block used. */
+:root {
+  --nav-h: 73px;
 }
+
+.explore-desktop-split {
+  display: none;
+}
+.explore-mode-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--ink-surface-2);
+  border-radius: 100px;
+  padding: 3px;
+}
+
+.explore-mobile-map {
+  position: relative;
+  height: calc(100dvh - var(--nav-h));
+  overflow: hidden;
+}
+/* The card strip floats OVER the bottom of the map (an overlay, not a second panel splitting
+   the height) — the map stays full-height behind it, the same relationship Citymapper/Uber use
+   between a map and its bottom sheet/carousel. */
+.explore-map-strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 90px 14px calc(env(safe-area-inset-bottom, 0px) + 108px);
+  background: linear-gradient(to top, rgba(15, 10, 6, 0.96) 34%, rgba(15, 10, 6, 0.7) 66%, transparent);
+  scroll-snap-type: x proximity;
+  z-index: 5;
+  pointer-events: none;
+}
+.explore-map-strip > * {
+  pointer-events: auto;
+}
+
 @media (min-width: 900px) {
-  .explore-viewport {
-    height: calc(100vh - 300px);
-    min-height: 480px;
-    max-height: 720px;
+  .explore-mobile-browse,
+  .explore-mode-toggle {
+    display: none;
+  }
+
+  /* The real desktop composition: discovery and the map as two permanently-visible panes, not
+     a phone layout stretched wide with a toggle bolted on. Deliberately NOT nested in `.page` —
+     that class's 720px reading-width cap is right for a column of text, wrong for a map that's
+     meant to fill the rest of the screen. */
+  .explore-desktop-split {
+    display: flex;
+    align-items: stretch;
+    height: calc(100vh - var(--nav-h));
+  }
+  body:has(.tabbar) .explore-desktop-split {
+    margin-left: 236px;
+  }
+  .explore-desktop-column {
+    width: 44%;
+    min-width: 400px;
+    max-width: 580px;
+    overflow-y: auto;
+    padding: 24px 20px 56px;
+    flex-shrink: 0;
+  }
+  .explore-desktop-map {
+    flex: 1;
+    position: relative;
+    min-width: 0;
   }
 }
 
