@@ -1,23 +1,29 @@
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;0,9..144,900;1,9..144,500&family=Archivo:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
+/* "Golden Hour" — the app's actual visual identity, not a generic dark-mode SaaS palette.
+   Warmer and richer than the old navy-black-with-a-gold-dot treatment: a coffee/espresso base
+   instead of blue-black, a genuinely saturated amber as a real primary colour (not a small
+   accent), and ember worked in as a second warm tone — evening-plans warmth, not "AI product"
+   purple. See docs/DECISIONS.md#golden-hour-redesign. */
 :root {
-  --ink-bg: #100f17;
-  --ink-surface: #1a1a26;
-  --ink-surface-2: #212233;
-  --ink-surface-3: #282a3d;
-  --ink-text: #f5f1e7;
-  --ink-text-muted: #9c97ae;
-  --ink-text-dim: #615d74;
-  --ink-gold: #f2a93b;
-  --ink-gold-ink: #221806;
-  --ink-ember: #ea5b3d;
-  --ink-moss: #7fb79a;
-  --ink-border: #2a2b3b;
-  --hard-shadow: 0 14px 32px -12px rgba(0, 0, 0, 0.55);
+  --ink-bg: #0f0a06;
+  --ink-surface: #1c140d;
+  --ink-surface-2: #251b12;
+  --ink-surface-3: #302418;
+  --ink-text: #f7f0e4;
+  --ink-text-muted: #a89985;
+  --ink-text-dim: #6b5d4d;
+  --ink-gold: #ffab2e;
+  --ink-gold-ink: #24140a;
+  --ink-ember: #ff6b4a;
+  --ink-moss: #8fc9a3;
+  --ink-border: #382a1c;
+  --hard-shadow: 0 14px 32px -12px rgba(0, 0, 0, 0.6);
   /* The default card elevation — soft and diffuse, doing the job a border+hard-shadow used to
      do, without the "database table row" outline. --hard-shadow stays for the few places that
      still want a defined edge (the map container, the composer). */
-  --ambient-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 28px -10px rgba(0, 0, 0, 0.5);
+  --ambient-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 14px 32px -10px rgba(0, 0, 0, 0.55);
+  --sunset-gradient: linear-gradient(135deg, #ffab2e, #ff6b4a);
 }
 
 * {
@@ -34,11 +40,13 @@ body {
 }
 
 body {
-  /* Same warm-glow treatment as the founding-team demo — two soft radial washes over the flat
-     ink background, subtle enough to read as "considered", not decorative. */
+  /* A felt atmosphere, not a flat colour field — a genuine sunset wash bleeding in from the
+     top corners against the espresso-dark base, the literal "golden hour" the whole palette
+     is named for. Bolder than a token subtlety-adjustment: this is meant to be visible. */
   background:
-    radial-gradient(ellipse 900px 500px at 15% -8%, rgba(242, 169, 59, 0.07), transparent 60%),
-    radial-gradient(ellipse 700px 500px at 100% 15%, rgba(127, 183, 154, 0.05), transparent 55%),
+    radial-gradient(ellipse 1000px 600px at 8% -10%, rgba(255, 171, 46, 0.16), transparent 58%),
+    radial-gradient(ellipse 800px 550px at 100% 0%, rgba(255, 107, 74, 0.12), transparent 55%),
+    radial-gradient(ellipse 700px 500px at 100% 100%, rgba(143, 201, 163, 0.05), transparent 60%),
     var(--ink-bg);
   background-attachment: fixed;
 }
@@ -358,19 +366,25 @@ input.field:focus {
    viewport, not .page's scroll context, with safe-area padding so it clears the home-indicator
    on iOS); a left sidebar on desktop (≥900px — see the @media block below). Same markup, same
    component, two layouts — no separate desktop nav to keep in sync with the mobile one. */
+/* A floating island, not a full-bleed bar welded to the screen edge — margin on every side,
+   its own rounded shape and shadow, sitting above the content rather than closing it off.
+   This is the single most immediately recognisable "this is a considered app, not a web page"
+   signal available in a bottom nav. */
 .tabbar {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  max-width: 480px;
+  left: 14px;
+  right: 14px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  max-width: 452px;
   margin: 0 auto;
   display: flex;
   align-items: center;
-  padding: 8px 4px calc(env(safe-area-inset-bottom, 0px) + 8px);
-  border-top: 1px solid var(--ink-border);
-  background: rgba(23, 24, 38, 0.88);
-  backdrop-filter: blur(14px);
+  gap: 2px;
+  padding: 7px;
+  border-radius: 26px;
+  background: rgba(28, 20, 13, 0.92);
+  box-shadow: var(--ambient-shadow);
+  backdrop-filter: blur(20px);
   z-index: 30;
 }
 .tabbar-brand {
@@ -391,16 +405,23 @@ input.field:focus {
   font-size: 10.5px;
   font-weight: 700;
   text-decoration: none;
-  padding: 6px 2px;
+  padding: 8px 2px;
   min-height: 48px;
-  border-radius: 10px;
-  transition: background 0.12s ease;
+  border-radius: 18px;
+  transition: background 0.15s ease, transform 0.15s ease;
 }
 .tab.active {
   color: var(--ink-gold);
+  background: rgba(255, 171, 46, 0.14);
 }
 .tab:active {
-  background: var(--ink-surface-2);
+  transform: scale(0.94);
+}
+
+/* Content needs to clear the floating bar's height + its own bottom offset, not just the old
+   flush-bottom bar's height. */
+.page {
+  padding-bottom: 116px;
 }
 
 /* Desktop composition (brief: "do not stretch the phone layout across desktop"). The nav
@@ -422,10 +443,11 @@ input.field:focus {
     justify-content: flex-start;
     gap: 2px;
     padding: 28px 14px;
-    border-top: none;
+    border-radius: 0;
     border-right: 1px solid var(--ink-border);
-    background: rgba(19, 19, 29, 0.6);
+    background: rgba(28, 20, 13, 0.5);
     backdrop-filter: none;
+    box-shadow: none;
   }
   .tabbar-brand {
     display: block;

@@ -16,7 +16,7 @@ interface CrewSummary {
   upcomingPlan: { id: string; title: string; publicSlug: string; startsAt: string | null; venueName: string | null } | null;
 }
 
-const AVATAR_COLORS = ['#f2a93b', '#7fb79a', '#ea5b3d', '#9c97ae', '#6b8ef2'];
+const AVATAR_COLORS = ['#ffab2e', '#ff6b4a', '#8fc9a3', '#c9a0dc', '#7fb3d5'];
 
 function initials(displayName: string | null, email: string) {
   const source = displayName?.trim() || email;
@@ -173,7 +173,21 @@ export default function CrewsPage() {
         <button
           onClick={openCreate}
           aria-label="New Crew"
-          style={{ background: 'var(--ink-surface-2)', border: '1px solid var(--ink-border)', color: 'var(--ink-text)', width: 32, height: 32, borderRadius: '50%', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          style={{
+            background: 'var(--ink-gold)',
+            color: 'var(--ink-gold-ink)',
+            border: 'none',
+            width: 34,
+            height: 34,
+            borderRadius: '50%',
+            fontSize: 19,
+            fontWeight: 700,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 6px 16px -6px rgba(255, 171, 46, 0.6)',
+          }}
         >
           +
         </button>

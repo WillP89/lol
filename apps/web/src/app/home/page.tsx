@@ -27,15 +27,31 @@ interface UpcomingPlan {
   priceMinMinor: number | null;
 }
 
-const AVATAR_COLORS = ['#f2a93b', '#7fb79a', '#ea5b3d', '#9c97ae', '#6b8ef2'];
+const AVATAR_COLORS = ['#ffab2e', '#ff6b4a', '#8fc9a3', '#c9a0dc', '#7fb3d5'];
+
+// Each Crew tile gets its own gradient identity — otherwise a row of same-toned cards reads
+// as one grey mass instead of "different groups of different people."
+const CREW_GRADIENTS = [
+  'linear-gradient(150deg, #4a2f6b, #241a2e)',
+  'linear-gradient(150deg, #6b3a1f, #2a1810)',
+  'linear-gradient(150deg, #1f4a3f, #10241e)',
+  'linear-gradient(150deg, #6b2f4a, #241626)',
+  'linear-gradient(150deg, #2f3f6b, #16182a)',
+];
 
 function initials(displayName: string | null, email: string) {
   return (displayName?.trim() || email).slice(0, 1).toUpperCase();
 }
-function avatarColor(seed: string) {
+function seedHash(seed: string, mod: number) {
   let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[hash];
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % mod;
+  return hash;
+}
+function avatarColor(seed: string) {
+  return AVATAR_COLORS[seedHash(seed, AVATAR_COLORS.length)];
+}
+function crewGradient(seed: string) {
+  return CREW_GRADIENTS[seedHash(seed, CREW_GRADIENTS.length)];
 }
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -219,33 +235,58 @@ export default function HomePage() {
         )}
 
         {crews && crews.length > 0 && (
-          <div style={{ marginBottom: 18 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div style={{ marginBottom: 22 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 }}>
               <div className="eyebrow" style={{ marginBottom: 0 }}>Your Crews</div>
               <Link href="/crews" className="muted" style={{ fontSize: 12.5 }}>See all →</Link>
             </div>
-            {crews.slice(0, 4).map((crew) => (
-              <Link key={crew.id} href={`/crews/${crew.id}`} className="card fade-up" style={{ display: 'block', textDecoration: 'none' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
-                  <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 16 }}>{crew.name}</div>
-                  <div className="stack" style={{ flexShrink: 0 }}>
-                    {crew.members.slice(0, 4).map((m) => (
-                      <div key={m.user.id} className="avatar" style={{ width: 22, height: 22, fontSize: 9, background: avatarColor(m.user.displayName ?? m.user.email) }}>
-                        {initials(m.user.displayName, m.user.email)}
+            {/* A horizontal row, not another vertical stack of full-width cards — Home was
+                turning into a single monotone column no matter what it showed. Each tile gets
+                its own gradient identity (crewGradient) so five Crews read as five different
+                groups, not five identical rows. */}
+            <div style={{ display: 'flex', gap: 12, overflowX: 'auto', margin: '0 -20px', padding: '0 20px 4px', scrollSnapType: 'x proximity' }}>
+              {crews.slice(0, 6).map((crew) => (
+                <Link
+                  key={crew.id}
+                  href={`/crews/${crew.id}`}
+                  className="fade-up"
+                  style={{
+                    flex: '0 0 auto',
+                    width: 178,
+                    borderRadius: 22,
+                    overflow: 'hidden',
+                    textDecoration: 'none',
+                    color: 'inherit',
+                    background: 'var(--ink-surface)',
+                    boxShadow: 'var(--ambient-shadow)',
+                    scrollSnapAlign: 'start',
+                  }}
+                >
+                  <div style={{ height: 84, background: crewGradient(crew.id), position: 'relative', padding: 10 }}>
+                    <div className="stack" style={{ position: 'absolute', bottom: 10, left: 10 }}>
+                      {crew.members.slice(0, 4).map((m) => (
+                        <div key={m.user.id} className="avatar" style={{ width: 24, height: 24, fontSize: 9.5, background: avatarColor(m.user.displayName ?? m.user.email), boxShadow: '0 0 0 2px var(--ink-surface)' }}>
+                          {initials(m.user.displayName, m.user.email)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ padding: '10px 12px 13px' }}>
+                    <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 15, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {crew.name}
+                    </div>
+                    {crew.latestMessage ? (
+                      <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                        <span style={{ fontWeight: 600, color: 'var(--ink-text)' }}>{crew.latestMessage.authorName}: </span>
+                        {crew.latestMessage.body}
                       </div>
-                    ))}
+                    ) : (
+                      <div className="muted" style={{ fontSize: 11.5 }}>Say hi →</div>
+                    )}
                   </div>
-                </div>
-                {crew.latestMessage ? (
-                  <div className="muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <span style={{ fontWeight: 600, color: 'var(--ink-text)' }}>{crew.latestMessage.authorName}: </span>
-                    {crew.latestMessage.body}
-                  </div>
-                ) : (
-                  <div className="muted" style={{ fontSize: 12.5 }}>No activity yet — say hi.</div>
-                )}
-              </Link>
-            ))}
+                </Link>
+              ))}
+            </div>
           </div>
         )}
 

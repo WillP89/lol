@@ -35,7 +35,7 @@ interface DayAvailability {
 }
 
 const ACTIVE_DECISION_STATUSES = new Set(['SHARED', 'GATHERING_INTEREST', 'LIKELY', 'READY']);
-const AVATAR_COLORS = ['#f2a93b', '#7fb79a', '#ea5b3d', '#9c97ae', '#6b8ef2'];
+const AVATAR_COLORS = ['#ffab2e', '#ff6b4a', '#8fc9a3', '#c9a0dc', '#7fb3d5'];
 function avatarColor(seed: string) {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % AVATAR_COLORS.length;
@@ -183,7 +183,7 @@ export default function CrewDetailPage() {
           <Link
             href={`/plans/${upcomingPlan.publicSlug}`}
             className="banner-card fade-up"
-            style={{ display: 'block', textDecoration: 'none', color: 'inherit', border: '1px solid var(--ink-moss)' }}
+            style={{ display: 'block', textDecoration: 'none', color: 'inherit', boxShadow: '0 0 0 1.5px rgba(143, 201, 163, 0.35), var(--ambient-shadow)' }}
           >
             <div className="eyebrow" style={{ color: 'var(--ink-moss)' }}>📅 Coming up</div>
             <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 17, margin: '4px 0 2px' }}>{upcomingPlan.title}</div>

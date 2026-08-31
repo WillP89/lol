@@ -217,3 +217,29 @@ rather than a second desktop-only nav component to keep in sync. `.page`/`.nav` 
 clear the sidebar only on pages that actually render one, via `body:has(.tabbar) .page`, since
 a handful of intentionally chrome-free pages (chat, auth, onboarding, the public Plan Card)
 still go full-width with no sidebar to clear.
+
+## #golden-hour-redesign
+
+After two rounds of structural work (nav, Home, Plans) still read as "the same app" because
+the actual visual system — colour tokens, typography scale, and above all a 1px border on
+every single card/button/chip — was never touched. This was the pass that changed the system
+itself, not another screen's content:
+
+- New palette ("Golden Hour"): espresso-dark base (`--ink-bg: #0f0a06`) instead of navy-black,
+  a genuinely saturated amber as `--ink-gold` used as a real primary colour, ember worked in as
+  a second warm tone. Not a purple/blue "AI SaaS" palette, not a subtler version of the old one
+  — a different colour story, warm and evening-plans-specific.
+- Removed the `border: 1px solid var(--ink-border)` from `.card`, `.banner-card`, `.btn`,
+  `.chip`, and `input.field` — a hard stroke around every piece of content is what made the
+  whole app read as a table of database rows. New `--ambient-shadow` token (soft, diffuse)
+  does the elevation job instead, the way Airbnb/Linear/Spotify actually differentiate content
+  from background.
+- TabBar (mobile) is now a floating rounded island with margin on every side, not a bar welded
+  flush to the screen edge — the single most recognisable "considered app, not a web page"
+  signal available in a bottom nav. Active tab gets a soft gold pill highlight.
+- Chat bubbles have an asymmetric corner radius (tight on the sender's corner — the iMessage/
+  WhatsApp "tail" detail) and no border — bubbles, not cards with text in them.
+- Home's Crews section is a horizontal-scroll row of gradient-identity tiles (`crewGradient`,
+  hashed per Crew id) instead of another vertical stack of uniform cards — five Crews now read
+  as five different groups, not five identical rows repeated. The "next plan" card is a real
+  full-bleed photo hero with text scrimmed onto it, not an image strip glued above a text block.
