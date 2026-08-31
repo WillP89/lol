@@ -7,8 +7,18 @@ import { api, ApiError } from '@/lib/api';
 import { formatPriceFrom } from '@/lib/formatPrice';
 import { displayNameOf } from '@/lib/displayName';
 import { v2Art } from '@/lib/v2Art';
+import { messagePreview } from '@/lib/messagePreview';
 import { BottomSheet } from '@/components/BottomSheet';
 import { TabBarV2 } from '@/components/TabBarV2';
+
+interface CrewListItem {
+  id: string;
+  name: string;
+  members: { user: { id: string; displayName: string | null; email: string } }[];
+  latestMessage: { body: string; authorName: string; createdAt: string } | null;
+  activePlan: { title: string } | null;
+  upcomingPlan: { title: string } | null;
+}
 
 interface Reaction {
   emoji: string;
@@ -287,11 +297,15 @@ export default function CrewPage() {
   const [postingManual, setPostingManual] = useState(false);
   const [votingMessageId, setVotingMessageId] = useState<string | null>(null);
   const [lockingPlanId, setLockingPlanId] = useState<string | null>(null);
+  // Desktop only — the persistent Crews rail beside the active conversation (see globals.css's
+  // .v2-crew-split comment for why this exists instead of just widening the message column).
+  const [crewList, setCrewList] = useState<CrewListItem[] | null>(null);
 
   useEffect(() => {
     api.get<{ crew: CrewDetail }>(`/crews/${crewId}`).then((res) => setCrew(res.crew)).catch((err) => setError(err instanceof ApiError ? err.message : 'Could not load Crew.'));
     api.get<{ availability: DayAvailability[] }>(`/crews/${crewId}/availability?days=0,1,2,3`).then((res) => setAvailability(res.availability)).catch(() => {});
     api.get<{ user: { id: string } }>('/users/me').then((res) => setMe(res.user.id)).catch(() => {});
+    api.get<{ crews: CrewListItem[] }>('/crews').then((res) => setCrewList(res.crews)).catch(() => {});
   }, [crewId]);
 
   const poll = useCallback(async () => {
@@ -548,7 +562,37 @@ export default function CrewPage() {
 
   return (
     <div className="v2">
-      <div className="v2-shell-desktop" style={{ maxWidth: 720, margin: '0 auto' }}>
+      <div className="v2-shell-desktop v2-crew-split">
+        {/* Desktop-only Crews rail beside the active conversation — see globals.css's
+            .v2-crew-split comment: the conversation column staying a fixed, readable width is
+            correct (WhatsApp/iMessage desktop both do this), but the dead space that used to sit
+            beside it wasn't. This is real navigation, not decoration. */}
+        {crewList && crewList.length > 0 && (
+          <div className="v2-crew-rail">
+            <div className="v2-card" style={{ padding: '16px 14px' }}>
+              <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Your Crews</div>
+              {crewList.map((c) => (
+                <Link
+                  key={c.id}
+                  href={`/crews/${c.id}`}
+                  className="v2-rail-crew-row"
+                  style={{ background: c.id === crewId ? 'var(--v2-bg-deep)' : undefined }}
+                >
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: avatarColor(c.name) }}>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: '#fff' }}>{c.name.charAt(0).toUpperCase()}</span>
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
+                    <div className="v2-dim" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {c.upcomingPlan ? `📅 ${c.upcomingPlan.title}` : c.activePlan ? `🗳️ ${c.activePlan.title}` : c.latestMessage ? messagePreview(c.latestMessage.body) : 'Say hi'}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+      <div className="v2-crew-main" style={{ maxWidth: 720, width: '100%' }}>
         {/* Header — minimal, no boxed nav bar: back arrow, avatar cluster + name (tap opens
             Crew info), that's the whole chrome. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '18px 20px 10px' }}>
@@ -691,6 +735,7 @@ export default function CrewPage() {
             </form>
           )}
         </div>
+      </div>
       </div>
 
       {/* THE COMPOSER'S "+" ACTION SHEET — every way of adding something to the conversation

@@ -1063,6 +1063,31 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   }
 }
 
+/* Crew chat's desktop composition — same fix as Home's rail: the conversation column staying a
+   fixed, readable width (WhatsApp/iMessage desktop both do this deliberately) is correct, but
+   the huge void beside it on a wide screen wasn't — the real fix is a persistent Crews list
+   beside the active conversation (exactly WhatsApp/Slack/Discord desktop's own actual layout),
+   not stretching message bubbles across the whole viewport. */
+.v2-crew-split { display: block; }
+.v2-crew-rail { display: none; }
+@media (min-width: 1280px) {
+  .v2-crew-split {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 28px;
+    padding-top: 18px;
+  }
+  .v2-crew-rail {
+    display: block;
+    width: 280px;
+    flex-shrink: 0;
+    max-height: calc(100dvh - 36px);
+    overflow-y: auto;
+  }
+  .v2-crew-main { flex-shrink: 0; }
+}
+
 /* Static (non-interactive) tag pill — Profile's "Into" list. */
 .v2-chip {
   display: inline-flex;

@@ -711,3 +711,15 @@ attempts, and none of them near the real start of the flow). Fixed: `SignupStart
 `requestMagicLink`, the real "someone is starting an auth attempt" moment; `SignupCompleted`
 only fires on a genuine first-ever session, and a returning login is no longer force-tracked as
 a signup-funnel event at all.
+
+## #crew-desktop-rail
+
+Same fix pattern as Home's split layout, applied to Crew chat — the single most important
+screen per the brief's own priority order ("make this the strongest part"). The conversation
+column staying a fixed, readable width on desktop is correct (WhatsApp/iMessage desktop both do
+this deliberately), but the dead space that used to sit beside it wasn't. Added a persistent
+Crews-list rail (`.v2-crew-split`/`.v2-crew-rail`) beside the active conversation — the actual
+layout WhatsApp/Slack/Discord desktop all use, not a coincidence: it's real navigation (every
+Crew, its own live activity line, the current one highlighted), the same rail component
+introduced for Home, reused here rather than reinvented. `/crews/:id` now also fetches the full
+Crew list (`GET /crews`) purely to populate this rail — no new endpoint needed.
