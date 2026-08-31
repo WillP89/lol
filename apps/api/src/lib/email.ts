@@ -15,6 +15,14 @@ import { logger } from './logger';
  */
 export class EmailError extends Error {}
 
+// Some hosts block outbound SMTP ports outright (common anti-spam-abuse policy on shared
+// PaaS infrastructure) — without an explicit timeout, a blocked connection doesn't fail, it
+// just hangs, which would hang the whole sign-in request (and, since fetch() has no default
+// timeout, the browser too) indefinitely instead of falling through to the dev-link fallback
+// below. 8s is generous for a real SMTP handshake and short enough that a blocked port fails
+// fast instead of silently stalling sign-in.
+const SMTP_TIMEOUT_MS = 8000;
+
 let smtpTransport: ReturnType<typeof nodemailer.createTransport> | null = null;
 function getSmtpTransport() {
   if (!smtpTransport) {
@@ -23,6 +31,9 @@ function getSmtpTransport() {
       port: config.SMTP_PORT,
       secure: config.SMTP_PORT === 465, // Gmail: 465 = implicit TLS, 587 = STARTTLS
       auth: { user: config.SMTP_USER, pass: config.SMTP_PASS },
+      connectionTimeout: SMTP_TIMEOUT_MS,
+      greetingTimeout: SMTP_TIMEOUT_MS,
+      socketTimeout: SMTP_TIMEOUT_MS,
     });
   }
   return smtpTransport;
