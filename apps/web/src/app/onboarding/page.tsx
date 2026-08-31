@@ -98,6 +98,9 @@ function OnboardingWizard() {
   return (
     <div className="v2" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <div className="v2-page" style={{ paddingTop: 0, paddingBottom: 0 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 12, background: 'var(--v2-plum)', color: 'var(--v2-brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 24, fontFamily: 'Bricolage Grotesque, sans-serif', fontWeight: 800, fontSize: 17 }}>
+          P
+        </div>
         <div style={{ display: 'flex', gap: 5, marginBottom: 28 }}>
           {steps.map((s) => (
             <div key={s} style={{ flex: 1, height: 3.5, borderRadius: 3, background: s <= step ? 'var(--v2-brand)' : 'var(--v2-bg-deep)' }} />
