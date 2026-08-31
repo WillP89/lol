@@ -14,6 +14,10 @@
   --ink-moss: #7fb79a;
   --ink-border: #2a2b3b;
   --hard-shadow: 0 14px 32px -12px rgba(0, 0, 0, 0.55);
+  /* The default card elevation — soft and diffuse, doing the job a border+hard-shadow used to
+     do, without the "database table row" outline. --hard-shadow stays for the few places that
+     still want a defined edge (the map container, the composer). */
+  --ambient-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 28px -10px rgba(0, 0, 0, 0.5);
 }
 
 * {
@@ -118,13 +122,17 @@ input {
   padding-left: 10px;
 }
 
+/* A visible 1px stroke on every single card is what made this read as "a form" rather than
+   "an app" — every piece of content sat in its own outlined box, like a table of database
+   rows. Elevation now comes from a soft ambient shadow and a background one shade lighter
+   than the page, the way Airbnb/Linear/Spotify actually differentiate content from ground —
+   no hard edge anywhere. */
 .card {
   background: var(--ink-surface);
-  border: 1px solid var(--ink-border);
-  border-radius: 18px;
+  border-radius: 20px;
   padding: 16px;
-  margin-bottom: 14px;
-  box-shadow: var(--hard-shadow);
+  margin-bottom: 12px;
+  box-shadow: var(--ambient-shadow);
 }
 
 /* A more prominent card for a single highlighted piece of content (Group DNA, "for your
@@ -132,11 +140,10 @@ input {
    flat surface every other card uses, so it reads as "the important one" without shouting. */
 .banner-card {
   background: linear-gradient(150deg, var(--ink-surface), var(--ink-surface-2));
-  border: 1px solid var(--ink-border);
-  border-radius: 18px;
+  border-radius: 20px;
   padding: 18px;
-  margin-bottom: 14px;
-  box-shadow: var(--hard-shadow);
+  margin-bottom: 12px;
+  box-shadow: var(--ambient-shadow);
 }
 
 /* A colour-blocked header for an event/experience card — no real photography exists for
@@ -156,9 +163,9 @@ input {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 13px 18px;
-  border-radius: 12px;
-  border: 1px solid var(--ink-border);
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: none;
   background: var(--ink-surface-2);
   color: var(--ink-text);
   font-weight: 700;
@@ -169,7 +176,7 @@ input {
   transition: transform 0.12s ease, filter 0.12s ease, background 0.12s ease;
 }
 .btn:hover {
-  filter: brightness(1.08);
+  filter: brightness(1.15);
 }
 .btn:active {
   transform: scale(0.97);
@@ -182,28 +189,26 @@ input {
 .btn-primary {
   background: var(--ink-gold);
   color: var(--ink-gold-ink);
-  border-color: transparent;
-  box-shadow: 0 6px 20px -8px rgba(242, 169, 59, 0.5);
+  box-shadow: 0 8px 24px -8px rgba(242, 169, 59, 0.55);
 }
 .btn-ghost {
   background: transparent;
   box-shadow: none;
 }
 .btn-danger {
-  background: transparent;
+  background: rgba(234, 91, 61, 0.1);
   color: var(--ink-ember);
-  border-color: rgba(234, 91, 61, 0.4);
   box-shadow: none;
 }
 .btn-danger:hover {
-  background: rgba(234, 91, 61, 0.08);
+  background: rgba(234, 91, 61, 0.18);
 }
 
 input.field {
   width: 100%;
-  padding: 13px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--ink-border);
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1.5px solid transparent;
   background: var(--ink-surface-2);
   color: var(--ink-text);
   font-size: 15px;
@@ -217,9 +222,9 @@ input.field:focus {
 .chip {
   display: inline-flex;
   align-items: center;
-  padding: 7px 13px;
+  padding: 8px 14px;
   border-radius: 100px;
-  border: 1px solid var(--ink-border);
+  border: none;
   background: var(--ink-surface-2);
   color: var(--ink-text-muted);
   font-size: 12.5px;
@@ -233,7 +238,6 @@ input.field:focus {
 .chip.selected {
   background: var(--ink-gold);
   color: var(--ink-gold-ink);
-  border-color: transparent;
 }
 .chip.static {
   cursor: default;

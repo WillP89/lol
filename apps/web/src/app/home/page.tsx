@@ -110,9 +110,9 @@ export default function HomePage() {
         </Link>
       </nav>
       <div className="page">
-        <div style={{ marginBottom: 22 }}>
-          <div className="muted" style={{ fontSize: 13 }}>{greeting()}</div>
-          <h1 style={{ fontSize: 24, marginTop: 2 }}>Here&rsquo;s what your people are up to.</h1>
+        <div style={{ marginBottom: 26 }}>
+          <div className="muted" style={{ fontSize: 13, fontWeight: 600, letterSpacing: '0.02em' }}>{greeting()}</div>
+          <h1 style={{ fontSize: 'clamp(28px, 7vw, 36px)', marginTop: 4, lineHeight: 1.08 }}>Here&rsquo;s what your people are up to.</h1>
         </div>
 
         {error && <div className="error">{error}</div>}
@@ -144,23 +144,47 @@ export default function HomePage() {
         )}
 
         {nextPlan && (
-          <Link href={`/plans/${nextPlan.publicSlug}`} className="banner-card fade-up" style={{ display: 'block', textDecoration: 'none', padding: 0, overflow: 'hidden' }}>
+          <Link
+            href={`/plans/${nextPlan.publicSlug}`}
+            className="fade-up"
+            style={{
+              display: 'block',
+              textDecoration: 'none',
+              color: 'inherit',
+              position: 'relative',
+              height: 220,
+              borderRadius: 24,
+              overflow: 'hidden',
+              marginBottom: 20,
+              boxShadow: 'var(--ambient-shadow)',
+              ...(nextPlan.imageUrl
+                ? { backgroundImage: `url(${nextPlan.imageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                : { background: categoryStyle(nextPlan.category).bg }),
+            }}
+          >
+            {/* Full-bleed photo with text scrimmed directly onto it, not a strip of image sat
+                above a text block — the way a "your trip" hero card actually reads as one
+                thing, not a colour swatch glued to a form. */}
             <div
-              className="art-block"
               style={{
-                height: 88,
-                borderRadius: 0,
-                ...(nextPlan.imageUrl
-                  ? { backgroundImage: `url(${nextPlan.imageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-                  : { background: categoryStyle(nextPlan.category).bg }),
+                position: 'absolute',
+                inset: 0,
+                background: 'linear-gradient(180deg, rgba(16,15,23,0) 30%, rgba(16,15,23,0.55) 65%, rgba(16,15,23,0.92) 100%)',
               }}
-            >
-              {!nextPlan.imageUrl && categoryStyle(nextPlan.category).emoji}
-            </div>
-            <div style={{ padding: 16 }}>
-              <div className="eyebrow">Your next plan</div>
-              <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 18, margin: '2px 0 3px' }}>{nextPlan.title}</div>
-              <div className="muted" style={{ fontSize: 13 }}>
+            />
+            {!nextPlan.imageUrl && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 56, opacity: 0.5 }}>
+                {categoryStyle(nextPlan.category).emoji}
+              </div>
+            )}
+            <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-gold)', marginBottom: 6 }}>
+                Your next plan
+              </div>
+              <div style={{ fontFamily: 'Fraunces, serif', fontWeight: 700, fontSize: 23, lineHeight: 1.15, marginBottom: 5, textShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
+                {nextPlan.title}
+              </div>
+              <div style={{ fontSize: 13.5, color: 'rgba(245,241,231,0.85)' }}>
                 {nextPlan.startsAt
                   ? new Date(nextPlan.startsAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
                   : 'Time to be confirmed'}

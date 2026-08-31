@@ -58,13 +58,12 @@ function EventCard({ data }: { data: PlanCardData }) {
       style={{
         display: 'block',
         width: 240,
-        borderRadius: 18,
+        borderRadius: 20,
         overflow: 'hidden',
-        border: '1px solid var(--ink-border)',
         background: 'var(--ink-surface)',
         textDecoration: 'none',
         color: 'inherit',
-        boxShadow: 'var(--hard-shadow)',
+        boxShadow: 'var(--ambient-shadow)',
       }}
     >
       <div
@@ -343,15 +342,20 @@ export default function CrewChatPage() {
                   <div style={{ width: 240, height: 108, borderRadius: 16, background: 'var(--ink-surface-2)', opacity: 0.6 }} />
                 ) : (
                   <div
-                    className="card fade-up"
+                    className="fade-up"
                     style={{
-                      margin: 0,
-                      padding: '9px 13px',
+                      padding: '10px 14px',
                       maxWidth: '78%',
-                      background: mine ? 'var(--ink-gold)' : undefined,
-                      color: mine ? 'var(--ink-gold-ink)' : undefined,
+                      background: mine ? 'var(--ink-gold)' : 'var(--ink-surface)',
+                      color: mine ? 'var(--ink-gold-ink)' : 'var(--ink-text)',
                       wordBreak: 'break-word',
-                      boxShadow: 'none', // a shadow on every bubble is too heavy for a chat thread
+                      fontSize: 14.5,
+                      lineHeight: 1.4,
+                      // A real bubble shape, not a card: a tight radius on the corner nearest
+                      // the sender reads as "this came from a direction" the way iMessage/
+                      // WhatsApp bubbles do — a uniform-radius rounded rectangle just looks
+                      // like a form field with text in it.
+                      borderRadius: mine ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
                     }}
                   >
                     {m.body}
