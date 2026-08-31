@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 /**
  * A focused-choice sheet with a backdrop — used wherever the app needs a decision (which Crew to
@@ -24,6 +24,9 @@ export function BottomSheet({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
+
   // Prevents the page behind the sheet from scrolling while it's open — otherwise a drag on
   // the sheet can scroll the page underneath it, which reads as broken on mobile.
   useEffect(() => {
@@ -34,6 +37,27 @@ export function BottomSheet({
       document.body.style.overflow = prev;
     };
   }, [open]);
+
+  // Real accessibility gaps this closes (brief: "keyboard, focus, screen-reader labels, modal
+  // focus" — every sheet in the app shares this one component, so the fix applies everywhere at
+  // once): Escape had no effect, focus never moved into the sheet on open or back to whatever
+  // opened it on close, and screen readers had no signal this was a modal dialog at all.
+  useEffect(() => {
+    if (!open) return;
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
+    // A short delay lets the open transition's initial render settle before moving focus —
+    // moving it synchronously on mount can fight the transform transition in some browsers.
+    const focusTimer = setTimeout(() => panelRef.current?.focus(), 50);
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      clearTimeout(focusTimer);
+      document.removeEventListener('keydown', onKeyDown);
+      previouslyFocused.current?.focus?.();
+    };
+  }, [open, onClose]);
 
   return (
     <div
@@ -49,6 +73,7 @@ export function BottomSheet({
     >
       <div
         onClick={onClose}
+        aria-hidden="true"
         style={{
           position: 'absolute',
           inset: 0,
@@ -58,7 +83,11 @@ export function BottomSheet({
         }}
       />
       <div
+        ref={panelRef}
         className="v2-sheet-panel"
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
         style={{
           position: 'relative',
           width: '100%',
@@ -74,9 +103,18 @@ export function BottomSheet({
           transform: open ? 'translateY(0)' : 'translateY(100%)',
           transition: 'transform 0.25s cubic-bezier(.32,.72,0,1)',
           boxShadow: 'var(--v2-shadow-lg)',
+          outline: 'none',
         }}
       >
-        <div style={{ width: 36, height: 4, borderRadius: 4, background: 'var(--v2-ink-dim)', opacity: 0.4, margin: '4px auto 14px', position: 'sticky', top: 0 }} />
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="v2-tap-feedback"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', padding: '10px 0 8px', margin: '-6px 0 8px', position: 'sticky', top: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+        >
+          <span style={{ width: 36, height: 4, borderRadius: 4, background: 'var(--v2-ink-dim)', opacity: 0.4 }} />
+        </button>
         {children}
       </div>
     </div>

@@ -1438,3 +1438,34 @@ signal for this category") keep chronological order via a stable sort, so "happe
 still surfaces rather than a total taste-only reshuffle. Nothing is hidden from a member's own
 browsing — Explore stays fully explorable either way. Reuses `categoryToTasteKey` (exported from
 services/match.ts) rather than a second mapping table.
+
+## #bottomsheet-accessibility
+
+Navigation/back/cancel audit (every multi-step flow: poll builder, availability, share, manual
+plan, suggest-preview) found every sub-view already has an explicit "← Back" button and every
+`BottomSheet` usage already wires backdrop-tap to `onClose` — no dead ends there. The one real
+gap was in `BottomSheet.tsx` itself, the single shared modal behind every sheet in the app
+(crew creation, poll voting, availability, share, plan responses, recommendation feedback,
+admin manual-plan builder): no keyboard dismissal, no focus management, no dialog semantics.
+Concretely: pressing Escape did nothing; opening a sheet left focus wherever it already was
+(often back on page content behind the now-visually-focused sheet, or nowhere in particular);
+closing a sheet never returned focus to whatever triggered it, so a keyboard or screen-reader
+user lost their place; and the panel had no `role="dialog"` / `aria-modal="true"`, so assistive
+tech had no signal a modal had even opened.
+
+Fixed by adding a `panelRef` + `previouslyFocused` ref pair: on open, focus moves into the panel
+(50ms after mount, to avoid fighting the slide-up transition) and Escape now calls the same
+`onClose` the backdrop tap already used; on close, focus is restored to whatever element had
+focus before the sheet opened. The panel now carries `role="dialog"`, `aria-modal="true"`, and
+`tabIndex={-1}` (so it's programmatically focusable without adding a tab stop); the backdrop is
+`aria-hidden="true"`. The drag-handle pill, previously a bare decorative `<span>` that happened
+to sit above a click-catching wrapper, is now itself a real `<button aria-label="Close">` —
+one unambiguous close control a screen reader can actually name, rather than an unlabelled
+swipe affordance.
+
+Verified live end-to-end (signup → onboarding → open the "New Crew" sheet from `/crews`):
+`role="dialog"` present, `aria-modal="true"` present, focus lands inside the panel on open,
+Escape closes it, and focus returns to the `New Crew` trigger button afterward — all five
+checks passing against the real running app, not just inferred from the diff. Because every
+sheet in the app shares this one component, the fix applies everywhere at once without
+touching each call site.
