@@ -723,3 +723,13 @@ layout WhatsApp/Slack/Discord desktop all use, not a coincidence: it's real navi
 Crew, its own live activity line, the current one highlighted), the same rail component
 introduced for Home, reused here rather than reinvented. `/crews/:id` now also fetches the full
 Crew list (`GET /crews`) purely to populate this rail — no new endpoint needed.
+
+## #bottomsheet-max-height
+
+Real bug, confirmed via a live production screenshot on a real (not maximised, not full display
+height) browser window: `BottomSheet` had no `max-height`, so on a shorter viewport, tall
+content (an event's image + description + "Share to Crew" button) got cut off at the bottom of
+the screen with no way to scroll to it — the button was rendered entirely off-screen and
+unreachable. Fixed with `maxHeight: calc(100dvh - 40px)` + its own `overflowY: auto`, verified
+against a genuinely short (660px) viewport where the button was previously unreachable and is
+now confirmed reachable via scroll.

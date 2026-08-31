@@ -71,13 +71,21 @@ export function BottomSheet({
           background: surface,
           borderTop: `1px solid ${border}`,
           borderRadius: radius,
+          // Real bug, confirmed via a live screenshot on a real (non-maximised, not full-height)
+          // browser window: with no max-height, tall content (an event's image + description +
+          // button) got cut off at the bottom of the viewport with no way to scroll to it —
+          // "Share to Crew" was rendered entirely off-screen. maxHeight + its own scroll means
+          // the sheet now always fits, however short the window is; the drag handle and any
+          // sticky footer content inside `children` stay reachable by scrolling the sheet itself.
+          maxHeight: 'calc(100dvh - 40px)',
+          overflowY: 'auto',
           padding: '10px 20px calc(env(safe-area-inset-bottom, 0px) + 20px)',
           transform: open ? 'translateY(0)' : 'translateY(100%)',
           transition: 'transform 0.25s cubic-bezier(.32,.72,0,1)',
           boxShadow: variant === 'light' ? 'var(--v2-shadow-lg)' : '0 -20px 40px -12px rgba(0,0,0,0.5)',
         }}
       >
-        <div style={{ width: 36, height: 4, borderRadius: 4, background: handle, margin: '4px auto 14px', opacity: variant === 'light' ? 0.35 : 1 }} />
+        <div style={{ width: 36, height: 4, borderRadius: 4, background: handle, margin: '4px auto 14px', opacity: variant === 'light' ? 0.35 : 1, position: 'sticky', top: 0 }} />
         {children}
       </div>
     </div>
