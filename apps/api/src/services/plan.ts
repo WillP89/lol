@@ -2,7 +2,7 @@ import { prisma } from '../lib/prisma';
 import { track } from './analytics';
 import { computeCrewDna } from './crewDna';
 import { requestMagicLink } from './auth';
-import { sendCrewMessage } from './chat';
+import { sendCrewMessage, sendSystemMessage } from './chat';
 import type { Plan, PlanStatusValue, VoteValue } from '@prisma/client';
 
 const READY_THRESHOLD = 0.6;
@@ -129,6 +129,45 @@ export async function createPlanFromRecommendationOption(crewId: string, optionI
 export async function sendExperienceToCrew(crewId: string, experienceId: string, userId: string): Promise<Plan> {
   const experience = await prisma.experience.findUniqueOrThrow({ where: { id: experienceId } });
   return createPlanForCrew(crewId, userId, { title: experience.name, experienceId, status: 'SHARED' });
+}
+
+/**
+ * The automatic recommendation engine's own delivery path (services/crewRecommendations.ts) —
+ * everything `sendExperienceToCrew` does (a real Plan, votable/lockable exactly like a
+ * member-shared idea), except the announcement is posted by the Plot system user via
+ * `sendSystemMessage` with distinct copy and emoji, so it never reads as if a real person
+ * shared it. Returns the chat message's id alongside the Plan so the caller can link the
+ * CrewRecommendation row to it. See docs/DECISIONS.md#crew-auto-recommendations.
+ */
+export async function createRecommendationPlanForCrew(
+  crewId: string,
+  experienceId: string,
+  systemUserId: string,
+): Promise<{ plan: Plan; messageId: string }> {
+  const experience = await prisma.experience.findUniqueOrThrow({ where: { id: experienceId } });
+  const members = await prisma.crewMember.findMany({ where: { crewId, status: 'ACTIVE' } });
+
+  const plan = await prisma.plan.create({
+    data: {
+      crewId,
+      proposedByUserId: systemUserId,
+      title: experience.name,
+      experienceId,
+      status: 'SHARED',
+      members: { create: members.map((m) => ({ userId: m.userId })) },
+    },
+    include: { experience: true },
+  });
+
+  await track('SentToCrew', { crewId, planId: plan.id, source: 'recommendation' }, { userId: systemUserId, crewId, planId: plan.id });
+
+  const message = await sendSystemMessage(
+    crewId,
+    systemUserId,
+    `✨ Plot found something your Crew might like: "${plan.title}" — /plans/${plan.publicSlug}`,
+  );
+
+  return { plan, messageId: message.id };
 }
 
 export async function createSoftPlan(crewId: string, userId: string, title: string): Promise<Plan> {

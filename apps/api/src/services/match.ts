@@ -19,6 +19,12 @@ export interface MatchOption {
   reasons: MatchReason[];
   availableMemberCount: number;
   totalMemberCount: number;
+  // null = distance couldn't be computed (no venue coords, or no member has a home location
+  // set) — genuinely unknown, never treated as "near" or "far". Used by the automatic
+  // recommendation engine (services/crewRecommendations.ts) to hard-filter on travel radius;
+  // the manual "Find us something"/"Suggest something" flows only use it as a soft scoring
+  // input, since a member actively browsing should still be able to see something further out.
+  withinRadius: boolean | null;
 }
 
 /**
@@ -39,44 +45,78 @@ export const identityRanker: LearnedRanker = {
 
 const CANDIDATE_WINDOW_DAYS = 21;
 const RESULT_COUNT = 3;
+// The onboarding default (see onboarding/page.tsx) — used whenever we need a radius and no
+// member has a real TasteProfile.travelRadiusMeters yet, so a brand-new Crew still gets a
+// sane "worth travelling for" distance rather than an unbounded or zero radius.
+const DEFAULT_RADIUS_METERS = 24000;
+
+/** Great-circle distance in miles — UK convention (brief: "miles not raw coordinates"). */
+function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 3958.8; // Earth radius, miles
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+async function resolveCrewCity(crewId: string, fallbackUserId?: string): Promise<string> {
+  const [crew, requester] = await Promise.all([
+    prisma.crew.findUnique({ where: { id: crewId }, select: { defaultCity: true } }),
+    fallbackUserId
+      ? prisma.user.findUnique({ where: { id: fallbackUserId }, select: { profile: { select: { homeCity: true } } } })
+      : Promise.resolve(null),
+  ]);
+  // The Crew's own city if set, else whoever asked's home city, else a genuinely UK-central
+  // fallback (never a hardcoded London assumption — see docs/DECISIONS.md#uk-wide-location).
+  return crew?.defaultCity ?? requester?.profile?.homeCity ?? UK_FALLBACK_CENTER.name;
+}
 
 /**
- * The signature "Find us something" interaction. Layered, in order:
+ * The shared scoring core behind "Find us something", "Suggest something", and the automatic
+ * Crew recommendation engine (services/crewRecommendations.ts) — one scorer, three call sites,
+ * so a scoring change (or a bug fix in it) applies everywhere at once instead of drifting.
+ * Layered, in order:
  *
  *  1. Hard constraints — publishable quality, not sold out, starts within the candidate
  *     window. Anything failing this never reaches scoring; it's a filter, not a penalty.
  *  2. Preference scoring — category affinity averaged across the crew's TasteProfiles,
  *     boosted by CrewDNA top categories when confidence is MEDIUM/HIGH.
- *  3. Context — under/over the crew's median comfortable spend, and how many members are
- *     free that evening (real AvailabilityWindow data, not simulated).
+ *  3. Context — under/over the crew's median comfortable spend, distance from the Crew's own
+ *     area (soft-scored here; the automatic engine applies a hard filter on top using
+ *     `withinRadius`), and how many members are free that evening (real AvailabilityWindow
+ *     data, not simulated).
  *  4. Learned re-rank hook — currently a no-op; see LearnedRanker above.
  *
  * Every option keeps its `reasons[]` so the API response is explainable, not a black box
- * score — see brief §46.
+ * score — see brief §46. Does not persist anything; callers that need an audit trail (
+ * `findUsSomething`) do that themselves.
  */
-export async function findUsSomething(
+export async function scoreExperiencesForCrew(
   crewId: string,
-  requestedByUserId: string,
-): Promise<{ recommendationId: string; options: MatchOption[] }> {
-  const [members, dna, crew, requester] = await Promise.all([
+  opts: { radiusMetersOverride?: number | null } = {},
+): Promise<MatchOption[]> {
+  const [members, dna] = await Promise.all([
     prisma.crewMember.findMany({
       where: { crewId, status: 'ACTIVE' },
-      include: { user: { include: { tasteProfile: true } } },
+      include: { user: { include: { tasteProfile: true, profile: true } } },
     }),
     prisma.crewDNA.findUnique({ where: { crewId } }),
-    prisma.crew.findUnique({ where: { id: crewId }, select: { defaultCity: true } }),
-    prisma.user.findUnique({ where: { id: requestedByUserId }, select: { profile: { select: { homeCity: true } } } }),
   ]);
-
-  // Self-heals an unseeded city on first use (see ensureInventory's own comment) — the Crew's
-  // own city if set, else whoever asked's home city, else a genuinely UK-central fallback
-  // (never a hardcoded London assumption — see docs/DECISIONS.md#uk-wide-location).
-  await ensureInventory(crew?.defaultCity ?? requester?.profile?.homeCity ?? UK_FALLBACK_CENTER.name);
 
   const userIds = members.map((m) => m.userId);
   const tasteProfiles = members
     .map((m) => m.user.tasteProfile)
     .filter((tp): tp is TasteProfile => Boolean(tp));
+  // Never expose a member's precise home coordinates to the Crew (see docs/DECISIONS.md#uk-
+  // wide-location) — this stays server-side, used only to compute a distance, never returned.
+  const memberCoords: { homeLat: number; homeLng: number }[] = [];
+  for (const m of members) {
+    const p = m.user.profile;
+    if (p && p.homeLat !== null && p.homeLng !== null) {
+      memberCoords.push({ homeLat: p.homeLat, homeLng: p.homeLng });
+    }
+  }
 
   const windowStart = new Date();
   const windowEnd = new Date();
@@ -96,6 +136,9 @@ export async function findUsSomething(
 
   const medianBudget = medianOf(tasteProfiles.map((tp) => (tp.budgetMinMinor + tp.budgetMaxMinor) / 2));
   const dnaTopCategories = new Set((dna?.topCategories as string[] | undefined) ?? []);
+  const radiusMeters = opts.radiusMetersOverride
+    ?? (medianOf(tasteProfiles.map((tp) => tp.travelRadiusMeters).filter((r) => r > 0)) || DEFAULT_RADIUS_METERS);
+  const radiusMiles = radiusMeters / 1609.34;
 
   const scored: MatchOption[] = [];
   for (const experience of candidates) {
@@ -127,6 +170,27 @@ export async function findUsSomething(
       }
     }
 
+    // Distance — averaged across whichever members have a home location set (never fabricated
+    // for the rest); scored here as a soft input, hard-filtered separately by the automatic
+    // recommendation engine via `withinRadius`. See docs/DECISIONS.md#crew-auto-recommendations.
+    let withinRadius: boolean | null = null;
+    if (experience.venue && memberCoords.length > 0) {
+      const distances = memberCoords.map((c) => haversineMiles(c.homeLat, c.homeLng, experience.venue!.latitude, experience.venue!.longitude));
+      const avgMiles = distances.reduce((a, b) => a + b, 0) / distances.length;
+      withinRadius = avgMiles <= radiusMiles;
+      if (avgMiles <= radiusMiles) {
+        // Closer scores higher, capped at 15 — a tiebreaker among in-radius options, not a
+        // dominant factor (a great match slightly further is still worth surfacing).
+        score += Math.max(0, 15 - (avgMiles / radiusMiles) * 15);
+        const roundedMiles = Math.round(avgMiles);
+        reasons.push({ code: 'nearby', label: roundedMiles <= 1 ? 'Under a mile from your area' : `${roundedMiles} miles from your area` });
+      } else if (avgMiles <= radiusMiles * 1.5) {
+        score -= 5; // a bit over — still shown to a member browsing manually, soft penalty only
+      } else {
+        score -= 15;
+      }
+    }
+
     const availability = await getMemberAvailability(
       userIds,
       experience.startsAt,
@@ -148,19 +212,46 @@ export async function findUsSomething(
       reasons,
       availableMemberCount: availableCount,
       totalMemberCount: userIds.length,
+      withinRadius,
     });
   }
 
   scored.sort((a, b) => b.matchScore - a.matchScore);
+  return scored;
+}
+
+/**
+ * The signature "Find us something" interaction — runs the shared scorer, persists the result
+ * for explainability/audit (brief §13 Intent Graph), and returns the top 3.
+ */
+export async function findUsSomething(
+  crewId: string,
+  requestedByUserId: string,
+): Promise<{ recommendationId: string; options: MatchOption[] }> {
+  const city = await resolveCrewCity(crewId, requestedByUserId);
+  // Self-heals an unseeded city on first use — see ensureInventory's own comment.
+  await ensureInventory(city);
+
+  const scored = await scoreExperiencesForCrew(crewId);
   const reranked = await identityRanker.rerank(scored.slice(0, 10), { crewId });
   const top = reranked.slice(0, RESULT_COUNT);
+
+  const [memberCount, dna, tasteProfiles] = await Promise.all([
+    prisma.crewMember.count({ where: { crewId, status: 'ACTIVE' } }),
+    prisma.crewDNA.findUnique({ where: { crewId } }),
+    prisma.tasteProfile.findMany({ where: { user: { crewMemberships: { some: { crewId, status: 'ACTIVE' } } } } }),
+  ]);
+  const medianBudget = medianOf(tasteProfiles.map((tp) => (tp.budgetMinMinor + tp.budgetMaxMinor) / 2));
+  const windowStart = new Date();
+  const windowEnd = new Date();
+  windowEnd.setDate(windowEnd.getDate() + CANDIDATE_WINDOW_DAYS);
 
   const recommendation = await prisma.planRecommendation.create({
     data: {
       crewId,
       requestedByUserId,
       inputSnapshot: {
-        memberCount: userIds.length,
+        memberCount,
         medianBudgetMinor: medianBudget,
         dnaConfidence: dna?.confidence ?? 'LOW',
         windowStart: windowStart.toISOString(),

@@ -262,6 +262,9 @@ model Crew {
   plans    Plan[]
   messages CrewMessage[]
 
+  recommendationSettings CrewRecommendationSettings?
+  recommendations        CrewRecommendation[]
+
   @@index([createdById])
 }
 
@@ -347,13 +350,13 @@ model CrewMessage {
 /// conversational object, not a separate feature bolted next to chat. See
 /// docs/DECISIONS.md#decision-objects.
 model MessagePoll {
-  id        String   @id @default(uuid())
-  messageId String   @unique
+  id        String      @id @default(uuid())
+  messageId String      @unique
   message   CrewMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
   question  String
   options   Json // string[]
-  kind      PollKind @default(GENERAL)
-  createdAt DateTime @default(now())
+  kind      PollKind    @default(GENERAL)
+  createdAt DateTime    @default(now())
 
   votes MessagePollVote[]
 }
@@ -511,6 +514,7 @@ model Experience {
   listings                  ProviderListing[]
   planRecommendationOptions PlanRecommendationOption[]
   plans                     Plan[]
+  crewRecommendations       CrewRecommendation[]
 
   @@index([category, startsAt])
   @@index([qualityScore])
@@ -606,18 +610,19 @@ model Plan {
   // degraded/incomplete Plan, it's the common case for most real plans, which never come from
   // a ticketed inventory. Populated only when experienceId is null; the UI reads whichever pair
   // is present. See docs/DECISIONS.md#manual-plans.
-  manualVenueName String?
-  manualStartsAt  DateTime?
+  manualVenueName  String?
+  manualStartsAt   DateTime?
   createdAt        DateTime                  @default(now())
   updatedAt        DateTime                  @updatedAt
   completedAt      DateTime?
   cancelledAt      DateTime?
 
-  members       PlanMember[]
-  votes         PlanVote[]
-  bookings      Booking[]
-  rewindSignals RewindSignal[]
-  referrals     Referral[]
+  members        PlanMember[]
+  votes          PlanVote[]
+  bookings       Booking[]
+  rewindSignals  RewindSignal[]
+  referrals      Referral[]
+  recommendation CrewRecommendation?
 
   @@index([crewId, status])
 }
@@ -669,6 +674,61 @@ enum VoteValue {
   IN
   MAYBE
   OUT
+}
+
+/// The automatic Crew recommendation system (docs/DECISIONS.md#crew-auto-recommendations) —
+/// Plot proactively finding and delivering things a Crew hasn't asked for yet, distinct from
+/// the member-triggered "Find us something"/"Suggest something" flows above. One settings row
+/// per Crew (self-heals via getOrCreate, same pattern as CrewDNA), plus a full delivery history
+/// so the engine can avoid repeats, respect a weekly cap, and answer "why did Plot suggest this
+/// again" after the fact.
+model CrewRecommendationSettings {
+  id                 String   @id @default(uuid())
+  crewId             String   @unique
+  crew               Crew     @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  enabled            Boolean  @default(true)
+  // A conservative cap, not a target — the scoring engine only delivers when it clears the
+  // confidence threshold, so most crews will see fewer than this most weeks. Never a "keep
+  // trying until something lands" quota.
+  maxPerWeek         Int      @default(2)
+  // Null = derive from the average of members' own TasteProfile.travelRadiusMeters, rather
+  // than forcing every Crew to configure a number before recommendations work at all.
+  travelRadiusMeters Int?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+/// One delivered (or attempted) recommendation. `status` starts at SENT and moves to whichever
+/// lightweight control the Crew tapped — never re-suggested once responded to, and the
+/// experienceId is excluded from all future scoring for this Crew regardless of status (a
+/// duplicate is a duplicate whether it was loved or dismissed).
+model CrewRecommendation {
+  id           String                   @id @default(uuid())
+  crewId       String
+  crew         Crew                     @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  experienceId String
+  experience   Experience               @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  score        Int
+  // A short, human explanation shown right on the card — "Because your Crew likes comedy", not
+  // raw score internals. See services/crewRecommendations.ts#explanationFor.
+  reasonText   String
+  status       CrewRecommendationStatus @default(SENT)
+  planId       String?                  @unique
+  plan         Plan?                    @relation(fields: [planId], references: [id])
+  createdAt    DateTime                 @default(now())
+  respondedAt  DateTime?
+
+  @@index([crewId, createdAt])
+  @@index([crewId, experienceId])
+}
+
+enum CrewRecommendationStatus {
+  SENT
+  MORE_LIKE_THIS
+  NOT_FOR_US
+  TOO_FAR
+  TOO_EXPENSIVE
+  WRONG_VIBE
 }
 
 // ---------------------------------------------------------------------------

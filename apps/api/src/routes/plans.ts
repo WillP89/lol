@@ -17,6 +17,7 @@ import {
 } from '../services/plan';
 import { track } from '../services/analytics';
 import { hasLiveProvider } from '../providers/registry';
+import { prisma } from '../lib/prisma';
 
 export async function planRoutes(app: FastifyInstance): Promise<void> {
   app.post('/crews/:crewId/plans/from-option', async (request, reply) => {
@@ -89,7 +90,15 @@ export async function planRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const pulse = await computePlanPulse(plan.id);
-    return reply.send({ plan, pulse });
+    // Only present when this Plan came from the automatic recommendation engine — the client
+    // uses this to render the "✨ Plot" badge + reason ("Because your Crew likes comedy") and
+    // the lightweight response controls, distinct from a Plan a member shared themselves. See
+    // docs/DECISIONS.md#crew-auto-recommendations.
+    const recommendation = await prisma.crewRecommendation.findUnique({
+      where: { planId: plan.id },
+      select: { id: true, reasonText: true, status: true },
+    });
+    return reply.send({ plan, pulse, recommendation });
   });
 
   // Public — vote without an account (email-only). See services/plan.ts#submitVote.

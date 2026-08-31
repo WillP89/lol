@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../middleware/auth';
-import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getCrewPreviewByInviteCode } from '../services/crew';
+import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getCrewPreviewByInviteCode, isCrewMember } from '../services/crew';
 import { sendCrewMessage, listCrewMessages, toggleReaction, createPoll, votePoll, ChatError } from '../services/chat';
 import { track } from '../services/analytics';
+import { getOrCreateSettings, updateSettings, respondToRecommendation, RecommendationError } from '../services/crewRecommendations';
 
 const CreateCrewSchema = z.object({ name: z.string().min(1).max(60), defaultCity: z.string().optional() });
 const JoinCrewSchema = z.object({ inviteCode: z.string().min(1) });
@@ -163,6 +164,55 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
       if (err instanceof ChatError) {
         const status = err.code === 'not_a_member' ? 403 : err.code === 'not_found' ? 404 : 400;
         return reply.code(status).send({ error: err.code, message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  // The auto-recommendation system's lightweight Crew-level controls (brief: "on/off,
+  // frequency, travel range") — deliberately just these three, not a settings page. See
+  // docs/DECISIONS.md#crew-auto-recommendations.
+  app.get('/crews/:id/recommendation-settings', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+    const settings = await getOrCreateSettings(id);
+    return reply.send({ settings });
+  });
+
+  const UpdateSettingsSchema = z.object({
+    enabled: z.boolean().optional(),
+    maxPerWeek: z.number().int().min(0).max(7).optional(),
+    // Explicit null clears the override (back to per-member-average); undefined leaves it
+    // untouched — the schema can't express "clear vs. don't touch" with .optional() alone.
+    travelRadiusMeters: z.number().int().positive().nullable().optional(),
+  });
+  app.patch('/crews/:id/recommendation-settings', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+    const parsed = UpdateSettingsSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+    const settings = await updateSettings(id, parsed.data);
+    return reply.send({ settings });
+  });
+
+  const RespondSchema = z.object({
+    action: z.enum(['more_like_this', 'not_for_us', 'too_far', 'too_expensive', 'wrong_vibe']),
+  });
+  app.post('/crews/:id/recommendations/:recId/respond', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id, recId } = request.params as { id: string; recId: string };
+    if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+    const parsed = RespondSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
+
+    try {
+      const recommendation = await respondToRecommendation(id, recId, request.user.id, parsed.data.action);
+      return reply.send({ recommendation });
+    } catch (err) {
+      if (err instanceof RecommendationError) {
+        return reply.code(err.code === 'not_found' ? 404 : 400).send({ error: err.code, message: err.message });
       }
       throw err;
     }

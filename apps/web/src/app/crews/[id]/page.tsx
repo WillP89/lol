@@ -102,6 +102,9 @@ interface PlanCardData {
   // card used to only destructure inCount/totalMembers off this and throw the rest away, which
   // is why it read as a flat counter instead of an idea with a life cycle.
   pulse: { inCount: number; maybeCount: number; outCount: number; totalMembers: number; level: number; status: string };
+  // Present only when this Plan came from the automatic Crew recommendation engine, not a
+  // member sharing something themselves — see docs/DECISIONS.md#crew-auto-recommendations.
+  recommendation?: { id: string; reasonText: string; status: string } | null;
 }
 
 interface Plan {
@@ -144,9 +147,35 @@ function formatTime(iso: string) {
 }
 
 const POLL_INTERVAL_MS = 3000;
-const PLAN_ANNOUNCEMENT = /^📍 Sent "(.+)" to the Crew — \/plans\/([a-zA-Z0-9-]+)$/;
+// Two distinct announcement formats land in chat: a member sharing something themselves, and
+// the automatic recommendation engine's own distinct copy (services/plan.ts#
+// createRecommendationPlanForCrew) — deliberately different wording/emoji so a recommendation
+// never reads as if a real person shared it. Both still need to resolve to the same rich
+// EventCard, which is what tripped this up the first time: adding the second format here
+// without teaching the frontend to recognise it left it rendering as a bare text bubble
+// instead of a plan card — caught via a real multi-user Playwright run, not code reading. See
+// docs/DECISIONS.md#crew-auto-recommendations.
+const MEMBER_PLAN_ANNOUNCEMENT = /^📍 Sent "(.+)" to the Crew — \/plans\/([a-zA-Z0-9-]+)$/;
+const RECOMMENDATION_PLAN_ANNOUNCEMENT = /^✨ Plot found something your Crew might like: "(.+)" — \/plans\/([a-zA-Z0-9-]+)$/;
+function matchPlanAnnouncement(body: string): { title: string; slug: string } | null {
+  const memberMatch = body.match(MEMBER_PLAN_ANNOUNCEMENT);
+  if (memberMatch) return { title: memberMatch[1], slug: memberMatch[2] };
+  const recMatch = body.match(RECOMMENDATION_PLAN_ANNOUNCEMENT);
+  if (recMatch) return { title: recMatch[1], slug: recMatch[2] };
+  return null;
+}
 
 const LOCKABLE_STATUSES = new Set(['SHARED', 'GATHERING_INTEREST', 'LIKELY', 'READY']);
+
+// The auto-recommendation system's travel-range chips (brief: "Nearby/25mi/50mi/Worth
+// travelling", not a slider) — metres, since that's what the API stores; miles is a UK-
+// convention display detail only. See docs/DECISIONS.md#crew-auto-recommendations.
+const RADIUS_CHIPS: { label: string; meters: number }[] = [
+  { label: 'Nearby', meters: 8047 }, // ~5 miles
+  { label: 'Within 25mi', meters: 40225 },
+  { label: 'Within 50mi', meters: 80450 },
+  { label: 'Worth travelling', meters: 160934 }, // ~100 miles
+];
 
 /** A status → what-to-say map for the shared-idea life cycle (services/plan.ts#derivePulseStatus).
  * The point: the SAME card should not read identically at every stage — "Robin shared this" is a
@@ -167,7 +196,7 @@ function planStageCopy(status: string, pulse: PlanCardData['pulse'], proposerNam
  * open Plan gets its own one-tap "Lock it in" right here — the payoff moment shouldn't require
  * navigating away from the conversation it happened in. */
 function EventCard({
-  data, members, me, onLock, locking, justLocked, onVote, onExpandVoters,
+  data, members, me, onLock, locking, justLocked, onVote, onExpandVoters, onRespondRecommendation,
 }: {
   data: PlanCardData;
   members: MemberLite[];
@@ -177,12 +206,18 @@ function EventCard({
   justLocked: boolean;
   onVote: (planId: string, vote: 'in' | 'maybe' | 'out') => void;
   onExpandVoters: OpenVoterSheet;
+  onRespondRecommendation: (recommendationId: string) => void;
 }) {
   const exp = data.plan.experience;
   const lockable = LOCKABLE_STATUSES.has(data.plan.status);
   const locked = data.plan.status === 'LOCKED' || data.plan.status === 'BOOKED' || justLocked;
   const proposer = members.find((m) => m.user.id === data.plan.proposedByUserId)?.user;
-  const proposerName = proposer ? displayNameOf(proposer.displayName, proposer.email).split(' ')[0] : 'Someone';
+  // A recommendation's proposer is the Plot system user, which is deliberately never a
+  // CrewMember (see docs/DECISIONS.md#crew-auto-recommendations) — `members.find` correctly
+  // finds nothing, so this reads "Plot shared this" rather than the generic "Someone" fallback,
+  // which is itself part of what makes an automatic recommendation distinguishable from a real
+  // person's share without a separate disclaimer.
+  const proposerName = data.recommendation ? 'Plot' : proposer ? displayNameOf(proposer.displayName, proposer.email).split(' ')[0] : 'Someone';
   const inVoterIds = data.plan.votes.filter((v) => v.vote === 'IN').map((v) => v.userId);
   const maybeVoterIds = data.plan.votes.filter((v) => v.vote === 'MAYBE').map((v) => v.userId);
   const outVoterIds = data.plan.votes.filter((v) => v.vote === 'OUT').map((v) => v.userId);
@@ -202,12 +237,24 @@ function EventCard({
           )}
         </div>
         <div style={{ padding: '12px 14px 8px' }}>
+          {/* The distinguishable "this is Plot, not a person" marker — brief: unprompted
+              delivery must read as native to the conversation but never pretend to be a human
+              share. A small eyebrow badge, not a disclaimer banner. */}
+          {data.recommendation && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--v2-brand)', background: 'rgba(255,47,126,0.1)', padding: '3px 8px', borderRadius: 100, marginBottom: 8 }}>
+              <span>✨</span><span>Plot</span>
+            </div>
+          )}
           <div className="v2-display" style={{ fontSize: 15, marginBottom: 4 }}>{data.plan.title}</div>
           {exp && (
             <div className="v2-muted" style={{ fontSize: 12, marginBottom: 8 }}>
               {exp.venue?.name ?? 'Venue TBC'} · {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
               {formatPriceFrom(exp.priceMinMinor) && ` · ${formatPriceFrom(exp.priceMinMinor)}`}
             </div>
+          )}
+          {/* A small, honest, non-creepy explanation — never the raw score. */}
+          {data.recommendation && (
+            <div className="v2-dim" style={{ fontSize: 11.5, marginBottom: 8 }}>{data.recommendation.reasonText}</div>
           )}
           {/* The actual life-cycle line — different words at each stage, not the same "X/Y in"
               counter throughout. */}
@@ -218,6 +265,24 @@ function EventCard({
           </div>
         </div>
       </Link>
+      {/* Lightweight per-recommendation feedback — brief: "More like this/Not for us/Too
+          far/Too expensive/Wrong vibe". A sibling of the Link (see the voter-breakdown comment
+          above for why), and only while unanswered — once responded, a small acknowledgment
+          replaces it rather than the buttons lingering meaninglessly. */}
+      {data.recommendation && (
+        data.recommendation.status === 'SENT' ? (
+          <button
+            type="button"
+            onClick={() => onRespondRecommendation(data.recommendation!.id)}
+            className="v2-tap-feedback"
+            style={{ display: 'block', width: '100%', padding: '0 14px 10px', margin: 0, border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--v2-ink-dim)', textDecoration: 'underline', textUnderlineOffset: 2 }}
+          >
+            Not quite right?
+          </button>
+        ) : (
+          <div className="v2-dim" style={{ padding: '0 14px 10px', fontSize: 11 }}>Thanks — noted for next time.</div>
+        )
+      )}
       {/* Who's actually in, converging visibly — and the real "who selected each state" fix: a
           bare "3 in" was never enough detail once the group grows past a couple of people.
           Tapping breaks down all three buckets (In/Maybe/Can't) by name, live-updating as votes
@@ -578,12 +643,20 @@ export default function CrewPage() {
   // snapshot — see VoterSheetSource's own comment for why that's what makes it live-update.
   const [voterSheetSource, setVoterSheetSource] = useState<VoterSheetSource | null>(null);
   const openVoterSheet: OpenVoterSheet = useCallback((source) => setVoterSheetSource(source), []);
+  // Which recommendation's lightweight feedback sheet ("More like this" / "Not for us" / ...)
+  // is currently open — see docs/DECISIONS.md#crew-auto-recommendations.
+  const [respondingRecId, setRespondingRecId] = useState<string | null>(null);
+  const [responding, setResponding] = useState(false);
   // The "Lock it in" celebration — see LockCelebration below and globals.css's .v2-lock-dot.
   const [celebrating, setCelebrating] = useState(false);
   const celebrate = useCallback(() => {
     setCelebrating(true);
     setTimeout(() => setCelebrating(false), 750);
   }, []);
+  // The auto-recommendation system's Crew-level controls (on/off, frequency, travel range) -
+  // fetched lazily the first time the Crew info sheet opens.
+  const [recSettings, setRecSettings] = useState<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null } | null>(null);
+  const [savingRecSettings, setSavingRecSettings] = useState(false);
 
   useEffect(() => {
     api.get<{ crew: CrewDetail }>(`/crews/${crewId}`).then((res) => setCrew(res.crew)).catch((err) => setError(err instanceof ApiError ? err.message : 'Could not load Crew.'));
@@ -627,9 +700,9 @@ export default function CrewPage() {
   useEffect(() => {
     if (!messages) return;
     for (const m of messages) {
-      const match = m.body.match(PLAN_ANNOUNCEMENT);
+      const match = matchPlanAnnouncement(m.body);
       if (!match) continue;
-      const slug = match[2];
+      const slug = match.slug;
       if (planCards[slug]) continue;
       setPlanCards((prev) => ({ ...prev, [slug]: 'loading' }));
       api.get<PlanCardData>(`/plans/public/${slug}`).then((data) => setPlanCards((prev) => ({ ...prev, [slug]: data }))).catch(() => setPlanCards((prev) => ({ ...prev, [slug]: 'error' })));
@@ -684,6 +757,32 @@ export default function CrewPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Vote did not go through.');
       setPlanCards((prev) => ({ ...prev, [slug]: data })); // revert
+    }
+  }
+
+  /** One of the lightweight recommendation-feedback actions — see docs/DECISIONS.md#crew-auto-
+   * recommendations. Finds the card by recommendation id (not plan id — the caller only has
+   * the recommendation's own id), marks it responded optimistically, then calls the real
+   * endpoint. */
+  async function respondToRecommendation(action: 'more_like_this' | 'not_for_us' | 'too_far' | 'too_expensive' | 'wrong_vibe') {
+    const recId = respondingRecId;
+    if (!recId) return;
+    const entry = Object.entries(planCards).find(([, v]) => v !== 'loading' && v !== 'error' && v.recommendation?.id === recId);
+    setResponding(true);
+    setRespondingRecId(null);
+    if (entry) {
+      const [slug, data] = entry as [string, PlanCardData];
+      const status = { more_like_this: 'MORE_LIKE_THIS', not_for_us: 'NOT_FOR_US', too_far: 'TOO_FAR', too_expensive: 'TOO_EXPENSIVE', wrong_vibe: 'WRONG_VIBE' }[action];
+      setPlanCards((prev) => ({ ...prev, [slug]: { ...data, recommendation: { ...data.recommendation!, status } } }));
+    }
+    try {
+      await api.post(`/crews/${crewId}/recommendations/${recId}/respond`, { action });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not send that.');
+      // Not reverted — a failed feedback POST isn't worth resurrecting the buttons over; the
+      // worst case is a slightly stale local "responded" state that a refetch corrects.
+    } finally {
+      setResponding(false);
     }
   }
 
@@ -967,6 +1066,32 @@ export default function CrewPage() {
     const res = await api.post<{ inviteUrl: string }>(`/crews/${crewId}/invites`, { channel: 'link' });
     setInviteUrl(res.inviteUrl);
   }
+
+  /** Fetched lazily the first time the Crew info sheet opens, not on every Crew page load -
+   * these settings are read far less often than they're irrelevant. */
+  async function loadRecSettings() {
+    if (recSettings) return;
+    try {
+      const res = await api.get<{ settings: { enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null } }>(`/crews/${crewId}/recommendation-settings`);
+      setRecSettings(res.settings);
+    } catch {
+      // Non-critical - the sheet just won't show this section if it fails.
+    }
+  }
+  async function patchRecSettings(patch: Partial<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null }>) {
+    if (!recSettings) return;
+    const prev = recSettings;
+    setRecSettings({ ...prev, ...patch });
+    setSavingRecSettings(true);
+    try {
+      const res = await api.patch<{ settings: typeof prev }>(`/crews/${crewId}/recommendation-settings`, patch);
+      setRecSettings(res.settings);
+    } catch {
+      setRecSettings(prev); // revert
+    } finally {
+      setSavingRecSettings(false);
+    }
+  }
   async function copyInvite() {
     if (!inviteUrl) return;
     try {
@@ -1068,7 +1193,7 @@ export default function CrewPage() {
             Crew info), that's the whole chrome. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '18px 20px 10px' }}>
           <Link href="/crews" aria-label="Back to Crews" style={{ fontSize: 20, color: 'var(--v2-ink-muted)', flexShrink: 0 }}>←</Link>
-          <button onClick={() => setInfoOpen(true)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+          <button onClick={() => { setInfoOpen(true); loadRecSettings(); }} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
             <div className="stack">
               {crew.members.slice(0, 4).map((m) => (
                 <div key={m.user.id} style={{ width: 30, height: 30, borderRadius: '50%', marginLeft: -8, fontSize: 11, fontWeight: 800, color: '#fff', background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--v2-bg)' }}>
@@ -1158,8 +1283,8 @@ export default function CrewPage() {
             )}
             {!solo && messages?.map((m, i) => {
               const mine = m.author.id === me;
-              const planMatch = m.body.match(PLAN_ANNOUNCEMENT);
-              const cardData = planMatch ? planCards[planMatch[2]] : undefined;
+              const planMatch = matchPlanAnnouncement(m.body);
+              const cardData = planMatch ? planCards[planMatch.slug] : undefined;
               const prev = i > 0 ? messages[i - 1] : null;
               const grouped = prev !== null && prev.author.id === m.author.id;
               const pending = pendingMessageIds.has(m.id);
@@ -1199,6 +1324,7 @@ export default function CrewPage() {
                         justLocked={justLockedPlanIds.has(cardData.plan.id)}
                         onVote={votePlanCard}
                         onExpandVoters={openVoterSheet}
+                        onRespondRecommendation={(recId) => setRespondingRecId(recId)}
                       />
                     ) : planMatch && cardData === 'loading' ? (
                       <div style={{ width: 260, height: 120, borderRadius: 16, background: 'var(--v2-bg-deep)' }} />
@@ -1517,6 +1643,57 @@ export default function CrewPage() {
           </div>
         )}
 
+        {recSettings && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Plot recommendations</div>
+              <button
+                onClick={() => patchRecSettings({ enabled: !recSettings.enabled })}
+                disabled={savingRecSettings}
+                className="v2-tap-feedback"
+                style={{ border: 'none', background: recSettings.enabled ? 'var(--v2-green)' : 'var(--v2-bg-deep)', color: recSettings.enabled ? '#fff' : 'var(--v2-ink-muted)', fontSize: 11.5, fontWeight: 800, padding: '5px 12px', borderRadius: 100, cursor: 'pointer' }}
+              >
+                {recSettings.enabled ? 'On' : 'Off'}
+              </button>
+            </div>
+            <p className="v2-muted" style={{ fontSize: 12, marginBottom: recSettings.enabled ? 12 : 0, lineHeight: 1.5 }}>
+              Plot occasionally finds something your Crew might like and shares it here — never more than a couple of times a week.
+            </p>
+            {recSettings.enabled && (
+              <>
+                <div className="v2-dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>How often</div>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+                  {[1, 2, 3].map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => patchRecSettings({ maxPerWeek: n })}
+                      disabled={savingRecSettings}
+                      className="v2-tap-feedback"
+                      style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: recSettings.maxPerWeek === n ? 'var(--v2-ink)' : 'var(--v2-bg-deep)', color: recSettings.maxPerWeek === n ? '#fff' : 'var(--v2-ink-muted)' }}
+                    >
+                      {n}/week
+                    </button>
+                  ))}
+                </div>
+                <div className="v2-dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>How far</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {RADIUS_CHIPS.map((chip) => (
+                    <button
+                      key={chip.label}
+                      onClick={() => patchRecSettings({ travelRadiusMeters: chip.meters })}
+                      disabled={savingRecSettings}
+                      className="v2-tap-feedback"
+                      style={{ padding: '7px 12px', borderRadius: 100, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: recSettings.travelRadiusMeters === chip.meters ? 'var(--v2-ink)' : 'var(--v2-bg-deep)', color: recSettings.travelRadiusMeters === chip.meters ? '#fff' : 'var(--v2-ink-muted)' }}
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         <div className="v2-eyebrow" style={{ marginBottom: 6 }}>Invite</div>
         {inviteUrl ? (
           <button onClick={copyInvite} className="v2-btn v2-btn-ghost" style={{ justifyContent: 'space-between', textAlign: 'left' }}>
@@ -1565,6 +1742,31 @@ export default function CrewPage() {
             </div>
           </div>
         )}
+      </BottomSheet>
+
+      {/* Lightweight recommendation feedback — brief's exact five controls. Deliberately a
+          plain list, not a form: one tap, done. */}
+      <BottomSheet open={respondingRecId !== null} onClose={() => setRespondingRecId(null)}>
+        <div className="v2-eyebrow" style={{ marginBottom: 14 }}>What&rsquo;s wrong with this one?</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {([
+            ['more_like_this', 'More like this'],
+            ['not_for_us', 'Not for us'],
+            ['too_far', 'Too far'],
+            ['too_expensive', 'Too expensive'],
+            ['wrong_vibe', 'Wrong vibe'],
+          ] as const).map(([action, label]) => (
+            <button
+              key={action}
+              onClick={() => respondToRecommendation(action)}
+              disabled={responding}
+              className="v2-card v2-tap-feedback"
+              style={{ padding: '13px 16px', border: 'none', textAlign: 'left', cursor: 'pointer', width: '100%', fontWeight: 700, fontSize: 14 }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </BottomSheet>
 
       {celebrating && <LockCelebration />}

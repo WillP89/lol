@@ -137,6 +137,22 @@ export async function sendCrewMessage(crewId: string, authorId: string, body: st
 }
 
 /**
+ * Posts into the conversation on behalf of Plot itself — the automatic Crew recommendation
+ * engine's delivery mechanism (services/crewRecommendations.ts), never called from a route
+ * handler on a real user's behalf. Deliberately skips the `isCrewMember` gate `sendCrewMessage`
+ * enforces: the system author is never a CrewMember (so it never appears in member lists, vote
+ * pulses, or "who's in the Crew" — see docs/DECISIONS.md#crew-auto-recommendations), which
+ * `sendCrewMessage`'s membership check would otherwise correctly reject.
+ */
+export async function sendSystemMessage(crewId: string, systemUserId: string, body: string) {
+  const message = await prisma.crewMessage.create({
+    data: { crewId, authorId: systemUserId, body: body.trim() },
+    select: messageAuthorSelect,
+  });
+  return withReactionSummary(message, systemUserId);
+}
+
+/**
  * `afterId` supports cheap polling: the web client passes the id of the last message it
  * already has and only gets back what's new, instead of re-fetching and re-rendering the
  * whole history every poll tick.

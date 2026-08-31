@@ -49,6 +49,11 @@ export const AnalyticsEvents = {
   SuggestionsSentToChat: 'SuggestionsSentToChat',
   ItemViewed: 'ItemViewed',
   ItemSharedToCrew: 'ItemSharedToCrew',
+  // The automatic Crew recommendation system (docs/DECISIONS.md#crew-auto-recommendations) —
+  // distinct from RecommendationShown/Dismissed above, which are about the manual "Find us
+  // something" flow's own PlanRecommendation model. These are unprompted deliveries.
+  CrewRecommendationDelivered: 'CrewRecommendationDelivered',
+  CrewRecommendationResponded: 'CrewRecommendationResponded',
 
   // Agree (Plan / consensus)
   SentToCrew: 'SentToCrew',
@@ -111,8 +116,15 @@ export interface AnalyticsEventPayloads {
   SuggestionsSentToChat: { crewId: string; count: number };
   ItemViewed: { experienceId: string; source: 'explore' | 'home' | 'chat' };
   ItemSharedToCrew: { crewId: string; experienceId: string };
+  CrewRecommendationDelivered: { crewId: string; experienceId: string; score: number };
+  CrewRecommendationResponded: {
+    crewId: string;
+    recommendationId: string;
+    action: 'more_like_this' | 'not_for_us' | 'too_far' | 'too_expensive' | 'wrong_vibe';
+    userId: string;
+  };
 
-  SentToCrew: { crewId: string; planId: string; source: 'find_us_something' | 'individual_send' };
+  SentToCrew: { crewId: string; planId: string; source: 'find_us_something' | 'individual_send' | 'recommendation' };
   PlanCardViewed: { planId: string; viewerUserId?: string; authenticated: boolean };
   PlanCardOpenedExternal: { planId: string; referrer?: string };
   VoteSubmitted: { planId: string; userId: string; vote: 'in' | 'maybe' | 'out' };

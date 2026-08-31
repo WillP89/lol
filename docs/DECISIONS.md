@@ -1295,3 +1295,94 @@ after signup + onboarding, the same invite context survives (via `next`) back to
 shows "Joined {name}" with no emoji, and lands in the real Crew; a separate non-invite signup
 lands on Home showing "Start a Crew" and "Worth a look nearby" with real Stafford-resolved
 suggestions.
+
+#### crew-auto-recommendations — THE MOST IMPORTANT NEW FEATURE (pilot brief's own words)
+
+Plot proactively finding and delivering genuinely relevant things into a Crew's conversation,
+unprompted — not a passive recommendations carousel a member has to go looking at. Deliberately
+built as a real, explainable, deterministic ranking (no ML, no fabricated "insight"), reusing
+the exact same scorer that already powers the member-triggered "Find us something"/"Suggest
+something" flows (`scoreExperiencesForCrew`, extracted from the old `findUsSomething` — one
+scorer, three call sites, so a scoring fix applies everywhere at once) — a real Crew preference
+profile derived entirely from existing data (TasteProfile category affinity, home location,
+budget, availability), not a new 40-question setup.
+
+**Delivery mechanism.** `generateRecommendationForCrew` gates on, in order: `enabled` (Crew-
+level, self-heals via `getOrCreateSettings`, same upsert pattern as CrewDNA), a weekly cap
+(`maxPerWeek`, default 2 — a ceiling, not a quota: most weeks most Crews see nothing, because
+most weeks nothing clears the confidence floor), never-repeat (excludes any experience ever
+recommended to this Crew before regardless of response, and anything a member has already
+shared themselves), a real taste signal required (see the real bug below), a hard travel-radius
+filter (unlike the manual flows, which only soft-score distance — a member actively browsing can
+see something further out; Plot pushing it unprompted captioned "Because your Crew likes X"
+cannot, if X had nothing to do with why it was picked), and a confidence floor
+(`MIN_RECOMMENDATION_SCORE = 55`). `runRecommendationSweep` runs this across every Crew, wired
+to a 6-hour `setInterval` in server.ts (skipped in tests) and exposed via
+`POST /admin/recommendations/sweep` (optionally scoped to one Crew) for ops and for deterministic
+pilot testing.
+
+**Delivered as a real Plan, through a system user, never disguised as a person.** A dedicated
+`Plot` User row (self-heals via `getPlotSystemUserId`, upserted by a fixed internal email) is
+never added as a CrewMember anywhere — it can't appear in member lists, vote pulses, or "who's
+in this Crew". `createRecommendationPlanForCrew` (services/plan.ts) posts through a new
+`sendSystemMessage` (services/chat.ts) that deliberately skips `sendCrewMessage`'s membership
+check, with distinct copy and emoji (`✨ Plot found something your Crew might like: "X" —
+/plans/slug`, vs a member's own `📍 Sent "X" to the Crew`) — different enough that
+`EventCard`'s life-cycle line reads "Plot shared this — who's in?" rather than a fabricated
+person's name. Because it's a real Plan, the whole existing decision loop (react/vote/poll/
+lock/book) applies to a recommendation with zero special-casing on the frontend beyond the
+badge/reason/feedback controls.
+
+**Two real bugs found via live multi-user Playwright testing, not code-reading:**
+
+1. The frontend's `PLAN_ANNOUNCEMENT` regex only matched the member-shared announcement format
+   — introducing the recommendation engine's own distinct copy (deliberately different, per the
+   paragraph above) meant the frontend never recognised it as a plan announcement at all, so it
+   rendered as a bare text bubble instead of the rich EventCard. Fixed with a
+   `matchPlanAnnouncement` helper trying both formats. A real product regression, invisible to
+   a backend-only test — only caught because the verification actually looked at the rendered
+   page, not just the API response.
+2. `POST /admin/experiences/manual` (the existing manual-curation supply path — no self-serve
+   API venues, see docs/providers/restaurants.md) had never actually worked: it spread a
+   `CanonicalEvent`-shaped object (needed for `buildCanonicalKey`/`computeQualityScore`, with
+   fields like `venueName`/`latitude`/`longitude` that only exist on `Venue`) straight into
+   `prisma.experience.upsert`, which has no such columns — a Prisma validation error on every
+   call. Found the first time this pass's own tests exercised the endpoint; fixed by building a
+   separate, `Experience`-column-only object for the actual write.
+
+**A real personalisation gap, also found via testing, not assumed:** a Crew with zero comedy
+taste still scored a comedy-blind sport event 57/100 purely on budget-fit + proximity +
+availability — enough to clear the confidence floor and go out captioned "Because your Crew
+likes comedy", which would have been a lie. Fixed by requiring an actual taste-signal reason
+(`category_affinity` or `crew_dna_match`) as a hard gate for automatic delivery specifically —
+a member browsing "Find us something" can reasonably be shown a good-fit item regardless; Plot
+pushing it unprompted with a taste-based explanation cannot.
+
+**Explanations** (`explanationFor`) pick the single most relevant real reason the scorer already
+produced, in a fixed priority order — "Because your Crew likes X" first, then distance, then
+budget, then availability — never a fabricated insight, never the raw score.
+
+**Lightweight controls**, exactly the five the brief named (More like this / Not for us / Too
+far / Too expensive / Wrong vibe), live in a small bottom sheet triggered by "Not quite right?"
+on the card; once answered, the card shows a plain "Thanks — noted for next time" instead of the
+buttons. Crew-level controls (on/off, 1–3/week, Nearby/25mi/50mi/Worth travelling) live in the
+existing Crew info sheet, fetched lazily on first open.
+
+**Verified live**, not just via the backend integration test (`test/crewRecommendations.test.ts`,
+6 cases: personalisation actually differs between a comedy/live-music/restaurant-taste Crew and
+a sport/day-activity/fitness-taste Crew, no-repeat across sweeps, the lightweight response
+endpoint, an IDOR check, the enabled/off gate): two full Crews, four real users, real Stafford
+inventory, `POST /admin/recommendations/sweep` per Crew, then the actual rendered UI — the "✨
+PLOT" badge, the real reason text, the correct distinct experience per Crew, the 5-option
+feedback sheet actually responding, the real IN/MAYBE/CAN'T-MAKE-IT vote buttons and Lock It In
+on the same card, and the Crew-level settings section in the info sheet.
+
+**Known v1 boundaries, left deliberately rather than half-built:** "More like this" is tracked
+(status + analytics event) but does not yet feed back into future scoring — a real feedback
+loop is a reasonable next iteration, not faked here as an "insight" the engine doesn't actually
+have. The standalone public Plan Card page (`/plans/[slug]`) does not yet show the Plot badge/
+reason/controls — only the Crew chat surface does; the brief's emphasis is squarely on delivery
+*into the conversation*, and the public page remains fully functional (vote, lock, book) either
+way. Travel radius defaults to the average of members' own TasteProfile radius until a Crew
+explicitly picks a chip — there's no fifth "auto" chip shown as selected for that state, which
+is honest (nothing was explicitly chosen) rather than a UI a Crew never asked for.

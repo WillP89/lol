@@ -7,6 +7,7 @@ import { syncAllProviders } from '../services/inventorySync';
 import { buildCanonicalKey } from '../services/entityResolution';
 import { computeQualityScore } from '../services/qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
+import { runRecommendationSweep, generateRecommendationForCrew } from '../services/crewRecommendations';
 
 /**
  * Internal operator tooling (brief §29 admin console, §64 operating dashboard). Gated by a
@@ -103,10 +104,35 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const canonicalKey = buildCanonicalKey(canonicalInput);
     const qualityScore = computeQualityScore(canonicalInput, new Date());
 
+    // Real bug found via testing this endpoint for the first time (not assumed): `canonicalInput`
+    // above is shaped for `buildCanonicalKey`/`computeQualityScore` (brief's CanonicalEvent
+    // shape — venueName/latitude/longitude/externalUrl/commissionEligible included), but none of
+    // those fields exist on the `Experience` model itself (venue location lives on `Venue`,
+    // provider/booking-link details on `ProviderListing`) — spreading it straight into
+    // `experience.upsert` therefore threw a Prisma validation error on every call, silently
+    // making this entire manual-curation endpoint (the "no self-serve API" supply path — see
+    // docs/providers/restaurants.md) unusable. Only the fields that are real Experience columns
+    // go into the actual write.
+    const experienceData = {
+      name: canonicalInput.name,
+      description: canonicalInput.description,
+      category: canonicalInput.category,
+      subcategories: canonicalInput.subcategories,
+      startsAt: canonicalInput.startsAt,
+      endsAt: canonicalInput.endsAt,
+      timezone: canonicalInput.timezone,
+      priceMinMinor: canonicalInput.priceMinMinor,
+      priceMaxMinor: canonicalInput.priceMaxMinor,
+      currency: canonicalInput.currency,
+      bookingStatus: 'AVAILABLE' as const,
+      imageUrl: canonicalInput.imageUrl,
+      tags: canonicalInput.tags,
+    };
+
     const experience = await prisma.experience.upsert({
       where: { canonicalKey },
-      update: { ...canonicalInput, venueId: venue.id, qualityScore },
-      create: { ...canonicalInput, canonicalKey, venueId: venue.id, qualityScore },
+      update: { ...experienceData, venueId: venue.id, qualityScore },
+      create: { ...experienceData, canonicalKey, venueId: venue.id, qualityScore },
     });
 
     await prisma.providerListing.upsert({
@@ -154,5 +180,25 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/feedback', async (_request, reply) => {
     const feedback = await prisma.feedbackSignal.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
     return reply.send({ feedback });
+  });
+
+  /**
+   * The automatic Crew recommendation system's periodic delivery job, triggerable on demand —
+   * real operation runs this on a timer (see server.ts), but the pilot brief specifically asks
+   * to "run recommendation generation" for a set of test Crews and verify the outputs, which
+   * needs a way to fire it deterministically rather than waiting for the timer. Same admin-key
+   * gate as every other route in this file. See docs/DECISIONS.md#crew-auto-recommendations.
+   */
+  app.post('/recommendations/sweep', async (request, reply) => {
+    const BodySchema = z.object({ crewId: z.string().optional() });
+    const parsed = BodySchema.safeParse(request.body ?? {});
+    const crewId = parsed.success ? parsed.data.crewId : undefined;
+
+    if (crewId) {
+      const recommendation = await generateRecommendationForCrew(crewId);
+      return reply.send({ crewsEvaluated: 1, delivered: recommendation ? 1 : 0, errors: 0, recommendation });
+    }
+    const result = await runRecommendationSweep();
+    return reply.send(result);
   });
 }
