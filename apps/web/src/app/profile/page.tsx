@@ -252,7 +252,7 @@ export default function ProfilePage() {
   const activeTravel = closestBand(TRAVEL_BANDS, 'meters', travelRadiusMeters);
 
   return (
-    <div className="v2">
+    <div className="v2 v2-app-shell">
       <div className="v2-shell-desktop">
         <div className="v2-page v2-page-wide" style={{ paddingTop: 28 }}>
           {/* Identity header — the biggest, most personal thing on the page, not a 56px icon

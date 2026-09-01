@@ -9,7 +9,7 @@ import { IconCompass } from '@/components/icons';
 export default function NotFound() {
   return (
     <div className="v2">
-      <div className="v2-page" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100vh', textAlign: 'center', alignItems: 'center' }}>
+      <div className="v2-page" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100dvh', textAlign: 'center', alignItems: 'center' }}>
         <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 900, letterSpacing: '-0.02em', fontSize: 20, marginBottom: 20 }}>Plot</div>
         <IconCompass size={36} style={{ color: 'var(--v2-ink-dim)', marginBottom: 12 }} />
         <h1 className="v2-display" style={{ fontSize: 21, marginBottom: 8 }}>Nothing here.</h1>

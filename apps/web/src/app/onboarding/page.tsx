@@ -101,7 +101,7 @@ function OnboardingWizard() {
   const canAdvance = step === 0 ? name.trim().length > 0 : step === 1 ? place !== null : true;
 
   return (
-    <div className="v2" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+    <div className="v2" style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <div className="v2-page" style={{ paddingTop: 0, paddingBottom: 0 }}>
         <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 900, letterSpacing: '-0.02em', fontSize: 20, marginBottom: 26 }}>Plot</div>
         <div style={{ display: 'flex', gap: 5, marginBottom: 28 }}>
@@ -213,7 +213,7 @@ function OnboardingWizard() {
 
 export default function OnboardingPage() {
   return (
-    <Suspense fallback={<div className="v2" style={{ minHeight: '100vh' }} />}>
+    <Suspense fallback={<div className="v2" style={{ minHeight: '100dvh' }} />}>
       <OnboardingWizard />
     </Suspense>
   );

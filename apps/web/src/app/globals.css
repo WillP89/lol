@@ -145,7 +145,7 @@ body {
   background: var(--v2-bg);
   color: var(--v2-ink);
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  min-height: 100vh;
+  min-height: 100dvh;
   position: relative;
 }
 
@@ -420,6 +420,75 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
 .v2-hoverable { transition: transform 0.15s ease, box-shadow 0.15s ease; }
 .v2-hoverable:active { transform: scale(0.98); }
 
+/* ==========================================================================
+   MOBILE APP SHELL — the one layout primitive every tab-bar page (Home,
+   Crews, Plans, Explore, Profile) opts into via the `v2-app-shell` class
+   on their outer `.v2` div, alongside their existing `.v2-shell-desktop`
+   content wrapper. Crew chat already had its own correct version of this
+   exact pattern (100dvh + one flex column + one internal scroll region) —
+   this generalises it instead of leaving every other page to invent its
+   own viewport math with `position: fixed` + guessed padding.
+
+   Root cause this replaces: those pages used to be plain document-flow
+   (`.v2`'s base `min-height: 100vh`, page grows, body/html scrolls) with
+   `.v2-nav-bottom` pinned via `position: fixed`. `position: fixed`'s
+   containing block is the browser's LAYOUT viewport, which is not the
+   same box as what's actually visible once the address bar is showing —
+   and critically, the two can change size independently of each other as
+   the address bar collapses/expands on scroll, which is exactly what
+   produced the reported "top and bottom don't move right, format goes
+   off" jump: the fixed pill's own position was correct relative to a
+   viewport definition that didn't match what the user could actually see
+   at that instant.
+
+   The fix is architectural, not a bigger padding number: give the page a
+   box sized with `100dvh` (which BY DEFINITION tracks the real visible
+   viewport as chrome shows/hides — that's what dvh is for), make that box
+   the one and only scroll boundary (`overflow: hidden` on the shell,
+   `overflow-y: auto` on its single content child), and anchor the
+   floating nav with `position: absolute` *inside* that box instead of
+   `position: fixed` against the ambiguous true viewport. An absolutely
+   positioned element's containing block is its nearest positioned
+   ancestor — here, the shell itself — so the pill's `bottom: …` is now
+   always measured against the box the user can actually see, not a
+   viewport definition that can silently disagree with it. */
+@media (max-width: 899px) {
+  .v2-app-shell {
+    height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  /* The direct child every one of these pages already renders — its job
+     changes from "just reserve left margin on desktop" to "be the one
+     scroll region" on mobile; the desktop-only name stays (touching five
+     call sites to rename it buys nothing) but this comment is the reason
+     it now also does mobile scroll duty. */
+  .v2-app-shell > .v2-shell-desktop {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
+  .v2-app-shell .v2-nav-bottom { position: absolute; }
+  /* Explore's own floating "Map" toggle and full-screen map overlay were
+     the same `position: fixed` pattern, one level deeper — same fix. */
+  .v2-app-shell .v2-explore-map-toggle,
+  .v2-app-shell .v2-explore-map-overlay { position: absolute; }
+}
+
+/* `BottomSheet` re-declares the bare `.v2` class at its portal root (see
+   its own file-level comment — the portal lives outside every page's own
+   `.v2` tree, so it needs the CSS variables re-established fresh) but is
+   NOT one of the pages above — it has no `.v2-shell-desktop` child and
+   sets its own `position: fixed` deliberately (a modal should cover the
+   true screen). Only `v2-app-shell` pages get the shell treatment, so
+   this guard is normally redundant — it exists only in case a future
+   sheet call site is ever opened from inside a shell page and both
+   classes end up on an ancestor chain; cheap insurance, not dead code. */
+.v2-sheet-root { height: auto !important; overflow: visible !important; }
+
 /* ---- Mobile: icon-only floating pill, no text labels — a small pink dot under the active
    icon carries state instead. Apple-Invites-plain: a solid white pill with a hairline border
    and a soft shadow, not a glass material — the chrome should get out of the way, not perform. */
@@ -555,13 +624,20 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   .v2-explore-card-meta { padding-right: 76px; }
 }
 
+/* `position: fixed` is the fallback (matches the old always-fixed behaviour, e.g. the ~900–999px
+   band where the shell rule below doesn't apply) — the `v2-app-shell` media rule earlier in this
+   file overrides both to `absolute`, anchored to the page's own dvh shell instead of the true
+   browser viewport. See that rule's comment for why. */
+.v2-explore-map-toggle { position: fixed; }
+.v2-explore-map-overlay { position: fixed; }
+
 .v2-explore-split { display: block; }
 .v2-explore-map-pane { display: none; }
 @media (min-width: 1000px) {
   .v2-explore-split {
     display: flex;
     align-items: stretch;
-    height: 100vh;
+    height: 100dvh;
   }
   .v2-explore-col {
     width: 50%;
@@ -835,12 +911,24 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
    behind the thread read as unfinished space, not a place a group actually lives. A soft two-
    colour wash (the Crew's own identity/art pair, the same colours its mark and tile already use
    elsewhere — never a new palette invented for this) replaces the flat white, at low enough
-   opacity that message bubbles stay the highest-contrast thing on screen. */
+   opacity that message bubbles stay the highest-contrast thing on screen.
+
+   `background-repeat: repeat-y` at a fixed 640px tile (this rule's own previous version) was a
+   real, live-confirmed bug: found scrolling an actual multi-screen conversation, where every
+   640px produced a visible horizontal seam — the two corner gradients each fade to transparent
+   well inside their own tile, so the tile SHOULD have repeated invisibly, but any residual
+   sub-pixel colour at the repeat boundary becomes a hard, visible line the moment it's tiled
+   indefinitely rather than painted once. `no-repeat` (this version) paints the whole wash a
+   single time across the full scrollable canvas instead of tiling it — the top-right/bottom-
+   left corners of the CONVERSATION carry the accent, fading toward a plain, unwashed middle for
+   a long thread, which reads as an intentional accent rather than a pattern with a seam in it.
+   `background-attachment: local` is what makes "the full scrollable canvas" the right sizing
+   basis here — same property as before, still what makes the wash scroll with the messages
+   rather than sit fixed behind them. */
 .v2-chat-canvas {
   background-color: var(--v2-bg);
   background-image: var(--v2-chat-wash);
-  background-repeat: repeat-y;
-  background-size: 100% 640px;
+  background-repeat: no-repeat;
   background-attachment: local;
 }
 

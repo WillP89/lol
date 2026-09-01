@@ -71,7 +71,7 @@ export default function JoinCrewPage() {
   }, [code, router]);
 
   return (
-    <div className="v2" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+    <div className="v2" style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <div className="v2-page" style={{ paddingTop: 0, paddingBottom: 0, textAlign: 'center' }}>
         {preview === null && (
           <div style={{ height: 200, borderRadius: 24, background: 'var(--v2-bg-deep)' }} />

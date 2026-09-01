@@ -10,7 +10,7 @@
 export default function GlobalError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
     <div className="v2">
-      <div className="v2-page" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100vh', textAlign: 'center', alignItems: 'center' }}>
+      <div className="v2-page" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100dvh', textAlign: 'center', alignItems: 'center' }}>
         <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 900, letterSpacing: '-0.02em', fontSize: 20, marginBottom: 28 }}>Plot</div>
         <h1 className="v2-display" style={{ fontSize: 21, marginBottom: 8 }}>Something went wrong.</h1>
         <p className="v2-muted" style={{ marginBottom: 22, maxWidth: 260 }}>

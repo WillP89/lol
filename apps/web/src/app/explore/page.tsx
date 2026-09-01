@@ -152,7 +152,15 @@ export default function ExplorePage() {
     if (!experiences) return [];
     const q = query.trim().toLowerCase();
     if (!q) return experiences;
-    return experiences.filter((e) => e.name.toLowerCase().includes(q) || e.venue.name.toLowerCase().includes(q));
+    // Real gap found typing "Comedy" into this box live: it only ever matched the event NAME or
+    // venue name, so a search for a category word came back "Nothing matched that search" even
+    // with genuine comedy nights on screen a moment earlier — the category itself
+    // (`COMEDY`/`LIVE_MUSIC`/…) was never checked. Matching the human-readable form of it too
+    // (underscores to spaces) makes a category search actually work, the way someone typing it
+    // would expect.
+    return experiences.filter(
+      (e) => e.name.toLowerCase().includes(q) || e.venue.name.toLowerCase().includes(q) || e.category.replace(/_/g, ' ').toLowerCase().includes(q),
+    );
   }, [experiences, query]);
 
   const hero = searched.length ? [...searched].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())[0] : null;
@@ -350,7 +358,7 @@ export default function ExplorePage() {
   }
 
   return (
-    <div className="v2">
+    <div className="v2 v2-app-shell">
       <div className="v2-shell-desktop">
         {error && <div className="v2-page" style={{ paddingBottom: 0, color: 'var(--v2-error)' }}>{error}</div>}
 
@@ -383,13 +391,18 @@ export default function ExplorePage() {
           <>
             <button
               onClick={() => setMobileMap((v) => !v)}
-              className="v2-btn v2-btn-dark"
-              style={{ display: 'flex', alignItems: 'center', gap: 6, position: 'fixed', right: 18, bottom: 96, zIndex: 45, boxShadow: 'var(--v2-shadow-lg)' }}
+              // Position comes from the class, not inline, on purpose: `.v2-explore-map-toggle`
+              // defaults to `fixed` but the `v2-app-shell` media rule (globals.css) switches it
+              // to `absolute`, anchored to this page's own 100dvh shell instead of the true
+              // browser viewport — the fix for exactly this button drifting/misaligning as the
+              // address bar collapses. An inline `position` would silently out-rank that rule.
+              className="v2-btn v2-btn-dark v2-explore-map-toggle"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, right: 18, bottom: 96, zIndex: 45, boxShadow: 'var(--v2-shadow-lg)' }}
             >
               {mobileMap ? <><IconList size={15} />List</> : <><IconMap size={15} />Map</>}
             </button>
             {mobileMap && (
-              <div style={{ position: 'fixed', inset: 0, zIndex: 42, background: 'var(--v2-bg)' }}>
+              <div className="v2-explore-map-overlay" style={{ inset: 0, zIndex: 42, background: 'var(--v2-bg)' }}>
                 {renderMap()}
               </div>
             )}

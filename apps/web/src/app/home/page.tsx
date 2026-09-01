@@ -193,7 +193,7 @@ export default function HomePage() {
   const firstName = me ? displayNameOf(me.displayName, me.email).split(' ')[0] : '';
 
   return (
-    <div className="v2">
+    <div className="v2 v2-app-shell">
       <div className="v2-shell-desktop">
         <div className="v2-page v2-home-page" style={{ paddingTop: 24 }}>
           {/* Header — small and secondary now; the story rail below it carries the page's real

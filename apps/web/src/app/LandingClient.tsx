@@ -28,7 +28,7 @@ export default function LandingClient() {
   ];
 
   return (
-    <div className="v2" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="v2" style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '22px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', maxWidth: 1080, margin: '0 auto', width: '100%' }}>
         <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 900, fontSize: 21, letterSpacing: '-0.02em' }}>Plot</div>
         <Link href="/auth" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--v2-ink-muted)' }}>Sign in</Link>
@@ -36,7 +36,7 @@ export default function LandingClient() {
 
       <div
         style={{
-          minHeight: 'calc(100vh - 76px)', display: 'flex', alignItems: 'center', gap: 48, flexWrap: 'wrap',
+          minHeight: 'calc(100dvh - 76px)', display: 'flex', alignItems: 'center', gap: 48, flexWrap: 'wrap',
           padding: '24px 28px 60px', maxWidth: 1080, margin: '0 auto', width: '100%',
         }}
       >

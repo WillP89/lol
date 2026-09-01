@@ -44,7 +44,7 @@ function AuthForm() {
   }
 
   return (
-    <div className="v2" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+    <div className="v2" style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <div className="v2-page" style={{ paddingTop: 0, paddingBottom: 0 }}>
         <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 900, fontSize: 22, letterSpacing: '-0.02em', marginBottom: 32 }}>Plot</div>
 
@@ -101,7 +101,7 @@ function AuthForm() {
 
 export default function AuthPage() {
   return (
-    <Suspense fallback={<div className="v2" style={{ minHeight: '100vh' }} />}>
+    <Suspense fallback={<div className="v2" style={{ minHeight: '100dvh' }} />}>
       <AuthForm />
     </Suspense>
   );

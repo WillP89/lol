@@ -156,7 +156,7 @@ export default function CrewsPage() {
   };
 
   return (
-    <div className="v2">
+    <div className="v2 v2-app-shell">
       <div className="v2-shell-desktop">
         <div className="v2-page v2-page-wide" style={{ paddingTop: 28 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 22 }}>

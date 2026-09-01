@@ -254,19 +254,23 @@ function EventCard({
               floating icon-in-a-circle badge (a real, reported regression: that treatment read
               as a sticker/emoji dropped onto the photo, exactly what the brief bans) — a scrim
               wash across the whole image, the same "the object itself changes state" idea a
-              photo caption bar uses, not a decoration stuck on top of it. */}
+              photo caption bar uses, not a decoration stuck on top of it.
+
+              Anchored top-left (scrim direction flipped to match), NOT bottom — a real bug found
+              clicking through this live: the voter-avatar stack below is ALSO bottom-left
+              (deliberately, "the group visually gathers around the idea" reads best low on the
+              card), and a locked plan always still has its voters showing, so bottom-aligning
+              both put "Locked in" literally behind the avatar stack the instant a plan converged
+              — the one moment this label matters most. Top-left is genuinely free: the "Plot
+              found this" mark owns top-right. */}
           {locked && (
-            <div className="v2-pop-in" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', padding: '10px 12px', background: 'linear-gradient(180deg, rgba(15,60,38,0) 55%, rgba(11,46,29,0.88) 100%)', pointerEvents: 'none' }}>
+            <div className="v2-pop-in" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-start', padding: '10px 12px', background: 'linear-gradient(0deg, rgba(15,60,38,0) 55%, rgba(11,46,29,0.88) 100%)', pointerEvents: 'none' }}>
               <span style={{ color: '#fff', fontSize: 12.5, fontWeight: 800, letterSpacing: '0.01em' }}>Locked in</span>
             </div>
           )}
-          {/* The distinguishable "this is Plot, not a person" marker, moved onto the primary
-              image real estate (top-right, clear of "Locked in" at top-left) rather than tucked
-              below it in the text area — brief: unprompted delivery must read as native to the
-              conversation but never pretend to be a human share, and specifically NOT an "AI
-              sparkle" mark (IconSpark, used elsewhere for a person's own found idea) —
-              IconGathering (loose converging points) is Plot noticing a pattern the Crew already
-              likes, not magic. See docs/DECISIONS.md#plot-brand-system. */}
+          {/* The distinguishable "this is Plot, not a person" marker — top-right, clear of
+              "Locked in" at top-left above. See docs/DECISIONS.md#plot-brand-system for why
+              IconGathering (loose converging points) rather than an "AI sparkle" mark. */}
           {data.recommendation && (
             <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 5, background: 'var(--v2-brand)', color: '#fff', fontSize: 10, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', padding: '5px 9px', borderRadius: 100 }}>
               <IconGathering size={11} /><span>Plot found this</span>
