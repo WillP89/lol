@@ -1629,3 +1629,25 @@ larger brand pass (docs/DECISIONS.md forthcoming for the remaining propagation, 
 and final handover) — the four anchor screens the brief named (Home, Crew/chat, Recommendation,
 Locked Plan) are covered; Crews list, Crew creation's "give it a look" step, invite preview,
 onboarding's avatar step, Explore markers, and Plans have not yet had the same treatment.
+
+## #plot-brand-system-propagation
+
+Continuing #plot-brand-system onto the surfaces the anchor-screen pass didn't reach yet:
+
+- **Crews list**: each card now leads with a real `CrewMark` (squircle, photo or identity
+  gradient) instead of nothing but a name, with real `PersonAvatar`s for the member stack
+  underneath — previously the row of member "avatars" was the exact same flat-circle-plus-
+  initial device as everywhere else this pass replaced.
+- **Crew creation now has a real identity step**: Name → **Give it a look** → Invite, closing
+  the literal "name field → submit" gap the brief quoted back at us. The new step shows a live
+  96px `CrewMark` preview wrapped in `MediaUploadButton` — upload a photo or skip and keep the
+  generated identity-gradient mark, exactly as advertised ("You can always change it later").
+- **Invite preview** (`/crews/join/:code`, public, no auth): now shows the real `CrewMark` and
+  real `PersonAvatar`s for up to 5 members, using the identity data added to
+  `getCrewPreviewByInviteCode` in the anchor-screen pass (name + avatar only, never email — see
+  the PII-leak note in #plot-brand-system). Previously a flat wall of coloured initial-circles
+  with no Crew identity visible at all before joining.
+
+Verified live: a full fresh signup → create Crew → "Give it a look" step (screenshot shows the
+crews-list card behind the sheet already carrying the new CrewMark, confirming the list and the
+creation flow share the same live data) → invite preview as a logged-out visitor, all screenshotted.

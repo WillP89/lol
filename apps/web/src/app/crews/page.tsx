@@ -8,29 +8,17 @@ import { TabBarV2 } from '@/components/TabBarV2';
 import { BottomSheet } from '@/components/BottomSheet';
 import { messagePreview } from '@/lib/messagePreview';
 import { IconCalendar, IconPoll } from '@/components/icons';
+import { PersonAvatar, CrewMark } from '@/components/Avatar';
+import { MediaUploadButton } from '@/components/MediaUploadButton';
 
 interface CrewSummary {
   id: string;
   name: string;
-  members: { user: { displayName: string | null; email: string } }[];
+  imageUrl: string | null;
+  members: { user: { displayName: string | null; email: string; avatarUrl?: string | null } }[];
   latestMessage: { body: string; authorName: string; createdAt: string } | null;
   activePlan: { id: string; title: string; publicSlug: string; inCount: number; totalMembers: number } | null;
   upcomingPlan: { id: string; title: string; publicSlug: string; startsAt: string | null; venueName: string | null } | null;
-}
-
-// Same palette as Home V2's avatar/ring colours — one shared identity system across the app,
-// not a different set of colours per screen for the same people and Crews.
-const AVATAR_COLORS = ['#ff2f7e', '#7c5cfc', '#2f8aff', '#ffc53d', '#34d399', '#ff7a3d'];
-
-function initials(displayName: string | null, email: string) {
-  const source = displayName?.trim() || email;
-  return source.slice(0, 1).toUpperCase();
-}
-
-function avatarColor(seed: string) {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[hash];
 }
 
 function timeAgo(iso: string): string {
@@ -86,7 +74,7 @@ function CrewActivityLine({ crew }: { crew: CrewSummary }) {
   return <div className="v2-dim" style={{ fontSize: 12.5 }}>Someone has to start it — say hi.</div>;
 }
 
-type CreateStep = 'name' | 'invite';
+type CreateStep = 'name' | 'look' | 'invite';
 
 /**
  * Crews — the list screen, in the same product language as Home/Crew/Explore: same warm ground,
@@ -105,6 +93,7 @@ export default function CrewsPage() {
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
   const [newCrewId, setNewCrewId] = useState<string | null>(null);
+  const [newCrewImageUrl, setNewCrewImageUrl] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -125,6 +114,7 @@ export default function CrewsPage() {
     setStep('name');
     setName('');
     setNewCrewId(null);
+    setNewCrewImageUrl(null);
     setInviteUrl(null);
     setShowCreate(true);
   }
@@ -142,7 +132,9 @@ export default function CrewsPage() {
       setNewCrewId(res.crew.id);
       const invite = await api.post<{ inviteUrl: string }>(`/crews/${res.crew.id}/invites`, { channel: 'link' });
       setInviteUrl(invite.inviteUrl);
-      setStep('invite');
+      // Name -> give it a look -> invite: creation is a short social flow with a real identity
+      // step, not "name field -> submit" (the brief's own quoted example of what to fix).
+      setStep('look');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not create Crew.');
@@ -226,21 +218,19 @@ export default function CrewsPage() {
                   className="v2-card fade-up v2-stagger"
                   style={{ display: 'block', padding: '15px 18px', ['--stagger-i' as string]: i }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
-                    <div className="v2-display" style={{ fontSize: 16.5 }}>{crew.name}</div>
-                    <div className="stack" style={{ flexShrink: 0 }}>
-                      {crew.members.slice(0, 4).map((m, i) => (
-                        <div
-                          key={i}
-                          style={{
-                            width: 24, height: 24, borderRadius: '50%', marginLeft: i === 0 ? 0 : -8, fontSize: 9.5, fontWeight: 800, color: '#fff',
-                            background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            border: '2px solid var(--v2-surface)',
-                          }}
-                        >
-                          {initials(m.user.displayName, m.user.email)}
-                        </div>
-                      ))}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                    <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={44} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="v2-display" style={{ fontSize: 16.5 }}>{crew.name}</div>
+                      {/* Real people, not another count — the same "who's actually here" energy
+                          as the Crew info sheet, just small enough to fit a list row. */}
+                      <div className="stack" style={{ marginTop: 4 }}>
+                        {crew.members.slice(0, 4).map((m, i) => (
+                          <div key={i} style={{ marginLeft: i === 0 ? 0 : -7, borderRadius: '50%', boxShadow: '0 0 0 2px var(--v2-surface)' }}>
+                            <PersonAvatar name={m.user.displayName} email={m.user.email} photoUrl={m.user.avatarUrl} size={20} />
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                   <CrewActivityLine crew={crew} />
@@ -282,6 +272,30 @@ export default function CrewsPage() {
               {creating ? 'Creating…' : 'Continue'}
             </button>
           </form>
+        ) : step === 'look' ? (
+          <div style={{ textAlign: 'center' }}>
+            <div className="v2-eyebrow" style={{ marginBottom: 4 }}>{name}</div>
+            <h2 className="v2-display" style={{ fontSize: 20, marginBottom: 6 }}>Give it a look</h2>
+            <p className="v2-muted" style={{ marginBottom: 20, fontSize: 13.5 }}>
+              A photo makes {name} instantly recognisable in your Crews list. You can always change it later.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 22 }}>
+              {newCrewId && (
+                <MediaUploadButton
+                  uploadPath={`/crews/${newCrewId}/image`}
+                  deletePath={`/crews/${newCrewId}/image`}
+                  shape="squircle"
+                  size={96}
+                  onChange={setNewCrewImageUrl}
+                >
+                  <CrewMark name={name} imageUrl={newCrewImageUrl} size={96} />
+                </MediaUploadButton>
+              )}
+            </div>
+            <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={() => setStep('invite')}>
+              Continue
+            </button>
+          </div>
         ) : (
           <div>
             <div className="v2-eyebrow" style={{ marginBottom: 4 }}>You&rsquo;re ready</div>

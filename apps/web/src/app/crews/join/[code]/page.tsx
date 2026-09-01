@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
-
-const AVATAR_COLORS = ['#7c5cfc', '#2f8aff', '#34d399', '#ffc53d', '#ff7a3d', '#ff2f7e'];
+import { PersonAvatar, CrewMark } from '@/components/Avatar';
 
 interface Preview {
   name: string;
+  imageUrl: string | null;
   memberCount: number;
   memberInitials: string[];
+  members: { displayName: string | null; avatarUrl: string | null }[];
   invitedByName: string | null;
 }
 
@@ -85,17 +86,15 @@ export default function JoinCrewPage() {
 
         {preview && preview !== 'error' && !joinedCrew && (
           <div className="fade-up">
+            {/* The Crew's own identity front and centre — not just a wall of member initials.
+                A real photo when the Crew has one, the identity-gradient mark otherwise. */}
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+              <CrewMark name={preview.name} imageUrl={preview.imageUrl} size={84} />
+            </div>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 22 }}>
-              {preview.memberInitials.slice(0, 5).map((initial, i) => (
-                <div
-                  key={i}
-                  style={{
-                    width: 52, height: 52, borderRadius: '50%', marginLeft: i === 0 ? 0 : -14,
-                    background: AVATAR_COLORS[i % AVATAR_COLORS.length], color: '#fff', fontWeight: 800, fontSize: 18,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', border: '3px solid var(--v2-bg)',
-                  }}
-                >
-                  {initial}
+              {preview.members.slice(0, 5).map((m, i) => (
+                <div key={i} style={{ marginLeft: i === 0 ? 0 : -14, borderRadius: '50%', boxShadow: '0 0 0 3px var(--v2-bg)' }}>
+                  <PersonAvatar name={m.displayName} email={m.displayName ?? `member-${i}`} photoUrl={m.avatarUrl} size={52} />
                 </div>
               ))}
             </div>
