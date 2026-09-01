@@ -11,7 +11,7 @@ interface PlanCardResponse {
     id: string;
     title: string;
     status: string;
-    crew: { name: string };
+    crew: { id: string; name: string };
     experience: { name: string; category: string; venue: { name: string; city: string } | null; startsAt: string; priceMinMinor: number | null } | null;
     // A Plan with no Experience at all ("Pub Saturday", a poll locked straight to a Plan) still
     // has somewhere and (optionally) somewhen — see docs/DECISIONS.md#manual-plans.
@@ -88,7 +88,7 @@ export default async function PlanCardPage({ params }: { params: { slug: string 
           </p>
         )}
 
-        <VoteForm slug={params.slug} initialPulse={pulse} isAuthenticated={isAuthenticated} />
+        <VoteForm slug={params.slug} initialPulse={pulse} isAuthenticated={isAuthenticated} crewId={plan.crew.id} crewName={plan.crew.name} />
       </div>
     </div>
   );

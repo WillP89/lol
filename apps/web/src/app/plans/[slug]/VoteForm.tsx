@@ -17,10 +17,14 @@ export function VoteForm({
   slug,
   initialPulse,
   isAuthenticated,
+  crewId,
+  crewName,
 }: {
   slug: string;
   initialPulse: Pulse;
   isAuthenticated: boolean;
+  crewId: string;
+  crewName: string;
 }) {
   const [pulse, setPulse] = useState(initialPulse);
   const [email, setEmail] = useState('');
@@ -87,12 +91,23 @@ export function VoteForm({
         </Link>
       ) : voted ? (
         <div className="v2-card" style={{ padding: '16px 18px' }}>
-          <p style={{ margin: 0 }}>Thanks — you&rsquo;re in the loop.</p>
-          {devMagicLinkUrl && (
-            <a className="v2-btn v2-btn-brand" style={{ marginTop: 12 }} href={devMagicLinkUrl}>
-              Continue on Plot →
+          {/* Real, reported dead end this fixes: a response used to land here and just stop —
+              "Thanks, you're in the loop" with nowhere to go. Every response needs a next state:
+              an already-signed-in member goes straight back to the conversation their response
+              just changed; someone who responded from an email link (no account yet) gets the
+              honest next step for THEM, not a button that quietly does nothing. */}
+          <p style={{ margin: 0, marginBottom: isAuthenticated || devMagicLinkUrl ? 12 : 0 }}>
+            Thanks — {crewName} can see your response.
+          </p>
+          {isAuthenticated ? (
+            <Link href={`/crews/${crewId}`} className="v2-btn v2-btn-brand" style={{ width: '100%' }}>
+              Back to {crewName} →
+            </Link>
+          ) : devMagicLinkUrl ? (
+            <a className="v2-btn v2-btn-brand" style={{ width: '100%' }} href={devMagicLinkUrl}>
+              Join the conversation →
             </a>
-          )}
+          ) : null}
         </div>
       ) : (
         <>

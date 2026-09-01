@@ -1,6 +1,7 @@
 import type { ProviderAdapter } from './types';
 import { mockTicketingProvider } from './mock/ticketingProvider';
 import { mockRestaurantProvider } from './mock/restaurantProvider';
+import { mockActivityProvider } from './mock/activityProvider';
 import { ticketmasterProvider } from './live/ticketmaster';
 import { eventbriteProvider } from './live/eventbrite';
 import { config } from '../lib/config';
@@ -28,8 +29,8 @@ const liveTicketedProviders: ProviderAdapter[] = [
 ];
 
 export const providerRegistry: ProviderAdapter[] = liveTicketedProviders.length > 0
-  ? [...liveTicketedProviders, mockRestaurantProvider]
-  : [mockTicketingProvider, mockRestaurantProvider];
+  ? [...liveTicketedProviders, mockRestaurantProvider, mockActivityProvider]
+  : [mockTicketingProvider, mockRestaurantProvider, mockActivityProvider];
 
 export const hasLiveProvider = providerRegistry.some((p) => p.isLive);
 
