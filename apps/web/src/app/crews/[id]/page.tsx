@@ -221,9 +221,9 @@ function EventCard({
   const myVote = data.plan.votes.find((v) => v.userId === me)?.vote ?? null;
   const openBreakdown = () => onExpandVoters({ kind: 'plan', planId: data.plan.id });
   return (
-    <div className={`v2-hoverable${justLocked ? ' v2-confirm-transition' : ' fade-up'}`} style={{ width: 264, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)' }}>
+    <div className={`v2-hoverable${justLocked ? ' v2-lock-transform' : ' fade-up'}`} style={{ width: 264, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)' }}>
       <Link href={`/plans/${data.plan.publicSlug}`} style={{ display: 'block' }}>
-        <div className={locked ? 'v2-event-art-locked' : undefined} style={{ height: 120, background: v2Art(exp?.imageUrl, exp?.category), position: 'relative', transition: 'box-shadow 0.4s ease' }}>
+        <div className={locked ? `v2-event-art-locked${justLocked ? ' v2-just-locked' : ''}` : undefined} style={{ height: 120, background: v2Art(exp?.imageUrl, exp?.category), position: 'relative' }}>
           {/* The definitive-state overlay — date/venue moving from "proposed" to "confirmed" is
               the actual payoff of Lock It In, so it happens right on the card people were
               already looking at, not only in a separate confetti layer. Plot's own converged
@@ -274,8 +274,9 @@ function EventCard({
             <div className="v2-dim" style={{ fontSize: 11.5, marginBottom: 8 }}>{data.recommendation.reasonText}</div>
           )}
           {/* The actual life-cycle line — different words at each stage, not the same "X/Y in"
-              counter throughout. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+              counter throughout. Keyed on `locked` so it crossfades in as its own fresh element
+              the instant the card converges, rather than the text silently swapping in place. */}
+          <div key={locked ? 'locked' : 'pending'} className="v2-pop-in" style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
             {locked && <IconLock size={12} style={{ flexShrink: 0, color: 'var(--v2-green)' }} />}
             <span style={{ fontSize: 12, fontWeight: 700, color: locked ? 'var(--v2-green)' : 'var(--v2-ink)' }}>
               {locked ? 'Locked in' : planStageCopy(data.plan.status, data.pulse, proposerName)}
@@ -319,36 +320,44 @@ function EventCard({
           </span>
         </button>
       )}
-      {/* Voting happens right here — no detour to a separate page to say "I'm in". Hidden once
-          locked: the decision is made, voting on it further is meaningless. */}
-      {!locked && (
-        <div style={{ display: 'flex', borderTop: '1px solid var(--v2-line)' }}>
-          {([['in', "I'm in"], ['maybe', 'Maybe'], ['out', "Can't make it"]] as const).map(([v, label]) => (
-            <button
-              key={v}
-              onClick={() => onVote(data.plan.id, v)}
-              className="v2-tap-feedback"
-              style={{
-                flex: 1, padding: '9px 4px', border: 'none', borderRight: v !== 'out' ? '1px solid var(--v2-line)' : 'none',
-                background: myVote === v ? 'var(--v2-bg-deep)' : 'none', cursor: 'pointer', fontSize: 11.5,
-                fontWeight: myVote === v ? 800 : 600, color: myVote === v ? 'var(--v2-ink)' : 'var(--v2-ink-muted)',
-              }}
-            >
-              {myVote === v ? '✓ ' : ''}{label}
-            </button>
-          ))}
+      {/* Voting + the Lock It In bar — hidden once locked, but SHRUNK away rather than yanked
+          out the instant `locked` flips: still mounted through the `justLocked` transition beat
+          (collapsed via CSS grid-rows, see .v2-collapse-row), then genuinely gone once the card
+          has settled into its steady locked state on a later load. This is the actual "the idea
+          becomes a plan" moment, not a badge swap — the same card shrinks its own decision
+          controls away as it converges, instead of a different card silently replacing it. */}
+      {(!locked || justLocked) && (
+        <div className={`v2-collapse-row${justLocked ? ' v2-collapsed' : ''}`}>
+          <div>
+            <div style={{ display: 'flex', borderTop: '1px solid var(--v2-line)' }}>
+              {([['in', "I'm in"], ['maybe', 'Maybe'], ['out', "Can't make it"]] as const).map(([v, label]) => (
+                <button
+                  key={v}
+                  onClick={() => onVote(data.plan.id, v)}
+                  className="v2-tap-feedback"
+                  style={{
+                    flex: 1, padding: '9px 4px', border: 'none', borderRight: v !== 'out' ? '1px solid var(--v2-line)' : 'none',
+                    background: myVote === v ? 'var(--v2-bg-deep)' : 'none', cursor: 'pointer', fontSize: 11.5,
+                    fontWeight: myVote === v ? 800 : 600, color: myVote === v ? 'var(--v2-ink)' : 'var(--v2-ink-muted)',
+                  }}
+                >
+                  {myVote === v ? '✓ ' : ''}{label}
+                </button>
+              ))}
+            </div>
+            {lockable && (
+              <button
+                onClick={() => onLock(data.plan.id)}
+                disabled={locking}
+                className="v2-tap-feedback"
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', padding: '10px 0', border: 'none', borderTop: '1px solid var(--v2-line)', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand)' }}
+              >
+                {!locking && <IconLock size={13} />}
+                {locking ? 'Locking in…' : 'Lock it in'}
+              </button>
+            )}
+          </div>
         </div>
-      )}
-      {lockable && !justLocked && (
-        <button
-          onClick={() => onLock(data.plan.id)}
-          disabled={locking}
-          className="v2-tap-feedback"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', padding: '10px 0', border: 'none', borderTop: '1px solid var(--v2-line)', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand)' }}
-        >
-          {!locking && <IconLock size={13} />}
-          {locking ? 'Locking in…' : 'Lock it in'}
-        </button>
       )}
     </div>
   );
@@ -407,81 +416,94 @@ function PollCard({ poll, messageId, onVote, members, onLockOption, locking, jus
   onExpandVoters: OpenVoterSheet;
 }) {
   const leading = poll.totalVotes > 0 ? poll.options.reduce((a, b) => (poll.counts[b] > poll.counts[a] ? b : a)) : null;
-
-  if (justLocked) {
-    // The confirmed state — other options gone, the winner expands into a definitive-looking
-    // banner. This is what "we are actually doing this" should look like in the same card the
-    // group was just deciding in, not a silent swap for a plain-text message.
-    return (
-      <div className="v2-confirm-transition" style={{ width: 260, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-green)', boxShadow: 'var(--v2-shadow-sm)', padding: '16px 16px' }}>
-        <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.75)', marginBottom: 6 }}>Locked in</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="v2-pop-in" style={{ fontSize: 20 }}>✓</span>
-          <span style={{ fontWeight: 800, fontSize: 16, color: '#fff' }}>{justLocked}</span>
-        </div>
-      </div>
-    );
-  }
+  const locked = justLocked !== null;
 
   return (
-    <div className="fade-up" style={{ width: 260, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)', padding: '14px 14px 10px' }}>
-      <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--v2-pop)', marginBottom: 6 }}>
-        {poll.kind === 'AVAILABILITY' ? 'When works?' : 'Poll'}
+    <div
+      className={`${justLocked ? 'v2-lock-transform' : 'fade-up'}`}
+      style={{
+        width: 260, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', padding: '14px 14px 10px',
+        background: locked ? 'var(--v2-green)' : 'var(--v2-surface)',
+        transition: 'background 0.45s cubic-bezier(.2,.8,.2,1)',
+      }}
+    >
+      {/* The header pill crossfades label + colour instead of the card being swapped for a
+          differently-structured one — same object, converging. */}
+      <div key={locked ? 'locked' : 'open'} className="v2-pop-in" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', color: locked ? 'rgba(255,255,255,0.8)' : 'var(--v2-pop)', marginBottom: 6 }}>
+        {locked && <IconLock size={10} />}
+        {locked ? 'Locked in' : poll.kind === 'AVAILABILITY' ? 'When works?' : 'Poll'}
       </div>
-      <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10 }}>{poll.question}</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: leading ? 10 : 2 }}>
+      <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10, color: locked ? '#fff' : 'var(--v2-ink)' }}>{poll.question}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: leading || locked ? 10 : 2 }}>
         {poll.options.map((option) => {
           const count = poll.counts[option] ?? 0;
           const pct = poll.totalVotes > 0 ? Math.round((count / poll.totalVotes) * 100) : 0;
           const mine = poll.myVote === option;
           const isLeading = option === leading && poll.totalVotes > 0;
+          // Losing options shrink away as the group converges (the same wrapper stays mounted
+          // the whole time — only its collapsed class toggles — so the CSS transition actually
+          // has two real states to interpolate between, not a swap to a differently-shaped
+          // node); the winner is the one option that stays, expanding into its confirmed look
+          // in the exact same slot rather than a new card silently replacing this one.
+          const isLoser = locked && option !== justLocked;
           return (
-            <button
-              key={option}
-              onClick={() => onVote(option)}
-              className="v2-tap-feedback"
-              style={{
-                position: 'relative', textAlign: 'left', border: 'none', borderRadius: 10, overflow: 'hidden', cursor: 'pointer', padding: '9px 12px',
-                background: 'var(--v2-bg-deep)',
-                boxShadow: isLeading ? 'inset 0 0 0 1.5px var(--v2-green)' : 'none',
-              }}
-            >
-              <div className="v2-settle" key={pct} style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: mine ? 'rgba(255,47,126,0.18)' : 'rgba(12,12,13,0.06)', transition: 'width 0.35s cubic-bezier(.2,.8,.2,1)' }} />
-              <div style={{ position: 'relative' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: mine ? 800 : 600 }}>
-                  <span>{mine ? '✓ ' : ''}{option}</span>
-                  {poll.totalVotes > 0 && <span className="v2-muted">{count}</span>}
-                </div>
-                <OptionVoters voterIds={poll.votersByOption[option] ?? []} members={members} />
+            <div key={option} className={`v2-collapse-row${isLoser ? ' v2-collapsed' : ''}`}>
+              <div>
+                <button
+                  onClick={() => onVote(option)}
+                  disabled={locked}
+                  className="v2-tap-feedback"
+                  style={{
+                    position: 'relative', textAlign: 'left', border: 'none', borderRadius: 10, overflow: 'hidden', cursor: locked ? 'default' : 'pointer', padding: '9px 12px', width: '100%',
+                    background: locked ? 'rgba(255,255,255,0.16)' : 'var(--v2-bg-deep)',
+                    boxShadow: isLeading && !locked ? 'inset 0 0 0 1.5px var(--v2-green)' : 'none',
+                    transition: 'background 0.4s ease',
+                  }}
+                >
+                  {!locked && (
+                    <div className="v2-settle" key={pct} style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: mine ? 'rgba(255,47,126,0.18)' : 'rgba(12,12,13,0.06)', transition: 'width 0.35s cubic-bezier(.2,.8,.2,1)' }} />
+                  )}
+                  <div style={{ position: 'relative' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13, fontWeight: mine || locked ? 800 : 600, color: locked ? '#fff' : undefined }}>
+                      <span>{locked ? <><span className="v2-pop-in" style={{ marginRight: 5 }}>✓</span>{option}</> : <>{mine ? '✓ ' : ''}{option}</>}</span>
+                      {poll.totalVotes > 0 && !locked && <span className="v2-muted">{count}</span>}
+                    </div>
+                    <OptionVoters voterIds={poll.votersByOption[option] ?? []} members={members} />
+                  </div>
+                </button>
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
       {/* "Who's voted" — one sheet covering every option, opened by a real sibling button, not
           a clickable nested inside each option's own <button> (which is invalid HTML and
-          unreliable to tap on some browsers). */}
-      {poll.totalVotes > 0 && (
-        <button
-          type="button"
-          onClick={() => onExpandVoters({ kind: 'poll', messageId })}
-          className="v2-tap-feedback"
-          style={{ display: 'block', width: '100%', padding: '2px 0 8px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--v2-ink-dim)', textDecoration: 'underline', textUnderlineOffset: 2 }}
-        >
-          See who voted
-        </button>
-      )}
-      {leading && (
-        <button
-          onClick={() => onLockOption(leading)}
-          disabled={locking}
-          className="v2-tap-feedback"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', padding: '9px 0', border: 'none', borderTop: '1px solid var(--v2-line)', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand)' }}
-        >
-          {!locking && <IconLock size={13} />}
-          {locking ? 'Locking in…' : `Lock in "${leading}"`}
-        </button>
-      )}
+          unreliable to tap on some browsers). Collapses away with the rest once locked. */}
+      <div className={`v2-collapse-row${locked ? ' v2-collapsed' : ''}`}>
+        <div>
+          {poll.totalVotes > 0 && (
+            <button
+              type="button"
+              onClick={() => onExpandVoters({ kind: 'poll', messageId })}
+              className="v2-tap-feedback"
+              style={{ display: 'block', width: '100%', padding: '2px 0 8px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--v2-ink-dim)', textDecoration: 'underline', textUnderlineOffset: 2 }}
+            >
+              See who voted
+            </button>
+          )}
+          {leading && (
+            <button
+              onClick={() => onLockOption(leading)}
+              disabled={locking}
+              className="v2-tap-feedback"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', padding: '9px 0', border: 'none', borderTop: '1px solid var(--v2-line)', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand)' }}
+            >
+              {!locking && <IconLock size={13} />}
+              {locking ? 'Locking in…' : `Lock in "${leading}"`}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -543,46 +565,6 @@ function ReactionRow({
         {reactions.reduce((n, r) => n + r.count, 0) === 1 ? '1 person reacted' : `${reactions.reduce((n, r) => n + r.count, 0)} people reacted`}
       </button>
     )}
-    </div>
-  );
-}
-
-const LOCK_BURST_COLORS = [
-  'var(--v2-confetti-1)', 'var(--v2-confetti-2)', 'var(--v2-confetti-3)',
-  'var(--v2-confetti-4)', 'var(--v2-confetti-5)', 'var(--v2-confetti-6)',
-];
-
-/** The "Lock it in" celebration — a small, quick burst of dots, not confetti-everywhere. See
- * globals.css's .v2-lock-dot for the animation itself; this just seeds a handful of them at
- * randomised angles/colours each time it mounts (keyed by the parent's `celebrating` toggle). */
-function LockCelebration() {
-  const dots = Array.from({ length: 12 }, (_, i) => {
-    const angle = (i / 12) * Math.PI * 2 + Math.random() * 0.3;
-    const dist = 90 + Math.random() * 70;
-    return {
-      id: i,
-      color: LOCK_BURST_COLORS[i % LOCK_BURST_COLORS.length],
-      tx: Math.cos(angle) * dist,
-      ty: Math.sin(angle) * dist,
-    };
-  });
-  return (
-    <div aria-hidden style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 200 }}>
-      {dots.map((d) => (
-        <div
-          key={d.id}
-          className="v2-lock-dot"
-          style={{
-            left: '50%',
-            top: '40%',
-            background: d.color,
-            ['--tx-start' as string]: '0px',
-            ['--ty-start' as string]: '0px',
-            ['--tx-end' as string]: `${d.tx}px`,
-            ['--ty-end' as string]: `${d.ty}px`,
-          }}
-        />
-      ))}
     </div>
   );
 }
@@ -663,12 +645,6 @@ export default function CrewPage() {
   // is currently open — see docs/DECISIONS.md#crew-auto-recommendations.
   const [respondingRecId, setRespondingRecId] = useState<string | null>(null);
   const [responding, setResponding] = useState(false);
-  // The "Lock it in" celebration — see LockCelebration below and globals.css's .v2-lock-dot.
-  const [celebrating, setCelebrating] = useState(false);
-  const celebrate = useCallback(() => {
-    setCelebrating(true);
-    setTimeout(() => setCelebrating(false), 750);
-  }, []);
   // The auto-recommendation system's Crew-level controls (on/off, frequency, travel range) -
   // fetched lazily the first time the Crew info sheet opens.
   const [recSettings, setRecSettings] = useState<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null } | null>(null);
@@ -1012,10 +988,11 @@ export default function CrewPage() {
   async function lockPlanById(planId: string) {
     setLockingPlanId(planId);
     // The state TRANSFORMATION happens right here, optimistically, before the network call even
-    // resolves — the EventCard flips into its confirmed state immediately. The confetti is one
-    // restrained flourish alongside that; it was never the experience on its own.
+    // resolves — the EventCard morphs into its confirmed state immediately (v2-lock-transform;
+    // see the component below). That transform IS the signature moment — no confetti burst
+    // alongside it (explicitly ruled out: "no sparkle, no confetti, no AI magic" — a real one
+    // used to run here and was removed for exactly that reason).
     setJustLockedPlanIds((prev) => new Set(prev).add(planId));
-    celebrate();
     try {
       await api.post(`/plans/${planId}/lock`);
       await poll();
@@ -1032,10 +1009,9 @@ export default function CrewPage() {
    * plan without a separate "now go make a Plan" step. */
   async function lockPollOption(messageId: string, question: string, option: string) {
     setLockingPlanId(messageId);
-    // Same optimistic transform as lockPlanById — the poll card itself flips to "Locked in —
-    // <option>" the instant you tap, not after the manual-plan-then-lock round trip completes.
+    // Same optimistic transform as lockPlanById — the poll card itself morphs to its locked
+    // look the instant you tap, not after the manual-plan-then-lock round trip completes.
     setJustLockedByMessage((prev) => ({ ...prev, [messageId]: option }));
-    celebrate();
     try {
       const res = await api.post<{ plan: { id: string; publicSlug: string } }>(`/crews/${crewId}/plans/manual`, { title: `${question} — ${option}` });
       await api.post(`/plans/${res.plan.id}/lock`);
@@ -1834,7 +1810,6 @@ export default function CrewPage() {
         </div>
       </BottomSheet>
 
-      {celebrating && <LockCelebration />}
       <TabBarV2 hideMobile />
     </div>
   );

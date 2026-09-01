@@ -170,26 +170,6 @@ body {
   .v2-reveal { opacity: 1; transform: none; transition: none; }
 }
 
-/* The "Lock it in" moment — the one place a little delight is earned (brief: "we've stopped
-   talking about it, this is happening"). A handful of brand-coloured dots bursting outward from
-   the tapped button and fading, ~700ms, not confetti-everywhere. */
-@keyframes v2LockBurst {
-  0% { transform: translate(var(--tx-start, 0), var(--ty-start, 0)) scale(0.4); opacity: 1; }
-  100% { transform: translate(var(--tx-end, 0), var(--ty-end, 0)) scale(1); opacity: 0; }
-}
-.v2-lock-dot {
-  position: fixed;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 200;
-  animation: v2LockBurst 0.7s cubic-bezier(.2,.8,.3,1) forwards;
-}
-@media (prefers-reduced-motion: reduce) {
-  .v2-lock-dot { display: none; }
-}
-
 /* ==========================================================================
    MOTION SYSTEM — a small, coherent set of durations, not a library of one-off
    transitions. Every animation here answers one of: where did this come
@@ -238,8 +218,19 @@ body {
 }
 .v2-arrive { animation: v2Arrive 0.3s cubic-bezier(.2,.8,.2,1) both; }
 
-/* TRANSITION — the exact "we are actually doing this" moment: a poll/event card resolving
-   into its confirmed state. A brief scale+settle on the whole card, not a page reload. */
+/* LOCK IT IN — Plot's signature state transformation: an idea becoming a plan, on the exact
+   same card object the group was just deciding in, not a swap to different markup. A lift-and-
+   settle (not a mere pulse) — the card visibly rises and drops back into place, the physical
+   metaphor for "this just became real and settled." Distinct from `v2-confirm-transition`
+   (kept below for the couple of lighter confirmation moments that don't carry this much
+   weight — a reaction landing, a small optimistic update) which stays a plain pulse. */
+@keyframes v2LockTransform {
+  0% { transform: scale(1) translateY(0); }
+  35% { transform: scale(1.035) translateY(-3px); box-shadow: var(--v2-shadow-lg); }
+  100% { transform: scale(1) translateY(0); }
+}
+.v2-lock-transform { animation: v2LockTransform 0.5s cubic-bezier(.2,.8,.2,1) both; }
+
 @keyframes v2Confirm {
   0% { transform: scale(1); }
   30% { transform: scale(1.03); }
@@ -248,15 +239,38 @@ body {
 .v2-confirm-transition { animation: v2Confirm 0.4s cubic-bezier(.2,.8,.2,1) both; }
 
 /* The visible difference between "proposed" and "locked" on an EventCard's own artwork — an
-   inset frame in the success colour, not just a badge floating on top. Small, restrained (this
-   is the "several great moments, not dozens" mandate — one quiet signal on every locked card,
-   not a loud one). */
+   inset frame in the success colour, not just a badge floating on top. `v2-just-locked` plays
+   once, live, right as the card converges: a brief flash of the brand's own "attention" colour
+   (the same pink used for "needs you" elsewhere) resolving into the steady locked-green ring —
+   the ring closing is the convergence motif (docs/DECISIONS.md#plot-brand-system's "people
+   gather, converge, decide"), not an arbitrary colour choice. */
 .v2-event-art-locked { box-shadow: inset 0 0 0 2.5px rgba(52,211,153,0.55); }
+@keyframes v2LockRing {
+  0% { box-shadow: inset 0 0 0 0px rgba(255,47,126,0); }
+  45% { box-shadow: inset 0 0 0 3.5px var(--v2-pop); }
+  100% { box-shadow: inset 0 0 0 2.5px rgba(52,211,153,0.55); }
+}
+.v2-event-art-locked.v2-just-locked { animation: v2LockRing 0.6s cubic-bezier(.2,.8,.2,1) both; }
+
+/* A row (vote buttons, a losing poll option, a "Lock it in" bar) shrinking away as part of the
+   Lock It In transformation, instead of vanishing the instant React stops rendering it — the
+   CSS grid-rows trick for animating to/from an unknown height without JS measuring. Mount with
+   this class present (`1fr`), then add `.v2-collapsed` on the same render pass that flips the
+   locked flag so the shrink actually plays instead of skipping straight to gone. */
+.v2-collapse-row {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.35s cubic-bezier(.2,.8,.2,1), opacity 0.3s ease;
+  opacity: 1;
+}
+.v2-collapse-row.v2-collapsed { grid-template-rows: 0fr; opacity: 0; }
+.v2-collapse-row > * { overflow: hidden; min-height: 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  .v2-pop-in, .v2-tap-feedback:active, .v2-settle, .v2-arrive, .v2-confirm-transition {
+  .v2-pop-in, .v2-tap-feedback:active, .v2-settle, .v2-arrive, .v2-confirm-transition, .v2-lock-transform, .v2-event-art-locked.v2-just-locked {
     animation: none !important;
   }
+  .v2-collapse-row { transition: none !important; }
 }
 
 /* A pending/optimistic message (sent locally, not yet confirmed by the server) — quietly
