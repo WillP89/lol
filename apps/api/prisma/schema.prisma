@@ -720,7 +720,7 @@ model CrewRecommendation {
   reasonText   String
   status       CrewRecommendationStatus @default(SENT)
   planId       String?                  @unique
-  plan         Plan?                    @relation(fields: [planId], references: [id])
+  plan         Plan?                    @relation(fields: [planId], references: [id], onDelete: Cascade)
   createdAt    DateTime                 @default(now())
   respondedAt  DateTime?
 
@@ -744,7 +744,12 @@ enum CrewRecommendationStatus {
 model Booking {
   id           String             @id @default(uuid())
   planId       String
-  plan         Plan               @relation(fields: [planId], references: [id])
+  // Real bug found operating the first-ever hard-delete this schema had to support (an admin
+  // reset-to-real-accounts operation): this had no cascade, so deleting a Crew (which cascades
+  // to its Plans) failed outright with a raw Postgres FK violation the moment any Plan had a
+  // real Booking — a booking has no meaning once its Plan is gone, so cascade is correct here,
+  // not just convenient.
+  plan         Plan               @relation(fields: [planId], references: [id], onDelete: Cascade)
   model        BookingModel
   status       BookingModelStatus @default(PENDING)
   externalUrl  String?
@@ -778,7 +783,7 @@ model BookingParticipant {
   bookingId String
   booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   userId    String
-  user      User    @relation(fields: [userId], references: [id])
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   paid      Boolean @default(false)
 
   @@unique([bookingId, userId])
@@ -789,7 +794,7 @@ model BookingParticipant {
 model Payment {
   id                  String        @id @default(uuid())
   bookingId           String
-  booking             Booking       @relation(fields: [bookingId], references: [id])
+  booking             Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   provider            String        @default("stripe")
   providerIntentId    String?
   amountMinor         Int
@@ -840,7 +845,11 @@ model IntentSignal {
   id          String   @id @default(uuid())
   name        String
   userId      String?
-  user        User?    @relation(fields: [userId], references: [id])
+  // SetNull, not Cascade: the whole point of a userId this nullable is to survive the user it
+  // was logged for — real gap found the first time this schema had to support a genuine hard
+  // delete: nothing actually enforced that intent, so a User with any tracked event (which is
+  // nearly every User) couldn't be deleted at all until this was added.
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   anonymousId String?
   crewId      String?
   planId      String?
@@ -856,7 +865,7 @@ model IntentSignal {
 model FeedbackSignal {
   id        String           @id @default(uuid())
   userId    String?
-  user      User?            @relation(fields: [userId], references: [id])
+  user      User?            @relation(fields: [userId], references: [id], onDelete: SetNull) // see IntentSignal.user's comment
   context   String // e.g. "experience:<id>", "booking:<id>"
   category  FeedbackCategory
   note      String?
@@ -882,7 +891,7 @@ model RewindSignal {
   planId    String
   plan      Plan         @relation(fields: [planId], references: [id], onDelete: Cascade)
   userId    String
-  user      User         @relation(fields: [userId], references: [id])
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade) // required field, can't SetNull — a rewind rating with no rater isn't meaningful
   rating    RewindRating
   reasons   Json // string[], e.g. ["great_venue", "too_expensive"]
   createdAt DateTime     @default(now())
@@ -913,11 +922,14 @@ model ExperimentAssignment {
 model Referral {
   id          String    @id @default(uuid())
   planId      String?
-  plan        Plan?     @relation(fields: [planId], references: [id])
+  plan        Plan?     @relation(fields: [planId], references: [id], onDelete: SetNull) // preserve the attribution row even once its Plan is gone
   senderId    String
-  sender      User      @relation("ReferralSender", fields: [senderId], references: [id])
+  // Required field, so SetNull isn't possible — Cascade rather than block deletion. If referral
+  // attribution history becomes operationally important to keep past account deletion, this
+  // should move to a nullable senderId + SetNull, matching IntentSignal's pattern.
+  sender      User      @relation("ReferralSender", fields: [senderId], references: [id], onDelete: Cascade)
   recipientId String?
-  recipient   User?     @relation("ReferralRecipient", fields: [recipientId], references: [id])
+  recipient   User?     @relation("ReferralRecipient", fields: [recipientId], references: [id], onDelete: SetNull)
   channel     String // 'whatsapp' | 'imessage' | 'sms' | 'link' | 'other'
   clickedAt   DateTime?
   installedAt DateTime?
@@ -944,7 +956,11 @@ model SchedulerState {
 model AuditEvent {
   id          String   @id @default(uuid())
   actorUserId String?
-  actor       User?    @relation(fields: [actorUserId], references: [id])
+  // SetNull — the account-deletion route (routes/users.ts) already writes AuditEvent rows with
+  // actorUserId: null deliberately, on the explicit principle that the audit trail should
+  // outlive the account; this makes that actually enforceable at the DB level for every other
+  // path that creates one too, not just that one.
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
   action      String // e.g. "user.delete", "admin.experience.feature"
   targetType  String?
   targetId    String?
