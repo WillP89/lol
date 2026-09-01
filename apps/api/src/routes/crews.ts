@@ -4,9 +4,10 @@ import { requireUser } from '../middleware/auth';
 import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getCrewPreviewByInviteCode, isCrewMember, removeCrewMember, leaveCrew, markCrewRead, CrewMembershipError } from '../services/crew';
 import { sendCrewMessage, listCrewMessages, toggleReaction, createPoll, votePoll, ChatError } from '../services/chat';
 import { track } from '../services/analytics';
-import { getOrCreateSettings, updateSettings, respondToRecommendation, RecommendationError } from '../services/crewRecommendations';
+import { getOrCreateSettings, updateSettings, respondToRecommendation, generateRecommendationForCrew, RecommendationError } from '../services/crewRecommendations';
 import { saveUpload, deleteUpload, MediaValidationError, MediaStorageUnavailableError } from '../lib/mediaStorage';
 import { prisma } from '../lib/prisma';
+import { logger } from '../lib/logger';
 
 const CreateCrewSchema = z.object({ name: z.string().min(1).max(60), defaultCity: z.string().optional() });
 const JoinCrewSchema = z.object({ inviteCode: z.string().min(1) });
@@ -109,6 +110,28 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     const result = await joinCrewByInviteCode(request.user.id, parsed.data.inviteCode);
     if (!result) return reply.code(404).send({ error: 'not_found', message: 'Invalid invite code.' });
     await track('InviteAccepted', { crewId: result.crew.id, userId: request.user.id }, { userId: request.user.id, crewId: result.crew.id });
+
+    // Real product gap found operating this live: the periodic sweep (every 6 hours) is the
+    // right cadence for ONGOING proactive discovery, but it's the wrong model for the single
+    // most important first moment — a brand-new Crew's SECOND member joining, which is exactly
+    // when a Crew first has anyone to recommend something TO at all
+    // (generateRecommendationForCrew's own memberCount<2 gate). Making that person wait up to 6
+    // hours for the "Plot found this for you" moment undermines the entire premise the product
+    // exists to prove.
+    //
+    // Deliberately scoped to ONLY that first 1->2 transition, not every join thereafter: firing
+    // on every join (member 3, 4, 5...) surprised unrelated flows with an unprompted Plan
+    // appearing mid-test/mid-journey, and isn't the moment that actually needs to feel instant —
+    // an already-active Crew is already well served by the periodic sweep. Fired here, not
+    // awaited — scoring does real work (provider inventory sync, distance/taste scoring) that
+    // shouldn't hold up the join response.
+    const activeMemberCount = await prisma.crewMember.count({ where: { crewId: result.crew.id, status: 'ACTIVE' } });
+    if (activeMemberCount === 2) {
+      generateRecommendationForCrew(result.crew.id).catch((err) => {
+        logger.error({ err, crewId: result.crew.id }, 'Immediate post-join recommendation attempt failed');
+      });
+    }
+
     return reply.send(result);
   });
 

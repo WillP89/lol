@@ -163,7 +163,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
     const [userCount, crewCount, planCounts, bookingsConfirmed, weeklyActiveCrews, eventCounts] = await Promise.all([
-      prisma.user.count({ where: { status: 'ACTIVE' } }),
+      // Excludes the Plot system account (getPlotSystemUserId) — a real User row so it can
+      // author messages, but not a real end-user; counting it here would mislead whoever's
+      // actually reading this dashboard about how many people are using the product.
+      prisma.user.count({ where: { status: 'ACTIVE', email: { not: PLOT_SYSTEM_EMAIL } } }),
       prisma.crew.count({ where: { archivedAt: null } }),
       prisma.plan.groupBy({ by: ['status'], _count: true }),
       prisma.booking.count({ where: { status: 'CONFIRMED' } }),

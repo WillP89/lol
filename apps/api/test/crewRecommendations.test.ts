@@ -80,6 +80,17 @@ describe('automatic Crew recommendations: real personalisation, not a fake carou
   beforeAll(async () => {
     await resetDatabase();
 
+    // Seeded BEFORE either Crew's second member joins, deliberately: the automatic engine now
+    // fires an immediate check the moment a Crew first has 2+ members (routes/crews.ts, "make
+    // the very first recommendation feel instant" — see docs/DECISIONS.md#crew-auto-
+    // recommendations), not only on the periodic sweep. Seeding first means that immediate
+    // check sees the exact same controlled inventory these tests are built around, so which
+    // experience gets picked is still fully deterministic — it just happens to land the moment
+    // the Crew becomes real, same as it would in production, rather than only when this test
+    // later calls the sweep endpoint by hand.
+    await seedExperience('Stafford Comedy Night', 'COMEDY', 'The Stafford Gatehouse');
+    await seedExperience('Stafford Sunday 5-a-side', 'SPORT', 'Stafford Leisure Centre');
+
     // Crew A: food/comedy/live-music taste.
     const comedyOwner = await setUpMember('rec-comedy-owner@plot-test.invalid', ['comedy', 'live_music', 'restaurant']);
     const comedyMate = await setUpMember('rec-comedy-mate@plot-test.invalid', ['comedy', 'live_music', 'restaurant']);
@@ -106,35 +117,40 @@ describe('automatic Crew recommendations: real personalisation, not a fake carou
     sportCrewId = sportCrew.id;
     await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: sportMate.cookie }, payload: { inviteCode: sportCrew.inviteCode } });
 
-    // Two real Stafford experiences, one per taste — the engine should tell these two Crews
-    // apart, not send the same generic thing to both.
-    await seedExperience('Stafford Comedy Night', 'COMEDY', 'The Stafford Gatehouse');
-    await seedExperience('Stafford Sunday 5-a-side', 'SPORT', 'Stafford Leisure Centre');
+    // The immediate post-join trigger above is fire-and-forget (routes/crews.ts deliberately
+    // doesn't hold up the join response for it) — give it a moment to actually land before any
+    // test asserts on its result, same as a real client would just see the message arrive a
+    // beat after joining, not wait synchronously for it.
+    await new Promise((resolve) => setTimeout(resolve, 500));
   });
 
   test('the comedy-taste Crew gets the comedy recommendation, not the sport one', async () => {
+    // Already delivered by the immediate post-join trigger above, not by this call — so calling
+    // the sweep now correctly finds nothing new (never-repeat), which is itself part of what's
+    // being proven: it didn't double-send.
     const res = await app.inject({ method: 'POST', url: '/admin/recommendations/sweep', headers: { 'x-admin-key': ADMIN_KEY }, payload: { crewId: comedyCrewId } });
     expect(res.statusCode).toBe(200);
-    const body = res.json() as { delivered: number; recommendation: { reasonText: string } | null };
-    expect(body.delivered).toBe(1);
-    expect(body.recommendation).not.toBeNull();
-    expect(body.recommendation!.reasonText.toLowerCase()).toContain('comedy');
+    expect((res.json() as { delivered: number }).delivered).toBe(0);
 
-    // And it actually landed in the Crew's real conversation, distinguishably.
-    const [owner] = [await loginByEmail('rec-comedy-owner@plot-test.invalid')];
+    // The real proof: it actually landed in the Crew's real conversation, distinguishably, the
+    // moment the Crew became real.
+    const owner = await loginByEmail('rec-comedy-owner@plot-test.invalid');
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${comedyCrewId}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
     const announcement = messages.find((m) => m.body.includes('Plot found something'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('Stafford Comedy Night');
+
+    const slug = announcement!.body.match(/\/plans\/([a-zA-Z0-9-]+)$/)![1];
+    const planRes = await app.inject({ method: 'GET', url: `/plans/public/${slug}` });
+    const { recommendation } = planRes.json() as { recommendation: { reasonText: string } | null };
+    expect(recommendation!.reasonText.toLowerCase()).toContain('comedy');
   });
 
   test('the sport-taste Crew gets the sport recommendation, not the comedy one — genuinely different output', async () => {
     const res = await app.inject({ method: 'POST', url: '/admin/recommendations/sweep', headers: { 'x-admin-key': ADMIN_KEY }, payload: { crewId: sportCrewId } });
     expect(res.statusCode).toBe(200);
-    const body = res.json() as { delivered: number; recommendation: { reasonText: string } | null };
-    expect(body.delivered).toBe(1);
-    expect(body.recommendation!.reasonText.toLowerCase()).toContain('sport');
+    expect((res.json() as { delivered: number }).delivered).toBe(0); // already delivered instantly on join, see above
 
     const owner = await loginByEmail('rec-sport-owner@plot-test.invalid');
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${sportCrewId}/messages`, headers: { cookie: owner.cookie } });
@@ -142,6 +158,11 @@ describe('automatic Crew recommendations: real personalisation, not a fake carou
     const announcement = messages.find((m) => m.body.includes('Plot found something'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('Sunday 5-a-side');
+
+    const slug = announcement!.body.match(/\/plans\/([a-zA-Z0-9-]+)$/)![1];
+    const planRes = await app.inject({ method: 'GET', url: `/plans/public/${slug}` });
+    const { recommendation } = planRes.json() as { recommendation: { reasonText: string } | null };
+    expect(recommendation!.reasonText.toLowerCase()).toContain('sport');
   });
 
   test('the same Crew is never recommended the same thing twice, even across repeated sweeps', async () => {

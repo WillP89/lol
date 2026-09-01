@@ -131,8 +131,14 @@ describe('golden path: signup through Rewind', () => {
       headers: { cookie: sessions.ben.cookie },
     });
     expect(listRes.statusCode).toBe(200);
-    const { messages } = listRes.json() as { messages: { id: string; body: string }[] };
-    expect(messages.map((m) => m.body)).toEqual(['anyone free Saturday?', 'I am!']);
+    // Filtered to these two members' own messages, not an exact-length/exact-content match on
+    // the whole thread: joining this Crew's second member earlier in this describe block can
+    // (correctly, by design — see routes/crews.ts's post-join immediate-recommendation trigger)
+    // race in a real "Plot found something..." system message asynchronously, and this test's
+    // actual purpose is human message ordering/polling, not asserting nothing else ever posts.
+    const { messages } = listRes.json() as { messages: { id: string; body: string; author: { id: string } }[] };
+    const humanMessages = messages.filter((m) => m.author.id === sessions.alex.userId || m.author.id === sessions.sam.userId);
+    expect(humanMessages.map((m) => m.body)).toEqual(['anyone free Saturday?', 'I am!']);
 
     // Polling with `after` the first message's id returns only what came after it.
     const polled = await app.inject({
@@ -140,8 +146,9 @@ describe('golden path: signup through Rewind', () => {
       url: `/crews/${crewId}/messages?after=${first.id}`,
       headers: { cookie: sessions.ben.cookie },
     });
-    const { messages: newOnly } = polled.json() as { messages: { body: string }[] };
-    expect(newOnly.map((m) => m.body)).toEqual(['I am!']);
+    const { messages: newOnly } = polled.json() as { messages: { id: string; body: string; author: { id: string } }[] };
+    const humanNewOnly = newOnly.filter((m) => m.author.id === sessions.alex.userId || m.author.id === sessions.sam.userId);
+    expect(humanNewOnly.map((m) => m.body)).toEqual(['I am!']);
 
     const outsider = await loginByEmail('not-in-the-crew@plot-test.invalid');
     const forbidden = await app.inject({
@@ -390,8 +397,12 @@ describe('golden path: signup through Rewind', () => {
     };
     const crew = crews[0];
     // Booked, not one of the still-deciding statuses — should no longer show as an open
-    // decision, and should show as the upcoming Plan instead.
-    expect(crew.activePlan).toBeNull();
+    // decision, and should show as the upcoming Plan instead — NOT as activePlan itself, though
+    // activePlan isn't necessarily null anymore: this Crew's second member joining earlier in
+    // this describe block can (correctly, by design) also have triggered a second, independent,
+    // genuinely-still-deciding Plan via the immediate post-join recommendation (see
+    // routes/crews.ts) — a real Crew can have more than one Plan in flight at once.
+    expect(crew.activePlan?.id).not.toBe(planId);
     expect(crew.upcomingPlan?.id).toBe(planId);
     expect(crew.latestMessage?.body).toContain('/plans/');
 
