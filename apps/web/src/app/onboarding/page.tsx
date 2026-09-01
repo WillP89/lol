@@ -6,11 +6,7 @@ import { api, ApiError } from '@/lib/api';
 import { LocationSearch, type UkPlaceResult } from '@/components/LocationSearch';
 import { PersonAvatar } from '@/components/Avatar';
 import { MediaUploadButton } from '@/components/MediaUploadButton';
-
-const INTERESTS = [
-  'Live music', 'Food', 'Pubs & drinks', 'Comedy', 'Sport', 'Festivals',
-  'Cinema', 'Theatre', 'Days out', 'Family', 'Outdoors', 'Markets', 'Something different',
-];
+import { INTERESTS, interestSlug } from '@/lib/interests';
 
 interface ExistingProfile {
   email: string;
@@ -78,7 +74,8 @@ function OnboardingWizard() {
         ...(place ? { homeCity: place.name, homeLat: place.lat, homeLng: place.lng } : {}),
       });
       await api.post('/users/me/taste', {
-        swipes: (interests.length ? interests : ['live_music']).map((category) => ({ category: category.toLowerCase().replace(/[^a-z]+/g, '_'), choice: 'yes' as const })),
+        // `interests` already holds slugs (toggled via the slug itself, see the chip map below).
+        swipes: (interests.length ? interests : ['live_music']).map((category) => ({ category, choice: 'yes' as const })),
         budget: { minMinor: 1500, maxMinor: 6000, currency: 'GBP' },
         travelRadiusMeters: 24000, // ~15 miles — a real "worth travelling for" radius, not a dense-city-block assumption
         energyPreference: 'MEDIUM' as const,
@@ -167,7 +164,7 @@ function OnboardingWizard() {
             <p className="v2-muted" style={{ marginBottom: 22 }}>Pick a few — you can change these anytime.</p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
               {INTERESTS.map((label) => {
-                const slug = label.toLowerCase().replace(/[^a-z]+/g, '_');
+                const slug = interestSlug(label);
                 const selected = interests.includes(slug);
                 return (
                   <button
