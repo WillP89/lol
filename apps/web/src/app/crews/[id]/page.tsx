@@ -635,6 +635,24 @@ export default function CrewPage() {
   // lib/useVisualViewportHeight.ts. `null` until the API has fired once (SSR, or a browser
   // without it), so every usage below falls back to the existing `dvh` calc in that case.
   const visualViewportHeight = useVisualViewportHeight();
+  // The chat area's height used to subtract a hardcoded pixel guess for "how tall is the header
+  // above it" (82/132) — a real, reported layout regression this fixes: those numbers were
+  // tuned to the OLD, smaller header, and silently went stale (the message list + composer ran
+  // too tall, pushing the composer off-screen) the moment the header banner grew for the
+  // identity-wash redesign. Measuring the actual rendered header/context area via ResizeObserver
+  // means this can never drift out of sync with whatever the header actually renders again.
+  const headerAreaRef = useRef<HTMLDivElement>(null);
+  const [headerAreaHeight, setHeaderAreaHeight] = useState(82);
+  useEffect(() => {
+    const el = headerAreaRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const height = entries[0]?.borderBoxSize?.[0]?.blockSize ?? entries[0]?.contentRect.height;
+      if (height) setHeaderAreaHeight(Math.ceil(height));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // The composer's "+" action sheet — one entry point into every way of adding something to
   // the conversation beyond plain text (see docs/DECISIONS.md#decision-objects).
@@ -904,6 +922,13 @@ export default function CrewPage() {
   }
 
   function openAction(view: 'poll' | 'availability' | 'share' | 'suggest' | 'manual') {
+    // Real, reported bug this fixes: this function only ever changed WHICH view shows inside the
+    // "+" sheet — it never opened the sheet itself. That's invisible when it's called from a menu
+    // item inside an already-open sheet (the sheet is already open, so nothing looked broken),
+    // but the empty-chat starter prompts ("See when everyone's free", "Find something for the
+    // Crew") call this directly as their own entry point, with the sheet closed — so tapping them
+    // visibly did nothing at all.
+    setActionOpen(true);
     setActionView(view);
     if (view === 'suggest' && suggestOptions === null) {
       setSuggestOptions('loading');
@@ -1271,6 +1296,7 @@ export default function CrewPage() {
           </div>
         )}
       <div className="v2-crew-main" style={{ maxWidth: 720, width: '100%' }}>
+      <div ref={headerAreaRef}>
         {/* Header — HARD RESET. Real, reported feedback: "tiny Crew header, tiny social presence".
             This is now a real banner, not a slim top bar: the Crew's own identity wash fills it
             (the same two colours its mark already draws from — never a new palette invented for
@@ -1323,14 +1349,16 @@ export default function CrewPage() {
             <span style={{ fontSize: 12, fontWeight: 800, color: upcomingPlan ? 'var(--v2-green)' : '#8a5f1f', flexShrink: 0 }}>{upcomingPlan ? 'View' : 'Vote'} →</span>
           </Link>
         )}
+      </div>
 
         <div
           style={{
             display: 'flex',
             flexDirection: 'column',
-            // visualViewportHeight already reflects the keyboard on iOS/Android; the dvh calc is
-            // only the fallback for when that API hasn't reported yet (or doesn't exist).
-            height: visualViewportHeight != null ? `${visualViewportHeight - (context ? 132 : 82)}px` : context ? 'calc(100dvh - 132px)' : 'calc(100dvh - 82px)',
+            // The measured header/context height (see headerAreaRef above) — never a hardcoded
+            // guess. visualViewportHeight already reflects the keyboard on iOS/Android; the dvh
+            // calc is only the fallback for when that API hasn't reported yet (or doesn't exist).
+            height: visualViewportHeight != null ? `${visualViewportHeight - headerAreaHeight}px` : `calc(100dvh - ${headerAreaHeight}px)`,
             padding: '4px 20px calc(env(safe-area-inset-bottom, 0px) + 14px)',
             position: 'relative',
           }}

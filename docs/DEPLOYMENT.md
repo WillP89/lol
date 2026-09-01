@@ -108,6 +108,36 @@ auto-detects `RENDER_EXTERNAL_URL`/`RAILWAY_PUBLIC_DOMAIN`, which those platform
 automatically. Set `API_PUBLIC_URL` explicitly only on a platform that doesn't provide one of
 those (Fly.io, a bare VPS, etc).
 
+## Step 2.6 — wire up the automatic Crew recommendation scheduler (do this)
+
+Plot's core loop — Plot proactively finding something and posting it into a Crew, unprompted —
+runs on a schedule (`services/crewRecommendations.ts`). The API process itself checks the
+database every 15 minutes and runs a sweep whenever one is actually overdue (every 6 hours by
+default), and that self-healing check also fires once on every boot — so on Fly.io or Railway,
+where the container stays running continuously, **no further setup is required.**
+
+**On Render specifically, also add an external Cron Job** (Render → your service → Cron Jobs →
+New Cron Job, e.g. schedule `*/30 * * * *`) that runs:
+
+```
+curl -X POST https://<your-api-url>/admin/recommendations/sweep \
+  -H "x-admin-key: <your ADMIN_API_KEY>"
+```
+
+Why this matters specifically on Render: its free tier puts an idle service to sleep, and a
+sleeping process's in-memory checks (the 15-minute poll above) simply stop running until
+something wakes it back up. An external ping is the one thing that reliably wakes a sleeping
+dyno in the first place — nothing running inside the process can do that for itself. The request
+above calls the exact same "is a sweep actually due" check the in-process poll uses (see
+`runSweepIfDue` in `crewRecommendations.ts`), so hitting it every 30 minutes does **not** mean a
+sweep runs every 30 minutes — it means "wake up and check every 30 minutes, actually run
+whenever the real 6-hour cadence says it's due." It's safe to call this endpoint as often as you
+like for exactly that reason. This same endpoint accepts `{"force": true}` in the request body
+for a genuine one-off manual run (ops/debugging only — a scheduler should never pass this).
+
+On Fly.io/Railway this external cron is optional defense-in-depth, not required — those
+platforms don't idle-sleep a paid/hobby container the way Render's free tier does.
+
 ## Step 3 — deploy the web app
 
 [Vercel](https://vercel.com) is the natural fit for Next.js — connect GitHub, import

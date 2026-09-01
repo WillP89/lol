@@ -1316,10 +1316,25 @@ shared themselves), a real taste signal required (see the real bug below), a har
 filter (unlike the manual flows, which only soft-score distance — a member actively browsing can
 see something further out; Plot pushing it unprompted captioned "Because your Crew likes X"
 cannot, if X had nothing to do with why it was picked), and a confidence floor
-(`MIN_RECOMMENDATION_SCORE = 55`). `runRecommendationSweep` runs this across every Crew, wired
-to a 6-hour `setInterval` in server.ts (skipped in tests) and exposed via
-`POST /admin/recommendations/sweep` (optionally scoped to one Crew) for ops and for deterministic
-pilot testing.
+(`MIN_RECOMMENDATION_SCORE = 55`). `runRecommendationSweep` runs this across every Crew.
+
+**Scheduling — a real P0 regression, found and fixed by live testing, not just re-reading the
+code.** The original mechanism was a bare 6-hour `setInterval` in server.ts. That has a genuine
+production bug, not just a dev-mode annoyance: `setInterval` only fires its FIRST tick a full
+interval after the process boots, and every restart (a routine dev-server bounce, or — the real
+production case — a redeploy, a crash recovery, or a free-tier host waking an idle dyno) resets
+that clock to zero. A Crew could go its entire lifetime never once seeing the sweep run if the
+process restarted more often than every 6 hours, which is exactly what happened during this
+session's own development. Replaced with `runSweepIfDue` (see `SchedulerState`, a one-row-per-
+job table): a single atomic conditional UPDATE (`WHERE lastClaimedAt IS NULL OR < cutoff`, not
+read-then-write) that asks the DATABASE whether a sweep is overdue, not this process's own
+memory — self-healing across restarts and safe against two instances racing each other during a
+rolling deploy (only whichever UPDATE actually changes a row wins the claim). server.ts calls
+this once ~10s after boot and on a 15-minute poll thereafter; `POST /admin/recommendations/sweep`
+calls the exact same due-check by default (`{"force": true}` bypasses it for a deliberate one-off
+ops run) — see docs/DEPLOYMENT.md's "wire up the scheduler" step for why an external cron hitting
+that endpoint is the recommended production setup on hosts that idle-sleep (Render's free tier),
+and `test/crewRecommendations.test.ts`'s scheduling describe block for the restart/race tests.
 
 **Delivered as a real Plan, through a system user, never disguised as a person.** A dedicated
 `Plot` User row (self-heals via `getPlotSystemUserId`, upserted by a fixed internal email) is

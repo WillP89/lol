@@ -7,7 +7,7 @@ import { syncAllProviders } from '../services/inventorySync';
 import { buildCanonicalKey } from '../services/entityResolution';
 import { computeQualityScore } from '../services/qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
-import { runRecommendationSweep, generateRecommendationForCrew } from '../services/crewRecommendations';
+import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from '../services/crewRecommendations';
 
 /**
  * Internal operator tooling (brief §29 admin console, §64 operating dashboard). Gated by a
@@ -183,22 +183,36 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
-   * The automatic Crew recommendation system's periodic delivery job, triggerable on demand —
-   * real operation runs this on a timer (see server.ts), but the pilot brief specifically asks
-   * to "run recommendation generation" for a set of test Crews and verify the outputs, which
-   * needs a way to fire it deterministically rather than waiting for the timer. Same admin-key
-   * gate as every other route in this file. See docs/DECISIONS.md#crew-auto-recommendations.
+   * The automatic Crew recommendation system's delivery job, triggerable on demand. THIS is the
+   * endpoint an external scheduler (Render Cron Jobs, a GitHub Actions scheduled workflow,
+   * cron-job.org, ...) should be pointed at for real production operation — see server.ts's own
+   * comment for why an in-process timer alone isn't sufficient on hobby-tier hosting, and
+   * docs/DEPLOYMENT.md for exactly how to wire one up. Same admin-key gate as every other route
+   * in this file, so it's safe to expose to an external pinger.
+   *
+   * Default behaviour goes through the exact same database-backed "is a sweep actually due"
+   * check server.ts's own poll uses (`runSweepIfDue`) — calling this every 30 minutes from an
+   * external cron does NOT mean a sweep actually runs every 30 minutes; it means "check every 30
+   * minutes, actually run whenever the real 6-hour cadence says it's due". `force: true` bypasses
+   * that check for real one-off ops/pilot-testing use ("run generation for these Crews right now
+   * and show me the outputs") — a deliberate human override, not the normal path a scheduler
+   * should take. See docs/DECISIONS.md#crew-auto-recommendations.
    */
   app.post('/recommendations/sweep', async (request, reply) => {
-    const BodySchema = z.object({ crewId: z.string().optional() });
+    const BodySchema = z.object({ crewId: z.string().optional(), force: z.boolean().optional() });
     const parsed = BodySchema.safeParse(request.body ?? {});
     const crewId = parsed.success ? parsed.data.crewId : undefined;
+    const force = parsed.success ? Boolean(parsed.data.force) : false;
 
     if (crewId) {
       const recommendation = await generateRecommendationForCrew(crewId);
       return reply.send({ crewsEvaluated: 1, delivered: recommendation ? 1 : 0, errors: 0, recommendation });
     }
-    const result = await runRecommendationSweep();
-    return reply.send(result);
+    if (force) {
+      const result = await runRecommendationSweep();
+      return reply.send({ ...result, ran: true, forced: true });
+    }
+    const outcome = await runSweepIfDue(RECOMMENDATION_SWEEP_DUE_INTERVAL_MS);
+    return reply.send({ ran: outcome.ran, forced: false, ...(outcome.result ?? { crewsEvaluated: 0, delivered: 0, errors: 0 }) });
   });
 }

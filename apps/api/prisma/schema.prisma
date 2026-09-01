@@ -920,6 +920,22 @@ model Referral {
   createdAt   DateTime  @default(now())
 }
 
+/// One row per named background job. The real state a restart-tolerant scheduler needs — see
+/// crewRecommendations.ts#claimSweepIfDue — that plain in-memory `setInterval` state can't give:
+/// this survives the process dying, restarting, or (on a host that sleeps an idle free-tier
+/// dyno — Render's free tier is the specific documented risk, see docs/DEPLOYMENT.md) being
+/// suspended for hours. `lastRunAt` is the one fact that answers "is a sweep actually overdue
+/// right now" regardless of how long THIS process has been alive, and `lastClaimedAt` (updated
+/// via a single atomic conditional UPDATE, not read-then-write) is what stops two instances —
+/// a rolling deploy's old+new pair, most realistically — from both starting a sweep at once.
+model SchedulerState {
+  jobName       String    @id
+  lastRunAt     DateTime?
+  lastClaimedAt DateTime?
+  lastResult    Json?
+  updatedAt     DateTime  @updatedAt
+}
+
 model AuditEvent {
   id          String   @id @default(uuid())
   actorUserId String?

@@ -224,3 +224,80 @@ describe('automatic Crew recommendations: real personalisation, not a fake carou
     expect((sweepRes.json() as { delivered: number }).delivered).toBe(0);
   });
 });
+
+/**
+ * The database-backed scheduler claim (crewRecommendations.ts#runSweepIfDue) — the actual fix
+ * for the P0 regression this exists because of: a plain in-memory `setInterval` has no way to
+ * know a sweep is overdue after this process was asleep/restarted, and no way to coordinate with
+ * a second instance racing it. This is what makes server.ts's boot-time check (and an external
+ * cron hitting POST /admin/recommendations/sweep without `force`) self-healing instead of
+ * "run once at boot and hope nothing else calls it too" — see docs/DEPLOYMENT.md.
+ */
+describe('recommendation sweep scheduling: database-backed, restart/race safe', () => {
+  beforeAll(async () => {
+    await resetDatabase();
+  });
+
+  test('a due sweep runs, and immediately calling again with the same interval does NOT run a second time', async () => {
+    const { runSweepIfDue } = await import('../src/services/crewRecommendations');
+    // No SchedulerState row exists yet at all — the very first boot on a brand-new database —
+    // this must count as "due", not silently no-op forever.
+    const first = await runSweepIfDue(6 * 60 * 60 * 1000);
+    expect(first.ran).toBe(true);
+
+    // Immediately again, same interval — simulates a second process (or this same process's
+    // next 15-minute check) asking "is it due" a moment later. The database, not this call's own
+    // memory, is what says no.
+    const second = await runSweepIfDue(6 * 60 * 60 * 1000);
+    expect(second.ran).toBe(false);
+  });
+
+  test('a sweep older than the interval is claimed as due again (the actual restart/sleep recovery case)', async () => {
+    const { prisma } = await import('../src/lib/prisma');
+    const { runSweepIfDue } = await import('../src/services/crewRecommendations');
+
+    // Simulate "this process was asleep/down for a long time" — back-date the claim the way a
+    // real long gap would leave it, rather than waiting a real interval out in the test.
+    await prisma.schedulerState.update({
+      where: { jobName: 'crew_recommendation_sweep' },
+      data: { lastClaimedAt: new Date(Date.now() - 7 * 60 * 60 * 1000) }, // 7h ago
+    });
+
+    const outcome = await runSweepIfDue(6 * 60 * 60 * 1000); // 6h interval — 7h ago is overdue
+    expect(outcome.ran).toBe(true);
+  });
+
+  test('two concurrent calls only let ONE of them actually run the sweep (the race two instances would hit)', async () => {
+    const { prisma } = await import('../src/lib/prisma');
+    const { runSweepIfDue } = await import('../src/services/crewRecommendations');
+    await prisma.schedulerState.update({
+      where: { jobName: 'crew_recommendation_sweep' },
+      data: { lastClaimedAt: new Date(Date.now() - 7 * 60 * 60 * 1000) },
+    });
+
+    const [a, b] = await Promise.all([
+      runSweepIfDue(6 * 60 * 60 * 1000),
+      runSweepIfDue(6 * 60 * 60 * 1000),
+    ]);
+    const ranCount = [a.ran, b.ran].filter(Boolean).length;
+    expect(ranCount).toBe(1);
+  });
+
+  test('POST /admin/recommendations/sweep with force:true bypasses the due-check (deliberate ops override)', async () => {
+    const { prisma } = await import('../src/lib/prisma');
+    // Make sure a sweep is NOT due right now, so a non-forced call would report ran: false.
+    await prisma.schedulerState.upsert({
+      where: { jobName: 'crew_recommendation_sweep' },
+      update: { lastClaimedAt: new Date() },
+      create: { jobName: 'crew_recommendation_sweep', lastClaimedAt: new Date() },
+    });
+
+    const notDue = await app.inject({ method: 'POST', url: '/admin/recommendations/sweep', headers: { 'x-admin-key': ADMIN_KEY }, payload: {} });
+    expect((notDue.json() as { ran: boolean }).ran).toBe(false);
+
+    const forced = await app.inject({ method: 'POST', url: '/admin/recommendations/sweep', headers: { 'x-admin-key': ADMIN_KEY }, payload: { force: true } });
+    const forcedBody = forced.json() as { ran: boolean; forced: boolean };
+    expect(forcedBody.ran).toBe(true);
+    expect(forcedBody.forced).toBe(true);
+  });
+});

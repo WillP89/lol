@@ -5,7 +5,7 @@ import { ensureInventory } from './inventorySync';
 import { scoreExperiencesForCrew, type MatchOption } from './match';
 import { createRecommendationPlanForCrew } from './plan';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
-import type { CrewRecommendation, CrewRecommendationStatus } from '@prisma/client';
+import type { CrewRecommendation, CrewRecommendationStatus, Prisma } from '@prisma/client';
 
 /**
  * Real gap this closes: every rejection path in `generateRecommendationForCrew` just returned
@@ -41,6 +41,11 @@ function logRecommendationOutcome(crewId: string, outcome: RecommendationOutcome
 // nothing clears this bar. Never "keep lowering the bar until something ships" logic.
 const MIN_RECOMMENDATION_SCORE = 55;
 const LOOKBACK_DAYS_FOR_WEEKLY_CAP = 7;
+
+// The real delivery cadence — shared by server.ts's own poll and the admin sweep endpoint's
+// default (non-`force`) path, so there is exactly one place this number lives, not two that can
+// drift apart. See runSweepIfDue's own comment for the full reasoning.
+export const RECOMMENDATION_SWEEP_DUE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 // The system author for every automatic recommendation — never a real person's identity, and
 // deliberately never added as a CrewMember of anything, so it can't appear in member lists,
@@ -288,4 +293,68 @@ export async function runRecommendationSweep(): Promise<{ crewsEvaluated: number
     }
   }
   return { crewsEvaluated: crews.length, delivered, errors };
+}
+
+const SWEEP_JOB_NAME = 'crew_recommendation_sweep';
+
+/**
+ * The restart/sleep-tolerant replacement for trusting a single process's own in-memory
+ * `setInterval` state. Real gap this closes: this app's documented deployment targets (Railway/
+ * Render/Fly — see docs/DEPLOYMENT.md) are typically ONE long-running container, but hobby-tier
+ * hosting on that shape commonly (a) puts an idle free-tier service to sleep for hours at a
+ * time (Render's free tier does this — the process, and every in-memory timer in it, simply
+ * stops running until the next inbound request wakes it), (b) restarts the process on every
+ * deploy, and (c) can briefly run an old+new instance pair during a rolling deploy. A bare
+ * `setInterval`'s schedule lives only in that one process's memory — it has no idea whether a
+ * sweep is actually overdue, only how long ITSELF has been alive, and two processes racing each
+ * other have no way to coordinate at all.
+ *
+ * This asks a different, correct question — "per the DATABASE, not per this process's own
+ * uptime, is a sweep actually overdue right now?" — and answers it with a single atomic
+ * conditional UPDATE (`WHERE lastClaimedAt IS NULL OR < cutoff`), not a read-then-write: two
+ * processes calling this at the same instant can't both see "unclaimed" and both proceed: only
+ * whichever UPDATE actually changed a row (`count === 1`) wins the claim, Postgres's own
+ * row-level locking serializes the race. Cheap and safe to call often (server.ts calls this on
+ * every boot AND on a short in-process poll) — a call that finds nothing overdue is one indexed
+ * UPDATE that touches zero rows, not a full sweep.
+ */
+async function claimSweepIfDue(dueIntervalMs: number): Promise<boolean> {
+  const cutoff = new Date(Date.now() - dueIntervalMs);
+  const now = new Date();
+
+  await prisma.schedulerState.upsert({
+    where: { jobName: SWEEP_JOB_NAME },
+    update: {},
+    create: { jobName: SWEEP_JOB_NAME },
+  });
+
+  const claim = await prisma.schedulerState.updateMany({
+    where: { jobName: SWEEP_JOB_NAME, OR: [{ lastClaimedAt: null }, { lastClaimedAt: { lt: cutoff } }] },
+    data: { lastClaimedAt: now },
+  });
+
+  return claim.count === 1;
+}
+
+/**
+ * The one function server.ts (and, in principle, an external cron hitting
+ * `POST /admin/recommendations/sweep`) should ever call — "run a sweep if the database says one
+ * is actually due", never "run a sweep because my own timer just fired". See `claimSweepIfDue`
+ * above for why that distinction is the actual production-correctness fix, not just the boot-
+ * timing fix from the previous pass.
+ */
+export async function runSweepIfDue(
+  dueIntervalMs: number,
+): Promise<{ ran: boolean; result?: { crewsEvaluated: number; delivered: number; errors: number } }> {
+  const claimed = await claimSweepIfDue(dueIntervalMs);
+  if (!claimed) {
+    return { ran: false };
+  }
+  const result = await runRecommendationSweep();
+  await prisma.schedulerState.update({
+    where: { jobName: SWEEP_JOB_NAME },
+    data: { lastRunAt: new Date(), lastResult: result as unknown as Prisma.InputJsonValue },
+  });
+  logger.info({ event: 'crew_recommendation_sweep_ran', ...result }, 'Recommendation sweep: ran (database confirmed it was due)');
+  return { ran: true, result };
 }
