@@ -61,6 +61,23 @@ export function BottomSheet({
     };
   }, [open]);
 
+  // A stable ref to the latest `onClose`, NOT a dependency of the effect below — real,
+  // release-blocking bug this fixes: every caller passes an inline `onClose` arrow
+  // (`() => setShowCreate(false)`, etc.), which gets a brand-new function identity on every
+  // render of the PARENT. With `onClose` in the effect's dependency array, typing a single
+  // character into any input inside an open sheet (Crew creation's name field, first and worst
+  // hit) re-renders the parent, which re-runs this effect — and the OLD effect's cleanup calls
+  // `previouslyFocused.current?.focus()`, yanking focus back to whatever was focused *before*
+  // the sheet opened (the "New Crew" button, or the page body) and away from the input the
+  // person was actively typing into. One character in, focus gone, every keystroke. Keeping the
+  // callback in a ref instead means the effect only depends on `open` — it runs once when the
+  // sheet opens and once when it closes, never on an unrelated parent re-render — while
+  // `onKeyDown` still always calls whatever `onClose` is current via the ref.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   // Real accessibility gaps this closes (brief: "keyboard, focus, screen-reader labels, modal
   // focus" — every sheet in the app shares this one component, so the fix applies everywhere at
   // once): Escape had no effect, focus never moved into the sheet on open or back to whatever
@@ -72,7 +89,7 @@ export function BottomSheet({
     // moving it synchronously on mount can fight the transform transition in some browsers.
     const focusTimer = setTimeout(() => panelRef.current?.focus(), 50);
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     }
     document.addEventListener('keydown', onKeyDown);
     return () => {
@@ -80,7 +97,7 @@ export function BottomSheet({
       document.removeEventListener('keydown', onKeyDown);
       previouslyFocused.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!mounted) return null;
 
