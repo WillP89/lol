@@ -5,7 +5,8 @@ import { ensureInventory } from './inventorySync';
 import { scoreExperiencesForCrew, type MatchOption } from './match';
 import { createRecommendationPlanForCrew } from './plan';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
-import type { CrewRecommendation, CrewRecommendationStatus, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { CrewRecommendation, CrewRecommendationStatus } from '@prisma/client';
 
 /**
  * Real gap this closes: every rejection path in `generateRecommendationForCrew` just returned
@@ -71,13 +72,31 @@ export interface RecommendationSettingsDTO {
 }
 
 /** Self-heals a settings row on first read — every Crew gets sane defaults (on, 2/week,
- * radius derived from members) without a separate "set up recommendations" step. */
+ * radius derived from members) without a separate "set up recommendations" step.
+ *
+ * Real bug found operating this in production for the first time: `upsert` is NOT safe against
+ * two truly concurrent callers racing to create the SAME never-before-touched crew's settings
+ * row — both see "doesn't exist yet", both attempt CREATE, whichever loses the race gets a raw
+ * P2002 unique-constraint error instead of the row it asked for. This isn't hypothetical: the
+ * in-process sweep poll and an admin/debug read can genuinely land in the same instant on a
+ * brand-new Crew. The fix is the standard "insert, and if you lost the race just re-read"
+ * pattern — catch exactly P2002 on `crewId` and fall through to `findUniqueOrThrow`, which by
+ * definition succeeds once ANY caller's create has landed. */
 export async function getOrCreateSettings(crewId: string): Promise<RecommendationSettingsDTO> {
-  const settings = await prisma.crewRecommendationSettings.upsert({
-    where: { crewId },
-    update: {},
-    create: { crewId },
-  });
+  let settings;
+  try {
+    settings = await prisma.crewRecommendationSettings.upsert({
+      where: { crewId },
+      update: {},
+      create: { crewId },
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      settings = await prisma.crewRecommendationSettings.findUniqueOrThrow({ where: { crewId } });
+    } else {
+      throw err;
+    }
+  }
   return { enabled: settings.enabled, maxPerWeek: settings.maxPerWeek, travelRadiusMeters: settings.travelRadiusMeters };
 }
 
@@ -164,6 +183,21 @@ async function evaluateCrewEligibility(crewId: string): Promise<CrewEligibilityR
   const city = await resolveCrewCityForSweep(crewId);
   await ensureInventory(city);
 
+  // Diagnostic-only, mirrors what scoreExperiencesForCrew computes internally for the actual
+  // radius filter (services/match.ts) — real gap found investigating "afterRadius: 0 for every
+  // candidate, on every multi-member Crew" in production: this is the one piece of context that
+  // number alone can't show (a member's real home city vs. coordinates, and the effective radius
+  // being applied), so it's surfaced directly rather than requiring a second round of guessing.
+  const memberLocations = await prisma.crewMember.findMany({
+    where: { crewId, status: 'ACTIVE' },
+    select: { user: { select: { email: true, profile: { select: { homeCity: true, homeLat: true, homeLng: true } } } } },
+  });
+  const locationSummary = memberLocations.map((m) => ({
+    email: m.user.email,
+    homeCity: m.user.profile?.homeCity ?? null,
+    hasCoordinates: m.user.profile?.homeLat !== null && m.user.profile?.homeLat !== undefined,
+  }));
+
   const scored = await scoreExperiencesForCrew(crewId, { radiusMetersOverride: settings.travelRadiusMeters });
 
   // Never repeat: anything ever recommended to this Crew before (any status — a dismissal is
@@ -190,6 +224,8 @@ async function evaluateCrewEligibility(crewId: string): Promise<CrewEligibilityR
   const eligible = withTaste.filter((o) => o.matchScore >= MIN_RECOMMENDATION_SCORE);
   const details = {
     city,
+    memberLocations: locationSummary,
+    travelRadiusMetersOverride: settings.travelRadiusMeters, // null = falls back to taste-profile median or a default, see match.ts
     totalScored: scored.length,
     afterDedup: notExcluded.length,
     afterRadius: inRadius.length,
