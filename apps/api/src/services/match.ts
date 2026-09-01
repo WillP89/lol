@@ -174,21 +174,29 @@ export async function scoreExperiencesForCrew(
       }
     }
 
-    // Distance — averaged across whichever members have a home location set (never fabricated
-    // for the rest); scored here as a soft input, hard-filtered separately by the automatic
-    // recommendation engine via `withinRadius`. See docs/DECISIONS.md#crew-auto-recommendations.
+    // Distance — the CLOSEST member's distance, not the group average. Real bug found running
+    // this against actual Crews in production: a Crew whose members live in genuinely different
+    // places (one in Birmingham, one in London — completely normal for a real friend group, not
+    // an edge case) had `withinRadius` false for literally every candidate, forever, because the
+    // *average* of two ~100-mile-apart homes to any real venue is never going to land inside any
+    // sane travel radius, even for a venue sitting right next to one of them. Averaging silently
+    // assumes a Crew clusters around one shared area; nearest-member distance instead asks "is
+    // this reasonably close to at least one of us", which is what "worth travelling for" is
+    // actually supposed to mean for a group that doesn't all live in the same postcode. Never
+    // fabricated for members with no home location set. See docs/DECISIONS.md#crew-auto-
+    // recommendations.
     let withinRadius: boolean | null = null;
     if (experience.venue && memberCoords.length > 0) {
       const distances = memberCoords.map((c) => haversineMiles(c.homeLat, c.homeLng, experience.venue!.latitude, experience.venue!.longitude));
-      const avgMiles = distances.reduce((a, b) => a + b, 0) / distances.length;
-      withinRadius = avgMiles <= radiusMiles;
-      if (avgMiles <= radiusMiles) {
+      const nearestMiles = Math.min(...distances);
+      withinRadius = nearestMiles <= radiusMiles;
+      if (nearestMiles <= radiusMiles) {
         // Closer scores higher, capped at 15 — a tiebreaker among in-radius options, not a
         // dominant factor (a great match slightly further is still worth surfacing).
-        score += Math.max(0, 15 - (avgMiles / radiusMiles) * 15);
-        const roundedMiles = Math.round(avgMiles);
+        score += Math.max(0, 15 - (nearestMiles / radiusMiles) * 15);
+        const roundedMiles = Math.round(nearestMiles);
         reasons.push({ code: 'nearby', label: roundedMiles <= 1 ? 'Under a mile from your area' : `${roundedMiles} miles from your area` });
-      } else if (avgMiles <= radiusMiles * 1.5) {
+      } else if (nearestMiles <= radiusMiles * 1.5) {
         score -= 5; // a bit over — still shown to a member browsing manually, soft penalty only
       } else {
         score -= 15;
