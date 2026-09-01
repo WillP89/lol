@@ -132,6 +132,7 @@ function OnboardingWizard() {
                   uploadPath="/users/me/avatar"
                   deletePath="/users/me/avatar"
                   size={76}
+                  presetKind="avatar"
                   onChange={setAvatarUrl}
                 >
                   <PersonAvatar name={name || null} email={email} photoUrl={avatarUrl} size={76} />

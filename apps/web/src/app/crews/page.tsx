@@ -286,6 +286,7 @@ export default function CrewsPage() {
                   deletePath={`/crews/${newCrewId}/image`}
                   shape="squircle"
                   size={96}
+                  presetKind="crew"
                   onChange={setNewCrewImageUrl}
                 >
                   <CrewMark name={name} imageUrl={newCrewImageUrl} size={96} />

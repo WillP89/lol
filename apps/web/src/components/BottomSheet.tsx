@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 /**
  * A focused-choice sheet with a backdrop — used wherever the app needs a decision (which Crew to
@@ -14,18 +15,40 @@ import { useEffect, useRef } from 'react';
  * proper centred dialog is the correct desktop pattern for the exact same "focused choice"
  * job, and it's self-contained regardless of what's behind it. See
  * docs/DECISIONS.md#plot-design-reset.
+ *
+ * Rendered into a `document.body` portal, not inline where it's called — a real, subtle CSS bug
+ * found via live testing (the Plot-avatar/Crew-art gallery, opened from inside the Crew-creation
+ * "Give it a look" sheet, had every tap on its own content swallowed by the OUTER sheet's
+ * backdrop): this panel sets `transform` for its slide-up animation, and per the CSS spec any
+ * transformed element becomes the containing block for its `position: fixed` DESCENDANTS — so a
+ * BottomSheet nested inside another BottomSheet's panel was never actually "fixed to the
+ * viewport" the way its own CSS claimed; it was silently confined to the outer panel's own
+ * (much smaller) box, with the outer panel's full-viewport backdrop still on top for everywhere
+ * outside that box. A z-index bump alone couldn't fix this — it's a containing-block problem,
+ * not a stacking-order one. A portal is the standard, correct fix: it renders outside the
+ * component tree entirely, so no ancestor's `transform` can ever intercept it, at any nesting
+ * depth.
  */
 export function BottomSheet({
   open,
   onClose,
   children,
+  zIndex = 50,
 }: {
   open: boolean;
   onClose: () => void;
   children: React.ReactNode;
+  // A nested sheet (see the portal note above) still benefits from an explicit higher value —
+  // the portal fixes *containment*, but two sibling portalled sheets open at once (outer +
+  // inner) still stack by z-index, and the inner one should always read as "in front".
+  zIndex?: number;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  // Portals need a real DOM `document.body` to render into, which doesn't exist during SSR —
+  // mount happens client-side only, one tick after first render.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Prevents the page behind the sheet from scrolling while it's open — otherwise a drag on
   // the sheet can scroll the page underneath it, which reads as broken on mobile.
@@ -59,12 +82,14 @@ export function BottomSheet({
     };
   }, [open, onClose]);
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 50,
+        zIndex,
         display: open ? 'flex' : 'none',
         alignItems: 'flex-end',
         justifyContent: 'center',
@@ -117,6 +142,7 @@ export function BottomSheet({
         </button>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

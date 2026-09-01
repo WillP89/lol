@@ -1,6 +1,8 @@
 'use client';
 
 import { identityGradient, initialsOf, crewInitial } from '@/lib/identity';
+import { PLOT_AVATAR_PREFIX, getPlotAvatarDef } from '@/components/PlotAvatars';
+import { crewArtStyle, isCrewArtUrl } from '@/lib/crewArt';
 
 /**
  * The two identity primitives used everywhere a person or a Crew is shown — replacing five
@@ -10,9 +12,10 @@ import { identityGradient, initialsOf, crewInitial } from '@/lib/identity';
  * systems use for pins vs. areas. Once you know it, you can tell a person from a group at a
  * glance without reading anything. See docs/DECISIONS.md#plot-brand-system.
  *
- * Both fall back to the identity-gradient system (lib/identity.ts) when there's no photo, and
- * both accept a real photo URL once upload exists (components/AvatarUpload.tsx) — never a bare
- * grey circle.
+ * Three real states now, not two: a real uploaded photo, a chosen Plot avatar/Crew art (a
+ * `plot-avatar:<id>` / `plot-crew-art:<id>` marker stored in the same column — see
+ * components/PlotAvatars.tsx and lib/crewArt.ts for why that's not a real file), or the
+ * generated identity-gradient mark. Never a bare grey circle.
  */
 
 export function PersonAvatar({
@@ -30,6 +33,10 @@ export function PersonAvatar({
 }) {
   const seed = email || name || 'plot';
   const initials = initialsOf(name, email);
+  const plotAvatarId = photoUrl?.startsWith(PLOT_AVATAR_PREFIX) ? photoUrl.slice(PLOT_AVATAR_PREFIX.length) : null;
+  const plotAvatar = plotAvatarId ? getPlotAvatarDef(plotAvatarId) : null;
+  const realPhoto = photoUrl && !plotAvatarId ? photoUrl : null;
+
   return (
     <div
       style={{
@@ -38,7 +45,7 @@ export function PersonAvatar({
         borderRadius: '50%',
         flexShrink: 0,
         position: 'relative',
-        background: photoUrl ? undefined : identityGradient(seed),
+        background: realPhoto ? undefined : identityGradient(seed),
         boxShadow: ring ? '0 0 0 2px var(--v2-surface), 0 0 0 3.5px rgba(12,12,13,0.14)' : 'none',
         overflow: 'hidden',
         display: 'flex',
@@ -46,8 +53,12 @@ export function PersonAvatar({
         justifyContent: 'center',
       }}
     >
-      {photoUrl ? (
-        <img src={photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      {realPhoto ? (
+        <img src={realPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      ) : plotAvatar ? (
+        <svg width={size} height={size} viewBox="0 0 40 40">
+          {plotAvatar.render('rgba(255,255,255,0.95)')}
+        </svg>
       ) : (
         <span
           style={{
@@ -76,6 +87,20 @@ export function CrewMark({
   size?: number;
 }) {
   const radius = Math.round(size * 0.28);
+  const artTheme = isCrewArtUrl(imageUrl);
+  const realPhoto = imageUrl && !artTheme ? imageUrl : null;
+
+  if (artTheme) {
+    return (
+      <div
+        style={{
+          width: size, height: size, borderRadius: radius, flexShrink: 0,
+          background: crewArtStyle(artTheme), backgroundSize: 'cover',
+        }}
+      />
+    );
+  }
+
   return (
     <div
       style={{
@@ -85,13 +110,13 @@ export function CrewMark({
         flexShrink: 0,
         position: 'relative',
         overflow: 'hidden',
-        background: imageUrl ? undefined : identityGradient(name),
+        background: realPhoto ? undefined : identityGradient(name),
         display: 'flex',
         alignItems: 'flex-end',
       }}
     >
-      {imageUrl ? (
-        <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      {realPhoto ? (
+        <img src={realPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
       ) : (
         <>
           {/* The "gathering" motif — three converging points, the same family as IconLock/

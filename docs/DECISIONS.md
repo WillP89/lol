@@ -1755,3 +1755,47 @@ generate on the operator's behalf.
 The secure dev/pilot trigger the brief asked for already existed:
 `POST /admin/recommendations/sweep` (optionally scoped to one Crew via `{crewId}`), gated by
 the `x-admin-key` header — no insecure public endpoint.
+
+## #plot-avatar-gallery
+
+Built the third real identity choice the brief specifically asked for: "upload a photo, choose a
+Plot avatar/curated Crew art, or use a generated identity" — previously only upload-or-generated
+existed.
+
+**Plot avatars** (`components/PlotAvatars.tsx`): 8 purpose-drawn creatures (fox, owl, bear,
+tiger, frog, octopus, raccoon, shark) in the same bold, single-tone, editorial language as the
+rest of Plot's iconography — no system emoji, no clipart, no stock-character rip-offs. Stored as
+a `plot-avatar:<id>` marker in the same `avatarUrl` column a real photo occupies (there's no
+file to persist), rendered by `PersonAvatar` on the same identity-gradient background every
+other fallback uses.
+
+**Curated Crew art** (`lib/crewArt.ts`): 8 authored abstract/editorial themes (night out,
+festival, food, pub, outdoors, house party, city, road trip) — tonal duotone gradient plus a
+large purpose-drawn icon motif, the same technique as the category fallback art
+(`lib/v2Art.ts`), not photography. **Honest reason it isn't real photography**: a genuinely
+curated lifestyle-photo library needs a paid license this pass has no budget or credentials
+for; authored art was the brief's own permitted alternative ("or purpose-designed Plot
+artwork"), not a corner cut silently.
+
+Both are real, validated server-side (`POST /users/me/avatar/preset`, `POST
+/crews/:id/image/preset`, each a zod enum against the same fixed set the picker offers — never
+trusting the client to only send a real id), and both open from a real visual gallery
+(`MediaUploadButton`'s new `presetKind` prop), not a dropdown.
+
+**A real, subtle CSS bug found and fixed along the way**: opening this gallery from *inside*
+another sheet (the Crew-creation "Give it a look" step, or the Crew info sheet) reliably made
+every tap on the gallery's own buttons land on the OUTER sheet's backdrop instead. Root cause:
+`BottomSheet`'s panel sets `transform` for its slide-up animation, and per the CSS spec any
+transformed element becomes the containing block for `position: fixed` DESCENDANTS — so a
+nested `BottomSheet`'s "fixed to the viewport" backdrop was actually silently confined to the
+OUTER panel's own small box, with the outer sheet's real full-viewport backdrop still on top
+everywhere else. A z-index bump alone didn't fix it (confirmed by testing — this is a
+containing-block problem, not a stacking-order one). Fixed properly with `createPortal`,
+rendering every `BottomSheet` into `document.body` regardless of nesting depth — the standard
+correct pattern for exactly this class of bug. Verified via direct DOM inspection (backdrop
+`getBoundingClientRect()` before: `{top: 487, height: 355}` confined to the outer panel; after:
+`{top: 0, height: 844}`, the full viewport) and a full live click-through: avatar chosen from
+Profile, Crew art chosen from the Crew-creation flow, both screenshotted working.
+
+Verified: 68/68 backend tests, `tsc`/`eslint` clean, full live signup → Profile → pick an owl
+avatar → create Crew → "Give it a look" → pick the Festival theme, screenshotted at every step.

@@ -70,6 +70,26 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 
+  // Curated Crew art — authored abstract/editorial themes (web/lib/crewArt.ts), the honest
+  // stand-in for real licensed lifestyle photography this pass has no budget/credentials for.
+  // Same marker-string pattern as the Plot avatar preset above: `plot-crew-art:<id>`, validated
+  // against the same fixed theme set the picker offers.
+  const CrewArtSchema = z.object({
+    themeId: z.enum(['night_out', 'festival', 'food', 'pub', 'outdoors', 'house_party', 'city', 'road_trip']),
+  });
+  app.post('/crews/:id/image/preset', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+    const parsed = CrewArtSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
+    const previous = await prisma.crew.findUnique({ where: { id }, select: { imageUrl: true } });
+    const imageUrl = `plot-crew-art:${parsed.data.themeId}`;
+    await prisma.crew.update({ where: { id }, data: { imageUrl } });
+    await deleteUpload(previous?.imageUrl);
+    return reply.send({ imageUrl });
+  });
+
   // Deliberately public — no requireUser — so tapping an invite link shows who/what you're
   // joining before forcing sign-in, not a generic login wall. See getCrewPreviewByInviteCode's
   // own comment for exactly what this does and doesn't expose.

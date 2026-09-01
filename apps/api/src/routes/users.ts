@@ -109,6 +109,22 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 
+  // The second real identity choice, alongside upload: a Plot-drawn avatar (see
+  // web/components/PlotAvatars.tsx) — no file at all, just a `plot-avatar:<id>` marker stored
+  // in the same column a real photo URL would occupy. Validated server-side against the same
+  // fixed set the picker offers, never trusting the client to only ever send a real one.
+  const PresetSchema = z.object({ presetId: z.enum(['fox', 'owl', 'bear', 'tiger', 'frog', 'octopus', 'raccoon', 'shark']) });
+  app.post('/users/me/avatar/preset', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const parsed = PresetSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
+    const previous = await prisma.user.findUnique({ where: { id: request.user.id }, select: { avatarUrl: true } });
+    const avatarUrl = `plot-avatar:${parsed.data.presetId}`;
+    await prisma.user.update({ where: { id: request.user.id }, data: { avatarUrl } });
+    await deleteUpload(previous?.avatarUrl); // no-op if `previous` was itself a preset marker, not a real file
+    return reply.send({ avatarUrl });
+  });
+
   app.post('/users/me/taste', async (request, reply) => {
     if (!requireUser(request, reply)) return;
     const parsed = SwipeSchema.safeParse(request.body);
