@@ -5,7 +5,7 @@ import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getC
 import { sendCrewMessage, listCrewMessages, toggleReaction, createPoll, votePoll, ChatError } from '../services/chat';
 import { track } from '../services/analytics';
 import { getOrCreateSettings, updateSettings, respondToRecommendation, RecommendationError } from '../services/crewRecommendations';
-import { saveUpload, deleteUpload, MediaValidationError } from '../lib/mediaStorage';
+import { saveUpload, deleteUpload, MediaValidationError, MediaStorageUnavailableError } from '../lib/mediaStorage';
 import { prisma } from '../lib/prisma';
 
 const CreateCrewSchema = z.object({ name: z.string().min(1).max(60), defaultCity: z.string().optional() });
@@ -55,6 +55,7 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ imageUrl });
     } catch (err) {
       if (err instanceof MediaValidationError) return reply.code(400).send({ error: 'invalid_request', message: err.message });
+      if (err instanceof MediaStorageUnavailableError) return reply.code(503).send({ error: 'storage_unavailable', message: err.message });
       throw err;
     }
   });

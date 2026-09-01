@@ -5,7 +5,7 @@ import { submitTasteSwipes, setLocationPreferences } from '../services/taste';
 import { track } from '../services/analytics';
 import { prisma } from '../lib/prisma';
 import { revokeAllSessionsForUser } from '../services/auth';
-import { saveUpload, deleteUpload, MediaValidationError } from '../lib/mediaStorage';
+import { saveUpload, deleteUpload, MediaValidationError, MediaStorageUnavailableError } from '../lib/mediaStorage';
 
 const SwipeSchema = z.object({
   swipes: z.array(z.object({ category: z.string(), choice: z.enum(['yes', 'maybe', 'no']) })).min(1),
@@ -96,6 +96,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ avatarUrl });
     } catch (err) {
       if (err instanceof MediaValidationError) return reply.code(400).send({ error: 'invalid_request', message: err.message });
+      if (err instanceof MediaStorageUnavailableError) return reply.code(503).send({ error: 'storage_unavailable', message: err.message });
       throw err;
     }
   });

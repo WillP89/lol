@@ -1664,3 +1664,41 @@ never tapping it. `Continue` was never gated on having a photo.
 Verified live: fresh signup lands on step 0 with a real identity-gradient `PersonAvatar` (initials
 derived from the not-yet-entered name's email fallback) and an edit-pencil badge, name field still
 required to advance, upload flow untouched from the Profile/Crew-info-sheet implementation.
+
+## #plot-media-storage-fix
+
+The real, user-reported bug: an uploaded avatar rendered as a broken-image icon. Root-caused to
+two independent, stacked failures in the previous media-storage implementation:
+
+1. `API_PUBLIC_URL` defaulted to `http://localhost:4000` with nothing in the real Render
+   deployment ever setting it — every avatar/Crew-image URL written to the database was
+   literally "the viewer's own machine, port 4000." Guaranteed broken for every user, always.
+2. Even with a correct URL, storage was local disk — not durable on Render/Railway's default
+   filesystem, which is wiped on every redeploy. A working photo today would have broken again
+   on the next deploy regardless.
+
+Fixed both, not just the symptom:
+
+- **`resolvePublicApiUrl()`** (config.ts): explicit `API_PUBLIC_URL` still wins if set;
+  otherwise auto-detects `RENDER_EXTERNAL_URL` (Render sets this on every web service
+  automatically) or `RAILWAY_PUBLIC_DOMAIN`; only falls back to `localhost` outside production.
+  In production with none of these resolvable, the process refuses to start with a clear error
+  — verified live (`test/…/test-prod-no-s3.ts`-style direct check): throws with the exact
+  reason, rather than silently writing more unreachable URLs into the database. Also verified
+  the Render auto-detection path resolves correctly when `RENDER_EXTERNAL_URL` is present.
+- **Real S3-compatible object storage** (`lib/mediaStorage.ts`, using `@aws-sdk/client-s3`,
+  which works unchanged against Cloudflare R2 — free tier, no egress fees — or real AWS S3):
+  activates automatically when `S3_BUCKET`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`/
+  `S3_PUBLIC_URL` are configured. Local disk is now explicitly dev/test-only; in production
+  without S3 configured, `saveUpload` throws `MediaStorageUnavailableError` and the upload
+  routes return a clean 503 ("uploads aren't available yet") instead of accepting a file onto
+  disk that the next deploy will delete — verified directly: `s3Configured` correctly `false`
+  with no env vars set, `saveUpload` throws the expected error rather than writing to disk.
+- `docs/DEPLOYMENT.md` gained a full "Step 2.5" with exact Cloudflare R2 setup instructions
+  (bucket creation, public access, API token scoping, the 5 env vars) — this is the one step
+  that genuinely requires the human: I cannot create a Cloudflare account or generate real
+  credentials on anyone's behalf. Until that step is done in the actual Render service, avatar/
+  Crew-image uploads will correctly refuse rather than silently break again.
+
+68/68 backend tests still pass (dev/test correctly uses the local-disk path throughout, since
+NODE_ENV is 'test' there, not 'production').

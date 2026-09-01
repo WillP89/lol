@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
-import { config } from './lib/config';
+import { config, s3Configured } from './lib/config';
 import { UPLOAD_DIR } from './lib/mediaStorage';
 import { logger } from './lib/logger';
 import { prisma } from './lib/prisma';
@@ -30,9 +30,12 @@ export function buildApp() {
 
   app.register(cookie);
   app.register(multipart, { limits: { fileSize: 6 * 1024 * 1024, files: 1 } });
-  // Serves uploaded avatars/Crew images straight from disk at an absolute API_PUBLIC_URL —
-  // see lib/mediaStorage.ts for the full "why local disk, how to swap it" rationale.
-  app.register(fastifyStatic, { root: UPLOAD_DIR, prefix: '/media/', decorateReply: false });
+  // Local-disk media serving — dev/test only. When S3 is configured, uploaded media is served
+  // straight from the bucket (S3_PUBLIC_URL) and this route never sees a request; see
+  // lib/mediaStorage.ts for why local disk isn't used in production at all.
+  if (!s3Configured) {
+    app.register(fastifyStatic, { root: UPLOAD_DIR, prefix: '/media/', decorateReply: false });
+  }
 
   app.addHook('onRequest', async (request) => {
     await attachUser(request);

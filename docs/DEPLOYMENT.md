@@ -72,6 +72,42 @@ a few hours), then grab the Server API token from the Postmark dashboard for
 pre-approved test addresses only — fine for verifying the integration works, not for a real
 pilot with friends.
 
+## Step 2.5 — persistent media storage (avatars, Crew images)
+
+**Do this, or every uploaded avatar/Crew photo will show as a broken image.** Without it, the
+app still runs — uploads are refused with a clear error instead of silently accepted — but
+nobody can set a photo. This is Cloudflare R2 (free tier: 10GB storage, no egress fees,
+S3-compatible so it just works with the standard AWS SDK already in this repo):
+
+1. Sign up at [dash.cloudflare.com](https://dash.cloudflare.com) (free), go to **R2 Object
+   Storage**, create a bucket (any name, e.g. `plot-media`).
+2. In the bucket's **Settings**, enable **Public access** via the r2.dev subdomain (or attach
+   your own custom domain if you have one) — this is the URL uploaded images will actually be
+   served from. Copy that URL.
+3. Under **R2 → Manage API Tokens**, create a token with **Object Read & Write** permission
+   scoped to this bucket. Copy the Access Key ID and Secret Access Key — the secret is shown
+   once.
+4. Find your R2 **Account ID** (Cloudflare dashboard sidebar) — the endpoint is
+   `https://<account-id>.r2.cloudflarestorage.com`.
+5. Add to the API service's environment variables (same place as Step 2):
+
+```
+S3_BUCKET=<your bucket name>
+S3_ACCESS_KEY_ID=<the Access Key ID from step 3>
+S3_SECRET_ACCESS_KEY=<the Secret Access Key from step 3>
+S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+S3_PUBLIC_URL=<the public bucket URL from step 2, no trailing slash>
+```
+
+Real AWS S3 works too (same env vars, omit `S3_ENDPOINT`, set `S3_PUBLIC_URL` to your bucket's
+own `https://<bucket>.s3.<region>.amazonaws.com`) — R2 is recommended for a pilot because it's
+free at this scale and has no egress charges.
+
+**You do not need to set `API_PUBLIC_URL` manually on Render or Railway** — the API now
+auto-detects `RENDER_EXTERNAL_URL`/`RAILWAY_PUBLIC_DOMAIN`, which those platforms set
+automatically. Set `API_PUBLIC_URL` explicitly only on a platform that doesn't provide one of
+those (Fly.io, a bare VPS, etc).
+
 ## Step 3 — deploy the web app
 
 [Vercel](https://vercel.com) is the natural fit for Next.js — connect GitHub, import
