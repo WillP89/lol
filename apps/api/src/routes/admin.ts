@@ -7,7 +7,7 @@ import { syncAllProviders } from '../services/inventorySync';
 import { buildCanonicalKey } from '../services/entityResolution';
 import { computeQualityScore } from '../services/qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
-import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, getOrCreateSettings, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from '../services/crewRecommendations';
+import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, getOrCreateSettings, explainCrewRecommendation, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from '../services/crewRecommendations';
 
 /**
  * Internal operator tooling (brief §29 admin console, §64 operating dashboard). Gated by a
@@ -285,7 +285,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
     const crews = await Promise.all(
       memberships.map(async ({ crew }) => {
-        const [settings, memberCount, mostRecent] = await Promise.all([
+        const [settings, memberCount, mostRecent, explain] = await Promise.all([
           getOrCreateSettings(crew.id),
           prisma.crewMember.count({ where: { crewId: crew.id, status: 'ACTIVE' } }),
           prisma.crewRecommendation.findFirst({
@@ -293,6 +293,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
             orderBy: { createdAt: 'desc' },
             include: { experience: { select: { name: true, category: true } } },
           }),
+          // The actual answer to "why hasn't this Crew gotten one yet" — runs the exact same
+          // eligibility logic generateRecommendationForCrew would, right now, without sending
+          // anything. See explainCrewRecommendation's own doc comment.
+          explainCrewRecommendation(crew.id),
         ]);
         return {
           crewId: crew.id,
@@ -308,6 +312,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
                 createdAt: mostRecent.createdAt,
               }
             : null,
+          rightNow: explain,
         };
       }),
     );

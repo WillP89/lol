@@ -130,17 +130,22 @@ async function resolveCrewCityForSweep(crewId: string): Promise<string> {
 }
 
 /**
- * Generates and delivers (at most) one automatic recommendation for a single Crew, if — and
- * only if — every real gate passes: recommendations enabled, under the weekly cap, a
- * not-previously-recommended experience clears the confidence floor, and (unlike the manual
- * "Find us something" flow) actually within the Crew's travel radius. Returns null whenever
- * nothing was sent, which is the expected common case, not an error.
+ * The full eligibility computation, extracted as its own read-only step — never persists
+ * anything, safe to call as often as you like. Real gap this closes: before this existed, the
+ * only way to answer "why hasn't my Crew gotten a recommendation in two days" was to grep
+ * server logs for `crew_recommendation_evaluated` and hope you had access to them. Now the
+ * exact same reasoning `generateRecommendationForCrew` uses is directly queryable — see
+ * `GET /admin/crews/:id/explain-recommendation`.
  */
-export async function generateRecommendationForCrew(crewId: string): Promise<CrewRecommendation | null> {
+export interface CrewEligibilityResult {
+  outcome: RecommendationOutcome | 'eligible';
+  details: Record<string, unknown>;
+  best?: MatchOption;
+}
+async function evaluateCrewEligibility(crewId: string): Promise<CrewEligibilityResult> {
   const settings = await getOrCreateSettings(crewId);
   if (!settings.enabled) {
-    logRecommendationOutcome(crewId, 'disabled');
-    return null;
+    return { outcome: 'disabled', details: {} };
   }
 
   const since = new Date(Date.now() - LOOKBACK_DAYS_FOR_WEEKLY_CAP * 24 * 60 * 60 * 1000);
@@ -149,13 +154,11 @@ export async function generateRecommendationForCrew(crewId: string): Promise<Cre
     prisma.crewMember.count({ where: { crewId, status: 'ACTIVE' } }),
   ]);
   if (recentCount >= settings.maxPerWeek) {
-    logRecommendationOutcome(crewId, 'weekly_cap_reached', { recentCount, maxPerWeek: settings.maxPerWeek });
-    return null;
+    return { outcome: 'weekly_cap_reached', details: { recentCount, maxPerWeek: settings.maxPerWeek } };
   }
   if (memberCount < 2) {
     // a solo "Crew" has no one to recommend anything to yet
-    logRecommendationOutcome(crewId, 'too_few_members', { memberCount });
-    return null;
+    return { outcome: 'too_few_members', details: { memberCount } };
   }
 
   const city = await resolveCrewCityForSweep(crewId);
@@ -185,22 +188,40 @@ export async function generateRecommendationForCrew(crewId: string): Promise<Cre
   const inRadius = notExcluded.filter((o) => o.withinRadius !== false);
   const withTaste = inRadius.filter(hasTasteSignal);
   const eligible = withTaste.filter((o) => o.matchScore >= MIN_RECOMMENDATION_SCORE);
+  const details = {
+    city,
+    totalScored: scored.length,
+    afterDedup: notExcluded.length,
+    afterRadius: inRadius.length,
+    afterTasteSignal: withTaste.length,
+    bestScoreSeen: withTaste.length > 0 ? Math.max(...withTaste.map((o) => o.matchScore)) : null,
+    scoreThreshold: MIN_RECOMMENDATION_SCORE,
+  };
   if (eligible.length === 0) {
     // Which filter actually killed it — "no strong match" covers a lot of genuinely different
     // situations, and during pilot "the whole pipeline is broken" vs "this Crew's taste is just
     // narrow this week" need to be tellable apart from the logs alone.
-    logRecommendationOutcome(crewId, 'no_eligible_candidate', {
-      totalScored: scored.length,
-      afterDedup: notExcluded.length,
-      afterRadius: inRadius.length,
-      afterTasteSignal: withTaste.length,
-      bestScoreSeen: withTaste.length > 0 ? Math.max(...withTaste.map((o) => o.matchScore)) : null,
-      scoreThreshold: MIN_RECOMMENDATION_SCORE,
-    });
+    return { outcome: 'no_eligible_candidate', details };
+  }
+
+  return { outcome: 'eligible', details, best: eligible[0] };
+}
+
+/**
+ * Generates and delivers (at most) one automatic recommendation for a single Crew, if — and
+ * only if — every real gate passes: recommendations enabled, under the weekly cap, a
+ * not-previously-recommended experience clears the confidence floor, and (unlike the manual
+ * "Find us something" flow) actually within the Crew's travel radius. Returns null whenever
+ * nothing was sent, which is the expected common case, not an error.
+ */
+export async function generateRecommendationForCrew(crewId: string): Promise<CrewRecommendation | null> {
+  const evaluation = await evaluateCrewEligibility(crewId);
+  if (evaluation.outcome !== 'eligible' || !evaluation.best) {
+    logRecommendationOutcome(crewId, evaluation.outcome as RecommendationOutcome, evaluation.details);
     return null;
   }
 
-  const best = eligible[0];
+  const best = evaluation.best;
   const systemUserId = await getPlotSystemUserId();
   const { plan, messageId } = await createRecommendationPlanForCrew(crewId, best.experience.id, systemUserId);
 
@@ -224,6 +245,29 @@ export async function generateRecommendationForCrew(crewId: string): Promise<Cre
   void messageId; // kept on the created CrewMessage itself; not stored redundantly here
 
   return recommendation;
+}
+
+/**
+ * Read-only diagnostic wrapper around `evaluateCrewEligibility` for `GET /admin/crews/:id/
+ * explain-recommendation` — the exact same reasoning `generateRecommendationForCrew` would use
+ * right now, without sending anything, so "why hasn't this Crew gotten a recommendation" has a
+ * real, specific answer instead of a guess.
+ */
+export async function explainCrewRecommendation(crewId: string) {
+  const evaluation = await evaluateCrewEligibility(crewId);
+  return {
+    crewId,
+    outcome: evaluation.outcome,
+    ...evaluation.details,
+    bestCandidate: evaluation.best
+      ? {
+          experienceId: evaluation.best.experience.id,
+          experienceName: evaluation.best.experience.name,
+          category: evaluation.best.experience.category,
+          score: evaluation.best.matchScore,
+        }
+      : null,
+  };
 }
 
 export type RecommendationResponseAction = 'more_like_this' | 'not_for_us' | 'too_far' | 'too_expensive' | 'wrong_vibe';
