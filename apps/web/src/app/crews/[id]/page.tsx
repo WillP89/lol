@@ -1636,6 +1636,8 @@ export default function CrewPage() {
             shape="squircle"
             size={72}
             presetKind="crew"
+            value={crew.imageUrl}
+            name={crew.name}
             onChange={(url) => setCrew((prev) => (prev ? { ...prev, imageUrl: url } : prev))}
           >
             <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={72} />

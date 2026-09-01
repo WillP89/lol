@@ -122,6 +122,9 @@ export default function ProfilePage() {
               deletePath="/users/me/avatar"
               size={56}
               presetKind="avatar"
+              value={user.avatarUrl}
+              name={user.displayName ?? undefined}
+              email={user.email}
               onChange={(url) => setUser((prev) => (prev ? { ...prev, avatarUrl: url } : prev))}
             >
               <PersonAvatar name={user.displayName} email={user.email} photoUrl={user.avatarUrl} size={56} />

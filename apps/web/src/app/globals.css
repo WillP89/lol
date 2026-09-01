@@ -304,6 +304,69 @@ body {
   }
 }
 
+/* Identity picker — the real "choose how you show up" experience (components/IdentityPicker.tsx),
+   replacing the old title/grid/save-button sheet. A horizontal, touch-native, scroll-snapping
+   strip on mobile; wraps into a composed grid on desktop instead of forcing horizontal scroll on
+   a pointer-driven surface where it isn't the natural gesture. */
+.v2-identity-strip {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  padding: 4px 20px 6px;
+  margin: 0 -20px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.v2-identity-strip::-webkit-scrollbar { display: none; }
+@media (min-width: 640px) {
+  .v2-identity-strip { flex-wrap: wrap; overflow: visible; justify-content: center; padding: 4px 4px 6px; margin: 0; }
+}
+.v2-identity-tile {
+  scroll-snap-align: center;
+  flex: 0 0 auto;
+  width: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 2px;
+}
+.v2-identity-tile-art {
+  width: 60px;
+  height: 60px;
+  transition: transform 0.18s cubic-bezier(.32,1.4,.5,1), box-shadow 0.18s ease;
+  box-shadow: 0 0 0 2px transparent;
+}
+.v2-identity-tile-active .v2-identity-tile-art {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 2.5px var(--v2-surface), 0 0 0 4.5px var(--v2-brand);
+}
+.v2-identity-tile-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--v2-ink-muted);
+  white-space: nowrap;
+}
+.v2-identity-tile-active .v2-identity-tile-label { color: var(--v2-ink); }
+
+/* The focused option's big preview — replayed on every selection change via React `key`, so the
+   settle motion (a quick overshoot-and-resolve, not a linear fade) fires fresh each time without
+   any manual animation-restart plumbing. */
+@keyframes v2IdentitySettle {
+  0% { transform: scale(0.82); opacity: 0.4; }
+  60% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.v2-identity-hero { animation: v2IdentitySettle 0.38s cubic-bezier(.32,1.4,.4,1); }
+@media (prefers-reduced-motion: reduce) {
+  .v2-identity-hero { animation: none; }
+  .v2-identity-tile-art { transition: none; }
+}
+
 /* Content column — generous for a light editorial layout, wider than the old dark app's 480px. */
 .v2-page {
   max-width: 560px;

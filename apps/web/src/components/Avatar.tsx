@@ -45,7 +45,7 @@ export function PersonAvatar({
         borderRadius: '50%',
         flexShrink: 0,
         position: 'relative',
-        background: realPhoto ? undefined : identityGradient(seed),
+        background: realPhoto || plotAvatar ? undefined : identityGradient(seed),
         boxShadow: ring ? '0 0 0 2px var(--v2-surface), 0 0 0 3.5px rgba(12,12,13,0.14)' : 'none',
         overflow: 'hidden',
         display: 'flex',
@@ -57,7 +57,7 @@ export function PersonAvatar({
         <img src={realPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
       ) : plotAvatar ? (
         <svg width={size} height={size} viewBox="0 0 40 40">
-          {plotAvatar.render('rgba(255,255,255,0.95)')}
+          {plotAvatar.render()}
         </svg>
       ) : (
         <span

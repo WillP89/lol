@@ -94,7 +94,15 @@ export function BottomSheet({
         alignItems: 'flex-end',
         justifyContent: 'center',
       }}
-      className="v2-sheet-root"
+      // "v2" here is NOT decorative — real regression this fixes: `--v2-*` custom properties
+      // (surface colour, ink, line, radii — everything every inline style below reads via
+      // `var(--v2-…)`) are defined on the `.v2` class (globals.css), scoped to the per-page
+      // wrapper div. A `createPortal` target is `document.body` — a SIBLING of that wrapper in
+      // the real DOM, not a descendant — so none of those variables were reachable here at all,
+      // and every var(...) silently resolved to nothing (a transparent panel background, for
+      // one). Re-declaring the class at the portal root re-establishes the whole variable set
+      // fresh, right where this subtree actually lives in the DOM.
+      className="v2 v2-sheet-root"
     >
       <div
         onClick={onClose}

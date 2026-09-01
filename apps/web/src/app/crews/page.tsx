@@ -287,6 +287,8 @@ export default function CrewsPage() {
                   shape="squircle"
                   size={96}
                   presetKind="crew"
+                  value={newCrewImageUrl}
+                  name={name}
                   onChange={setNewCrewImageUrl}
                 >
                   <CrewMark name={name} imageUrl={newCrewImageUrl} size={96} />
