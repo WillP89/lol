@@ -18,7 +18,15 @@ import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, R
  */
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', async (request, reply) => {
-    if (request.headers['x-admin-key'] !== config.ADMIN_API_KEY) {
+    // Real gap found operating this for the first time: every admin route needed a header,
+    // which meant a plain browser tab (paste a URL, done) couldn't reach any of them — the
+    // operator had to have curl/Postman handy. A `?key=` query param is weaker as a secret
+    // transport (URLs end up in browser history/server access logs) but this is still the same
+    // single shared secret either way, not a downgrade in WHO can authenticate — only in where
+    // the value can leak to. Acceptable for a pilot's read-mostly ops routes; see the doc-
+    // comment above on why this whole scheme needs replacing before real launch regardless.
+    const key = request.headers['x-admin-key'] ?? (request.query as Record<string, string> | undefined)?.key;
+    if (key !== config.ADMIN_API_KEY) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
   });
@@ -214,5 +222,40 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     }
     const outcome = await runSweepIfDue(RECOMMENDATION_SWEEP_DUE_INTERVAL_MS);
     return reply.send({ ran: outcome.ran, forced: false, ...(outcome.result ?? { crewsEvaluated: 0, delivered: 0, errors: 0 }) });
+  });
+
+  /**
+   * Real gap found verifying this in production for the first time: `lastResult.delivered` on
+   * `/health/scheduler` proves a sweep delivered *something*, but not WHICH Crew — so "it says
+   * delivered:1 but I can't find a message from Plot anywhere" was previously undebuggable
+   * without direct database access. Lists exactly what was delivered, to which named Crew, and
+   * who's in it, newest first — paste this URL (with ?key=) into a browser.
+   */
+  app.get('/recommendations/recent', async (request, reply) => {
+    const QuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(50).default(20) });
+    const parsed = QuerySchema.safeParse(request.query ?? {});
+    const limit = parsed.success ? parsed.data.limit : 20;
+
+    const recommendations = await prisma.crewRecommendation.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        crew: { select: { id: true, name: true, members: { select: { user: { select: { email: true } } } } } },
+        experience: { select: { name: true, category: true } },
+      },
+    });
+
+    return reply.send({
+      recommendations: recommendations.map((r) => ({
+        crewId: r.crewId,
+        crewName: r.crew.name,
+        crewMembers: r.crew.members.map((m) => m.user.email),
+        experienceName: r.experience?.name ?? null,
+        category: r.experience?.category ?? null,
+        score: r.score,
+        status: r.status,
+        createdAt: r.createdAt,
+      })),
+    });
   });
 }
