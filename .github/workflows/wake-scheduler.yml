@@ -1,0 +1,44 @@
+name: Wake recommendation scheduler
+
+# The free alternative to Render's (paid) Cron Jobs add-on. Render's free-tier web services
+# sleep when idle, and a sleeping process can't run its own in-memory checks — see
+# docs/DEPLOYMENT.md Step 2.6 and server.ts's own comment on `checkSweep`. GitHub Actions'
+# scheduled workflows are free (public repos: unlimited; private repos: within the free
+# monthly minutes, and this job runs in a few seconds), so this pings the API every 30
+# minutes purely to wake it — the actual "is a sweep due" decision still lives entirely in
+# `runSweepIfDue` (services/crewRecommendations.ts), so this never double-fires a sweep that
+# already happened; it just makes sure something checks regularly even while the dyno sleeps.
+#
+# Requires two repo secrets (Settings -> Secrets and variables -> Actions -> New repository
+# secret): PLOT_API_URL (e.g. https://plot-api.onrender.com, no trailing slash) and
+# PLOT_ADMIN_API_KEY (must match ADMIN_API_KEY set on the API service itself). Until both are
+# set, this workflow's step is skipped rather than failing loudly every 30 minutes.
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {} # lets you trigger a one-off run manually from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required secrets are set
+        id: check
+        run: |
+          if [ -n "${{ secrets.PLOT_API_URL }}" ] && [ -n "${{ secrets.PLOT_ADMIN_API_KEY }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::PLOT_API_URL and/or PLOT_ADMIN_API_KEY repo secrets are not set — skipping. See docs/DEPLOYMENT.md Step 2.6."
+          fi
+      - name: Ping the sweep endpoint (wakes the dyno; runSweepIfDue decides whether a sweep actually runs)
+        if: steps.check.outputs.configured == 'true'
+        run: |
+          curl -sS -X POST "${{ secrets.PLOT_API_URL }}/admin/recommendations/sweep" \
+            -H "x-admin-key: ${{ secrets.PLOT_ADMIN_API_KEY }}" \
+            -w "\nHTTP %{http_code}\n" \
+            --max-time 30
+      - name: Report scheduler health either way
+        if: steps.check.outputs.configured == 'true'
+        run: |
+          curl -sS "${{ secrets.PLOT_API_URL }}/health/scheduler" -w "\nHTTP %{http_code}\n" --max-time 15

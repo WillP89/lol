@@ -295,7 +295,10 @@ export async function runRecommendationSweep(): Promise<{ crewsEvaluated: number
   return { crewsEvaluated: crews.length, delivered, errors };
 }
 
-const SWEEP_JOB_NAME = 'crew_recommendation_sweep';
+// Exported (not just a local const) so a read-only status endpoint (see app.ts's `/health/
+// scheduler`) can look up the exact same SchedulerState row this module writes, instead of a
+// second hardcoded copy of the job name drifting out of sync with this one.
+export const SWEEP_JOB_NAME = 'crew_recommendation_sweep';
 
 /**
  * The restart/sleep-tolerant replacement for trusting a single process's own in-memory

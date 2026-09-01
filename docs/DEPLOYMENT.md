@@ -116,26 +116,47 @@ database every 15 minutes and runs a sweep whenever one is actually overdue (eve
 default), and that self-healing check also fires once on every boot — so on Fly.io or Railway,
 where the container stays running continuously, **no further setup is required.**
 
-**On Render specifically, also add an external Cron Job** (Render → your service → Cron Jobs →
-New Cron Job, e.g. schedule `*/30 * * * *`) that runs:
+**On Render specifically, you also need an external ping.** Why: its free tier puts an idle
+service to sleep, and a sleeping process's in-memory checks (the 15-minute poll above) simply
+stop running until something wakes it back up. An external ping is the one thing that reliably
+wakes a sleeping dyno in the first place — nothing running inside the process can do that for
+itself.
+
+**Recommended (free): the GitHub Actions workflow already in this repo**
+(`.github/workflows/wake-scheduler.yml`) pings the sweep endpoint every 30 minutes — no
+Render dashboard clicking, no paid add-on (Render's own Cron Jobs feature is billed, unlike a
+GitHub Actions schedule). Turn it on by adding two repo secrets (GitHub → this repo → Settings
+→ Secrets and variables → Actions → New repository secret):
 
 ```
-curl -X POST https://<your-api-url>/admin/recommendations/sweep \
-  -H "x-admin-key: <your ADMIN_API_KEY>"
+PLOT_API_URL = https://<your-api-url>          (no trailing slash)
+PLOT_ADMIN_API_KEY = <your ADMIN_API_KEY>       (same value set on the API service itself)
 ```
 
-Why this matters specifically on Render: its free tier puts an idle service to sleep, and a
-sleeping process's in-memory checks (the 15-minute poll above) simply stop running until
-something wakes it back up. An external ping is the one thing that reliably wakes a sleeping
-dyno in the first place — nothing running inside the process can do that for itself. The request
-above calls the exact same "is a sweep actually due" check the in-process poll uses (see
-`runSweepIfDue` in `crewRecommendations.ts`), so hitting it every 30 minutes does **not** mean a
-sweep runs every 30 minutes — it means "wake up and check every 30 minutes, actually run
-whenever the real 6-hour cadence says it's due." It's safe to call this endpoint as often as you
-like for exactly that reason. This same endpoint accepts `{"force": true}` in the request body
-for a genuine one-off manual run (ops/debugging only — a scheduler should never pass this).
+Until both secrets exist, the workflow runs on schedule but skips its actual step (with a
+visible warning in the Actions log) rather than failing — so it's safe to merge before you've
+set them up. You can also trigger it once by hand from the repo's **Actions** tab → "Wake
+recommendation scheduler" → **Run workflow**, to confirm it's wired up correctly before waiting
+for the schedule.
 
-On Fly.io/Railway this external cron is optional defense-in-depth, not required — those
+**Alternative**: Render → your service → Cron Jobs → New Cron Job (schedule `*/30 * * * *`),
+running the same `curl -X POST https://<your-api-url>/admin/recommendations/sweep -H
+"x-admin-key: <your ADMIN_API_KEY>"` — this costs a small amount on Render's usage-based
+pricing for Cron Jobs, which the GitHub Actions workflow above avoids entirely.
+
+Either way, the request calls the exact same "is a sweep actually due" check the in-process
+poll uses (see `runSweepIfDue` in `crewRecommendations.ts`), so pinging every 30 minutes does
+**not** mean a sweep runs every 30 minutes — it means "wake up and check every 30 minutes,
+actually run whenever the real 6-hour cadence says it's due." This same endpoint accepts
+`{"force": true}` in the request body for a genuine one-off manual run (ops/debugging only — a
+scheduler should never pass this).
+
+**Check it's actually working** — visit `https://<your-api-url>/health/scheduler` in any
+browser (no admin key needed, unlike every other admin/ops route — it's read-only, no secrets
+in the response). It reports `lastRunAt`, `nextDueAt`, whether a sweep is `overdue`, and a
+plain-English `diagnosis` — this is the one place to check instead of guessing from silence.
+
+On Fly.io/Railway this external ping is optional defense-in-depth, not required — those
 platforms don't idle-sleep a paid/hobby container the way Render's free tier does.
 
 ## Step 3 — deploy the web app

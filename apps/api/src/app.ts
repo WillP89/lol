@@ -19,6 +19,7 @@ import { feedbackRoutes } from './routes/feedback';
 import { exploreRoutes } from './routes/explore';
 import { locationRoutes } from './routes/locations';
 import { analyticsClientRoutes } from './routes/analyticsClient';
+import { SWEEP_JOB_NAME, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from './services/crewRecommendations';
 
 /**
  * Builds the Fastify app without calling `listen()` — kept separate from server.ts so
@@ -58,6 +59,57 @@ export function buildApp() {
       app.log.error({ err }, 'Health check DB query failed');
       return reply.code(503).send({ status: 'error', db: 'unreachable' });
     }
+  });
+
+  /**
+   * Public, read-only, no admin key — same trust level as `/health` above: timestamps only, no
+   * secrets or user data. The real gap this closes: on a host that idle-sleeps (Render's free
+   * tier — see docs/DEPLOYMENT.md, server.ts's own comment on `checkSweep`), NOTHING in-process
+   * can prove the automatic recommendation sweep is actually running — the only way to find out
+   * today was to read server logs nobody's watching. This lets anyone with the API's URL (a
+   * browser tab is enough, no curl/headers needed) see, in plain terms, whether the sweep has
+   * ever run and whether it's overdue by more than would be explained by the normal 15-minute
+   * in-process check interval — which is the exact, specific symptom of a sleeping dyno with no
+   * external cron pinging it. See `SWEEP_JOB_NAME`/`RECOMMENDATION_SWEEP_DUE_INTERVAL_MS` in
+   * services/crewRecommendations.ts for what actually writes this row.
+   */
+  app.get('/health/scheduler', async (_request, reply) => {
+    const state = await prisma.schedulerState.findUnique({ where: { jobName: SWEEP_JOB_NAME } });
+    const now = Date.now();
+    const dueIntervalHours = RECOMMENDATION_SWEEP_DUE_INTERVAL_MS / (60 * 60 * 1000);
+    const lastRunAt = state?.lastRunAt ?? null;
+    const nextDueAt = lastRunAt ? new Date(lastRunAt.getTime() + RECOMMENDATION_SWEEP_DUE_INTERVAL_MS) : null;
+    // Grace beyond the due interval before calling it "overdue" rather than just "not due yet" —
+    // wide enough to absorb the in-process 15-minute check cadence plus a slow cold start, so
+    // this doesn't cry wolf on a perfectly healthy host between checks.
+    const graceMs = 30 * 60 * 1000;
+    const overdue = nextDueAt !== null && now - nextDueAt.getTime() > graceMs;
+    const neverRun = lastRunAt === null;
+    let diagnosis: string;
+    if (neverRun) {
+      diagnosis =
+        'The sweep has never run since this SchedulerState row was created. If the API has been up for ' +
+        'more than ~15 minutes, this is unexpected — check server logs for errors, or the process may not ' +
+        'be staying alive long enough to complete the boot-time check.';
+    } else if (overdue) {
+      diagnosis =
+        `Overdue: a sweep was due by ${nextDueAt!.toISOString()} but has not run since ${lastRunAt!.toISOString()}. ` +
+        'The most common cause is an idle-sleeping host (e.g. Render free tier) with no external cron ' +
+        'pinging POST /admin/recommendations/sweep to wake it — see docs/DEPLOYMENT.md Step 2.6.';
+    } else {
+      diagnosis = 'Healthy — the sweep has run within its expected cadence.';
+    }
+    return reply.send({
+      jobName: SWEEP_JOB_NAME,
+      lastRunAt: lastRunAt?.toISOString() ?? null,
+      lastClaimedAt: state?.lastClaimedAt?.toISOString() ?? null,
+      nextDueAt: nextDueAt?.toISOString() ?? null,
+      dueIntervalHours,
+      overdue,
+      neverRun,
+      diagnosis,
+      lastResult: state?.lastResult ?? null,
+    });
   });
 
   app.register(authRoutes);
