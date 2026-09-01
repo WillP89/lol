@@ -305,7 +305,14 @@ export default function HomePage() {
             <Link
               href={`/plans/${nextPlan.publicSlug}`}
               className="fade-up v2-bleed"
-              style={{ display: 'block', position: 'relative', height: 420, overflow: 'hidden', marginBottom: 6 }}
+              // Real bug found screenshotting this on an actual phone viewport (not just desktop
+              // devtools): at 420px, this card's own pinned-bottom title sat close enough to the
+              // physical bottom edge that on a real iPhone viewport (chrome visible, the DEFAULT
+              // state — not the taller one you only get after scrolling) it rendered partly
+              // underneath the floating nav pill, on first paint, with nothing scrolled yet. 340
+              // keeps this "the dominant moment" (still by far the biggest thing on the page) while
+              // clearing the fold on real hardware, not just a taller desktop-emulated viewport.
+              style={{ display: 'block', position: 'relative', height: 340, overflow: 'hidden', marginBottom: 6 }}
             >
               <div
                 className="v2-ken-burns"

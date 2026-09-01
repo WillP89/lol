@@ -89,7 +89,13 @@ function Card({
         <div className="v2-display" style={{ fontSize: size === 'hero' ? 24 : 16, color: '#fff', lineHeight: 1.15, marginBottom: 6 }}>
           {exp.name}
         </div>
-        <div style={{ fontSize: size === 'hero' ? 13.5 : 12, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>
+        {/* `v2-explore-card-meta`'s mobile-only right padding keeps price/date clear of the
+            floating Map toggle (fixed at `right:18, bottom:96`, so it can float over any card
+            depending on scroll position) — a real overlap found scrolling this page for real: a
+            card's own price text ending up rendered partly underneath that button's opaque
+            background. Desktop never mounts that button (see `!isDesktop` above), so it gets no
+            padding there. */}
+        <div className="v2-explore-card-meta" style={{ fontSize: size === 'hero' ? 13.5 : 12, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>
           {formatShortDate(exp.startsAt)} · {exp.venue.name}
           {price && ` · ${price}`}
         </div>

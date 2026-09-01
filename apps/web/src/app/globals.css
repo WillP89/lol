@@ -330,11 +330,19 @@ body {
   .v2-identity-track * { transition: none !important; }
 }
 
-/* Content column — generous for a light editorial layout, wider than the old dark app's 480px. */
+/* Content column — generous for a light editorial layout, wider than the old dark app's 480px.
+   Bottom padding clears the floating `.v2-nav-bottom` pill (46px tab + 8px*2 padding = 62px,
+   sitting `env(safe-area-inset-bottom) + 16px` off the physical bottom edge) with room to spare.
+   Real bug this replaces: a flat 108px never accounted for the safe-area inset itself, so on
+   every notched iPhone (34px inset) the nav's true footprint — 62 + 16 + 34 = 112px — already
+   exceeded the 108px reserved for it, meaning the last bit of every page's content (and, on
+   shorter screens, whatever content happened to fall at that scroll position) rendered partly
+   *underneath* the opaque pill instead of clearing it. Desktop's rail replaces the pill entirely
+   (see `.v2-shell-desktop`) so this cost nothing there. */
 .v2-page {
   max-width: 560px;
   margin: 0 auto;
-  padding: 20px 20px 108px;
+  padding: 20px 20px calc(96px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Pill button family. */
@@ -540,6 +548,12 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   color: var(--v2-ink);
 }
 .v2-search input::placeholder { color: var(--v2-ink-dim); }
+
+/* Keeps price/date text clear of the floating mobile Map toggle — see the comment at its call
+   site in explore/page.tsx. Only reserved under 900px; the button never mounts on desktop. */
+@media (max-width: 899px) {
+  .v2-explore-card-meta { padding-right: 76px; }
+}
 
 .v2-explore-split { display: block; }
 .v2-explore-map-pane { display: none; }

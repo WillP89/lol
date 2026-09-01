@@ -78,17 +78,32 @@ const CATEGORY_ART: Record<string, CategoryArt> = {
 };
 const DEFAULT_ART = CATEGORY_ART.LIVE_MUSIC;
 
-function iconDataUri(svgInner: string): string {
+function iconDataUri(svgInner: string, opacity: number): string {
   // Low-opacity white baked directly into the SVG (rather than a CSS `opacity` on the whole
   // background layer, which would also fade the gradient beneath it) — a faint texture, not a
   // foreground graphic competing with the title/date text over it.
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.1">${svgInner}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,${opacity})" stroke-width="1.1">${svgInner}</svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
 
+// A faint repeating dot grid, tiled small across the whole card — the one thing that was missing
+// between "one icon in a corner" and "a designed surface": texture that reads at a glance, before
+// the eye ever gets to the watermark. Real gap found running this against actual seeded content:
+// every tile without a real photo (which today is *every* tile — no live provider key configured,
+// see the file header) was 90%+ flat colour. A single corner icon at 55% of the card's width
+// doesn't fix that for a 280–420px-tall hero card; most of it was still dead space.
+const DOT_GRID = `url("data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26"><circle cx="2" cy="2" r="1.1" fill="rgba(255,255,255,0.09)"/></svg>',
+)}") repeat`;
+
 export function v2Art(imageUrl: string | null | undefined, category: string | null | undefined): string {
   const art = CATEGORY_ART[category ?? ''] ?? DEFAULT_ART;
-  const iconLayer = `${iconDataUri(art.icon)} no-repeat 115% 130% / 55% auto`;
-  const fallback = `${iconLayer}, ${art.gradient}`;
+  // Two copies of the category icon — a large one anchored bottom-right (the signature mark,
+  // still deliberately oversized/cropped rather than a neat centred sticker) plus a small one
+  // top-left balancing the composition — over the dot grid, over the gradient. `imageUrl` layers
+  // on top of all of it, so a real photo still fully obscures every fallback layer beneath it.
+  const bigIcon = `${iconDataUri(art.icon, 0.14)} no-repeat 122% 128% / 62% auto`;
+  const smallIcon = `${iconDataUri(art.icon, 0.1)} no-repeat -8% -14% / 26% auto`;
+  const fallback = `${bigIcon}, ${smallIcon}, ${DOT_GRID}, ${art.gradient}`;
   return imageUrl ? `url("${imageUrl}") center / cover no-repeat, ${fallback}` : fallback;
 }
