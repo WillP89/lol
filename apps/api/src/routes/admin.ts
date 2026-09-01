@@ -7,7 +7,7 @@ import { syncAllProviders } from '../services/inventorySync';
 import { buildCanonicalKey } from '../services/entityResolution';
 import { computeQualityScore } from '../services/qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
-import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, getOrCreateSettings, explainCrewRecommendation, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from '../services/crewRecommendations';
+import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, getOrCreateSettings, explainCrewRecommendation, PLOT_SYSTEM_EMAIL, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from '../services/crewRecommendations';
 
 /**
  * Internal operator tooling (brief §29 admin console, §64 operating dashboard). Gated by a
@@ -318,5 +318,53 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     );
 
     return reply.send({ userId: user.id, email: user.email, joinedAt: user.createdAt, crews });
+  });
+
+  /**
+   * A real, explicit, one-off operator request ("moving forwards, remove ALL accounts apart
+   * from these two real ones, and remove all existing Crews — they were all test/fake") — not
+   * something this route should make easy to trigger by accident. Two independent guards: the
+   * keep-list is hardcoded, not a request parameter (so a wrong param can't widen or narrow who
+   * survives), and the actual deletion only runs with `?confirm=DELETE_ALL_TEST_DATA` exactly —
+   * every other call (including the bare `?key=...` alone) is a dry run that reports exactly
+   * what WOULD be deleted and changes nothing. Crews are deleted first (cascades to
+   * CrewMember/CrewMessage/Plan/CrewRecommendation/etc. — see schema.prisma's onDelete: Cascade
+   * on every one of those), then every User not on the keep-list (cascades to their
+   * Profile/TasteProfile/etc.) — the Plot system account is deliberately never touched, it
+   * self-heals via getPlotSystemUserId() regardless.
+   */
+  const KEEP_EMAILS = ['willproud89@gmail.com', 'itswillproud@gmail.com'];
+  const CONFIRM_PHRASE = 'DELETE_ALL_TEST_DATA';
+  app.get('/reset-to-real-accounts', async (request, reply) => {
+    const QuerySchema = z.object({ confirm: z.string().optional() });
+    const parsed = QuerySchema.safeParse(request.query ?? {});
+    const confirm = parsed.success ? parsed.data.confirm : undefined;
+
+    const [usersToDelete, crewsToDelete] = await Promise.all([
+      prisma.user.findMany({ where: { email: { notIn: [...KEEP_EMAILS, PLOT_SYSTEM_EMAIL] } }, select: { email: true } }),
+      prisma.crew.findMany({ select: { name: true } }),
+    ]);
+
+    if (confirm !== CONFIRM_PHRASE) {
+      return reply.send({
+        dryRun: true,
+        wouldKeep: KEEP_EMAILS,
+        wouldDeleteUserCount: usersToDelete.length,
+        wouldDeleteUserEmails: usersToDelete.map((u) => u.email),
+        wouldDeleteCrewCount: crewsToDelete.length,
+        wouldDeleteCrewNames: crewsToDelete.map((c) => c.name),
+        message: `Nothing was deleted. Add &confirm=${CONFIRM_PHRASE} to this exact URL to actually run this.`,
+      });
+    }
+
+    const deletedCrews = await prisma.crew.deleteMany({});
+    const deletedUsers = await prisma.user.deleteMany({ where: { email: { notIn: [...KEEP_EMAILS, PLOT_SYSTEM_EMAIL] } } });
+
+    return reply.send({
+      dryRun: false,
+      kept: KEEP_EMAILS,
+      deletedCrewCount: deletedCrews.count,
+      deletedUserCount: deletedUsers.count,
+    });
   });
 }

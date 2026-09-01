@@ -52,7 +52,7 @@ export const RECOMMENDATION_SWEEP_DUE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hou
 // deliberately never added as a CrewMember of anything, so it can't appear in member lists,
 // vote pulses, or "who's in this Crew" anywhere in the product. Self-heals on first use, same
 // pattern as ensureInventory's city seeding.
-const PLOT_SYSTEM_EMAIL = 'system+plot-recommendations@plot.internal';
+export const PLOT_SYSTEM_EMAIL = 'system+plot-recommendations@plot.internal';
 let cachedSystemUserId: string | null = null;
 export async function getPlotSystemUserId(): Promise<string> {
   if (cachedSystemUserId) return cachedSystemUserId;
