@@ -17,6 +17,8 @@ interface CrewSummary {
   name: string;
   imageUrl: string | null;
   members: { user: { displayName: string | null; email: string; avatarUrl?: string | null } }[];
+  // Real, persisted unread state — see apps/api/src/services/crew.ts#crewSummaryExtras.
+  unreadCount: number;
   latestMessage: { body: string; authorName: string; createdAt: string } | null;
   activePlan: { id: string; title: string; publicSlug: string; inCount: number; totalMembers: number } | null;
   upcomingPlan: { id: string; title: string; publicSlug: string; startsAt: string | null; venueName: string | null } | null;
@@ -202,6 +204,20 @@ export default function CrewsPage() {
                     <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(0,0,0,0) 32%, rgba(0,0,0,0.68) 100%)' }} />
                     <div style={{ position: 'absolute', top: 12, left: 12 }}>
                       <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={34} />
+                      {/* Real, persisted unread state — see apps/api/src/services/crew.ts
+                          #crewSummaryExtras. Never faked client-side. */}
+                      {crew.unreadCount > 0 && (
+                        <div
+                          className="v2-pop-in"
+                          style={{
+                            position: 'absolute', top: -4, right: -4, minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9,
+                            background: 'var(--v2-pop)', color: '#fff', fontSize: 9.5, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            boxShadow: '0 0 0 2px rgba(0,0,0,0.55)',
+                          }}
+                        >
+                          {crew.unreadCount > 9 ? '9+' : crew.unreadCount}
+                        </div>
+                      )}
                     </div>
                     {activity.tone === 'plan' && (
                       <div style={{ position: 'absolute', top: 12, right: 12, fontSize: 10, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase', color: '#fff', background: 'var(--v2-green)', padding: '4px 9px', borderRadius: 100 }}>
@@ -229,7 +245,7 @@ export default function CrewsPage() {
                           {crew.members.length} {crew.members.length === 1 ? 'person' : 'people'}
                         </span>
                       </div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{ fontSize: 12, fontWeight: crew.unreadCount > 0 ? 800 : 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {activity.text}
                       </div>
                     </div>

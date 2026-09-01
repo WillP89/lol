@@ -17,6 +17,9 @@ interface CrewSummary {
   name: string;
   imageUrl: string | null;
   members: { user: { id: string; displayName: string | null; email: string; avatarUrl?: string | null } }[];
+  // Real, persisted unread state — see apps/api/src/services/crew.ts#crewSummaryExtras. Never
+  // computed client-side; the server is the only place that knows what's actually been read.
+  unreadCount: number;
   latestMessage: { body: string; authorName: string; createdAt: string; authorAvatarUrl?: string | null } | null;
   activePlan: { id: string; title: string; publicSlug: string; inCount: number; totalMembers: number; iVoted: boolean } | null;
   upcomingPlan: { id: string; title: string; publicSlug: string; startsAt: string | null; venueName: string | null } | null;
@@ -234,15 +237,37 @@ export default function HomePage() {
             <div className="v2-story-rail" style={{ marginBottom: 28 }}>
               {crews.map((crew) => {
                 const status = crewStatusLine(crew);
+                const hasUnread = crew.unreadCount > 0;
                 const tileHref = status.urgent ? `/plans/${crew.activePlan!.publicSlug}` : `/crews/${crew.id}`;
+                // Priority order for the ring: a vote genuinely waiting on you beats unread
+                // messages beats a locked plan beats nothing — the same "what's actually true
+                // right now, most-important-first" rule the rest of Home's hero uses.
+                const ringClass = status.urgent ? ' urgent' : hasUnread ? ' unread' : crew.upcomingPlan ? ' plan' : '';
                 return (
-                  <Link key={crew.id} href={tileHref} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 72 }}>
-                    <div className={`v2-story-ring${status.urgent ? ' urgent' : crew.upcomingPlan ? ' plan' : ''}`}>
-                      <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={64} />
+                  <Link key={crew.id} href={tileHref} className="v2-tap-feedback" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 72 }}>
+                    <div style={{ position: 'relative' }}>
+                      <div className={`v2-story-ring${ringClass}`}>
+                        <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={64} />
+                      </div>
+                      {/* Real, persisted unread state (never faked client-side) — see
+                          apps/api/src/services/crew.ts#crewSummaryExtras. A count up to 9, then
+                          "9+" rather than a badge that keeps growing wider than the avatar. */}
+                      {hasUnread && (
+                        <div
+                          className="v2-pop-in"
+                          style={{
+                            position: 'absolute', top: -2, right: -2, minWidth: 20, height: 20, padding: '0 5px', borderRadius: 10,
+                            background: 'var(--v2-pop)', color: '#fff', fontSize: 10.5, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            boxShadow: '0 0 0 2.5px var(--v2-bg)',
+                          }}
+                        >
+                          {crew.unreadCount > 9 ? '9+' : crew.unreadCount}
+                        </div>
+                      )}
                     </div>
                     <span
                       style={{
-                        fontSize: 11, fontWeight: status.urgent ? 800 : 600, color: status.urgent ? 'var(--v2-pop)' : 'var(--v2-ink-muted)',
+                        fontSize: 11, fontWeight: status.urgent || hasUnread ? 800 : 600, color: status.urgent ? 'var(--v2-pop)' : 'var(--v2-ink-muted)',
                         maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}
                     >

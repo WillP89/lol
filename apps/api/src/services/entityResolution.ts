@@ -53,3 +53,48 @@ export function similarityScore(a: string, b: string): number {
 export function shouldAutoMerge(a: string, b: string): boolean {
   return similarityScore(a, b) >= AUTO_MERGE_THRESHOLD;
 }
+
+// A near-duplicate cluster (same fictional DJ set at the "same" venue two days apart, from two
+// city aliases that resolved to two different Venue rows) is still recognisably the same thing to
+// a human looking at two cards side by side — this is the window within which "same name, same
+// category" gets treated as one option rather than two.
+const NEAR_DUPLICATE_WINDOW_DAYS = 3;
+
+/**
+ * Runtime near-duplicate suppression — the counterpart `similarityScore`/`shouldAutoMerge` were
+ * missing. Before this, both functions existed only as ingestion-time heuristics that nothing
+ * ever called: `buildCanonicalKey`'s unique constraint was the only dedup that actually ran, and
+ * it only catches SAME-DAY exact matches. Root-caused via the actual reported bug (two "Jorja
+ * Smith DJ Set" cards, different dates): `defaultCity` values "Stafford" and "Stone" both alias to
+ * the same STAFFORDSHIRE_VENUES set (providers/mock/ticketingProvider.ts), but `ensureInventory`
+ * self-heals per literal city string on first use — each alias gets its own Venue row (Venue
+ * identity is name+city) and its own Experience row (canonicalKey includes the day, and the mock
+ * provider's "daysOut" is relative to whichever wall-clock day each city's sync happened to run
+ * on). `scoreExperiencesForCrew`'s candidate query has no city filter — by design, so a crew can
+ * still see worth-travelling-for options further out — so both rows end up as separate-looking
+ * options for the same crew.
+ *
+ * This isn't only a mock-data quirk: the exact same shape of problem happens with a real gig
+ * listed by two real providers under slightly different names or a day apart. The general fix
+ * lives here, at the point results are about to be shown, not just at ingestion: collapse
+ * same-category, similar-name, near-in-time items down to the single best-ranked (i.e. first, in
+ * whatever order the caller already sorted by) representative.
+ */
+export function dedupeNearDuplicates<T>(
+  items: T[],
+  getFields: (item: T) => { name: string; category: string; startsAt: Date },
+): T[] {
+  const kept: T[] = [];
+  for (const item of items) {
+    const fields = getFields(item);
+    const isDuplicate = kept.some((existing) => {
+      const existingFields = getFields(existing);
+      if (existingFields.category !== fields.category) return false;
+      const daysApart = Math.abs(fields.startsAt.getTime() - existingFields.startsAt.getTime()) / 86_400_000;
+      if (daysApart > NEAR_DUPLICATE_WINDOW_DAYS) return false;
+      return shouldAutoMerge(fields.name, existingFields.name);
+    });
+    if (!isDuplicate) kept.push(item);
+  }
+  return kept;
+}

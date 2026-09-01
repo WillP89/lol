@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { MIN_PUBLISHABLE_QUALITY_SCORE } from './qualityScoring';
 import { ensureInventory } from './inventorySync';
 import { categoryToTasteKey } from './match';
+import { dedupeNearDuplicates } from './entityResolution';
 
 const EXPLORE_WINDOW_DAYS = 21;
 const EXPLORE_LIMIT = 200;
@@ -28,7 +29,7 @@ export async function listExploreExperiences(city: string, userId?: string) {
   const windowEnd = new Date();
   windowEnd.setDate(windowEnd.getDate() + EXPLORE_WINDOW_DAYS);
 
-  const experiences = await prisma.experience.findMany({
+  const rows = await prisma.experience.findMany({
     where: {
       qualityScore: { gte: MIN_PUBLISHABLE_QUALITY_SCORE },
       bookingStatus: { not: 'SOLD_OUT' },
@@ -39,6 +40,11 @@ export async function listExploreExperiences(city: string, userId?: string) {
     orderBy: { startsAt: 'asc' },
     take: EXPLORE_LIMIT,
   });
+  // Near-duplicate suppression (see entityResolution.ts#dedupeNearDuplicates) — kept in
+  // chronological order, so the surviving representative of any cluster is whichever happens
+  // soonest, same as the rest of this browse view. A real duplicate ("Jorja Smith DJ Set" twice,
+  // a day apart, same venue family) should never reach the feed as two cards.
+  const experiences = dedupeNearDuplicates(rows, (e) => ({ name: e.name, category: e.category, startsAt: e.startsAt }));
 
   if (!userId) return experiences;
   const tasteProfile = await prisma.tasteProfile.findUnique({ where: { userId }, select: { categoryAffinity: true } });

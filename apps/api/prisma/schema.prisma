@@ -278,6 +278,11 @@ model CrewMember {
   role     CrewRole         @default(MEMBER)
   status   CrewMemberStatus @default(ACTIVE)
   joinedAt DateTime         @default(now())
+  /// Real, persisted unread state — never faked client-side. Null means "never read anything in
+  /// this Crew yet" (every message ever sent counts as unread), not "read at time zero" — see
+  /// services/crew.ts#crewSummaryExtras for how this turns into an unread count, and
+  /// POST /crews/:id/read for the one place this is ever written.
+  lastReadAt DateTime?
 
   @@unique([crewId, userId])
   @@index([userId])

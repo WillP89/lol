@@ -678,6 +678,7 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   transition: transform 0.15s ease;
 }
 .v2-story-ring.urgent { background: linear-gradient(135deg, var(--v2-pop), var(--v2-confetti-4)); }
+.v2-story-ring.unread { background: var(--v2-pop); }
 .v2-story-ring.plan { background: linear-gradient(135deg, var(--v2-green), var(--v2-confetti-3)); }
 .v2-story-ring:active { transform: scale(0.94); }
 @keyframes v2RingPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,47,126,0.35); } 50% { box-shadow: 0 0 0 5px rgba(255,47,126,0); } }

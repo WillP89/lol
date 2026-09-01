@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { MIN_PUBLISHABLE_QUALITY_SCORE } from './qualityScoring';
 import { getMemberAvailability } from './availability';
 import { ensureInventory } from './inventorySync';
+import { dedupeNearDuplicates } from './entityResolution';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { track } from './analytics';
 import { sendExperienceToCrew } from './plan';
@@ -87,6 +88,9 @@ async function resolveCrewCity(crewId: string, fallbackUserId?: string): Promise
  *     `withinRadius`), and how many members are free that evening (real AvailabilityWindow
  *     data, not simulated).
  *  4. Learned re-rank hook — currently a no-op; see LearnedRanker above.
+ *  5. Near-duplicate suppression — collapses same-category, similar-name, near-in-time options
+ *     (see entityResolution.ts#dedupeNearDuplicates) down to the single best-scoring one, so a
+ *     mock-data or multi-provider near-duplicate never shows as two separate cards.
  *
  * Every option keeps its `reasons[]` so the API response is explainable, not a black box
  * score — see brief §46. Does not persist anything; callers that need an audit trail (
@@ -217,7 +221,14 @@ export async function scoreExperiencesForCrew(
   }
 
   scored.sort((a, b) => b.matchScore - a.matchScore);
-  return scored;
+  // Near-duplicate suppression (see entityResolution.ts#dedupeNearDuplicates) — runs after
+  // sorting so the kept representative of any cluster is the best-scoring one, not just
+  // whichever happened to be fetched first.
+  return dedupeNearDuplicates(scored, (option) => ({
+    name: option.experience.name,
+    category: option.experience.category,
+    startsAt: option.experience.startsAt,
+  }));
 }
 
 /**

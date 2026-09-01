@@ -145,6 +145,9 @@ function formatTime(iso: string) {
 }
 
 const POLL_INTERVAL_MS = 3000;
+// The composer's auto-grow ceiling — about 6 lines at the composer's own font size, past which
+// it scrolls internally rather than eating the whole screen on a long paste.
+const COMPOSER_MAX_HEIGHT = 140;
 // Two distinct announcement formats land in chat: a member sharing something themselves, and
 // the automatic recommendation engine's own distinct copy (services/plan.ts#
 // createRecommendationPlanForCrew) — deliberately different wording/emoji so a recommendation
@@ -629,30 +632,26 @@ export default function CrewPage() {
   const [copied, setCopied] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const lastIdRef = useRef<string | undefined>(undefined);
-  const composerInputRef = useRef<HTMLInputElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const composerFormRef = useRef<HTMLFormElement>(null);
+  // The composer's multi-line growth — real, reported gap: it was a fixed-height single-line
+  // `<input>`, so a message longer than one line just silently scrolled its own text sideways
+  // inside a tiny box instead of growing, the way every real chat composer (iMessage, WhatsApp,
+  // Slack) does. `rows={1}` plus this effect resetting height to `auto` then to the actual
+  // `scrollHeight` on every keystroke is the standard auto-grow technique — capped at
+  // `COMPOSER_MAX_HEIGHT` so a genuinely long paste grows the box, not the whole page, past
+  // which it scrolls internally instead.
+  useEffect(() => {
+    const el = composerInputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
+  }, [draft]);
   const router = useRouter();
   // The real source of truth for "how much space do I actually have" on mobile — see
   // lib/useVisualViewportHeight.ts. `null` until the API has fired once (SSR, or a browser
   // without it), so every usage below falls back to the existing `dvh` calc in that case.
   const visualViewportHeight = useVisualViewportHeight();
-  // The chat area's height used to subtract a hardcoded pixel guess for "how tall is the header
-  // above it" (82/132) — a real, reported layout regression this fixes: those numbers were
-  // tuned to the OLD, smaller header, and silently went stale (the message list + composer ran
-  // too tall, pushing the composer off-screen) the moment the header banner grew for the
-  // identity-wash redesign. Measuring the actual rendered header/context area via ResizeObserver
-  // means this can never drift out of sync with whatever the header actually renders again.
-  const headerAreaRef = useRef<HTMLDivElement>(null);
-  const [headerAreaHeight, setHeaderAreaHeight] = useState(82);
-  useEffect(() => {
-    const el = headerAreaRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      const height = entries[0]?.borderBoxSize?.[0]?.blockSize ?? entries[0]?.contentRect.height;
-      if (height) setHeaderAreaHeight(Math.ceil(height));
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
 
   // The composer's "+" action sheet — one entry point into every way of adding something to
   // the conversation beyond plain text (see docs/DECISIONS.md#decision-objects).
@@ -720,6 +719,15 @@ export default function CrewPage() {
     return () => clearInterval(interval);
   }, [crewId, loadCrew]);
 
+  // Real, persisted unread state — marks this Crew read (see apps/api/src/services/crew.ts
+  // #markCrewRead) whenever this member is actually looking at it, not on a timer regardless of
+  // whether anyone's here. Only while the tab is genuinely visible — a backgrounded tab still
+  // polling for messages should NOT silently mark them read before anyone's actually seen them.
+  function markRead() {
+    if (document.visibilityState !== 'visible') return;
+    api.post(`/crews/${crewId}/read`).catch(() => {});
+  }
+
   const poll = useCallback(async () => {
     try {
       const res = await api.get<{ messages: ChatMessage[] }>(`/crews/${crewId}/messages${lastIdRef.current ? `?after=${lastIdRef.current}` : ''}`);
@@ -728,6 +736,7 @@ export default function CrewPage() {
         return;
       }
       lastIdRef.current = res.messages[res.messages.length - 1].id;
+      markRead();
       // Merge by id (not append) and re-sort by createdAt — real bug found via multi-session
       // testing: two overlapping `poll()` calls (React StrictMode double-invoking this effect
       // in dev; a slow response racing the next 3s interval tick in any environment) could each
@@ -1263,8 +1272,18 @@ export default function CrewPage() {
   }
 
   return (
-    <div className="v2">
-      <div className="v2-shell-desktop v2-crew-split">
+    // Real, reported P0 fix: the composer used to fight a hardcoded/measured pixel-height guess
+    // for "how much space is left" — fragile by construction, and it broke again the moment the
+    // header's own height changed. Replaced with the actually-correct way to pin a bottom bar in
+    // a scrollable conversation: ONE flex column filling the real viewport height (`100dvh` —
+    // already tracks the keyboard/toolbar on modern mobile browsers, the same technique
+    // BottomSheet already relies on elsewhere in this file), where the header is a natural
+    // flex-shrink:0 child, the message list is the one `flex:1; min-height:0; overflow-y:auto`
+    // scroll region, and the composer is just the LAST flex child — inherently always visible at
+    // the bottom, because that is what a flex column does, not because of a number anyone
+    // calculated. No JS measurement of anything is needed for this to stay correct.
+    <div className="v2" style={{ height: '100dvh', overflow: 'hidden' }}>
+      <div className="v2-shell-desktop v2-crew-split" style={{ height: '100%' }}>
         {/* Desktop-only Crews rail beside the active conversation — see globals.css's
             .v2-crew-split comment: the conversation column staying a fixed, readable width is
             correct (WhatsApp/iMessage desktop both do this), but the dead space that used to sit
@@ -1295,8 +1314,8 @@ export default function CrewPage() {
             </div>
           </div>
         )}
-      <div className="v2-crew-main" style={{ maxWidth: 720, width: '100%' }}>
-      <div ref={headerAreaRef}>
+      <div className="v2-crew-main" style={{ maxWidth: 720, width: '100%', height: '100dvh', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flexShrink: 0 }}>
         {/* Header — HARD RESET. Real, reported feedback: "tiny Crew header, tiny social presence".
             This is now a real banner, not a slim top bar: the Crew's own identity wash fills it
             (the same two colours its mark already draws from — never a new palette invented for
@@ -1353,12 +1372,16 @@ export default function CrewPage() {
 
         <div
           style={{
+            // The one flex-fill scroll region — no explicit height anywhere here. `flex: 1`
+            // takes exactly whatever's left below the header inside .v2-crew-main's own
+            // height:100dvh, and `minHeight: 0` is the one non-obvious rule flexbox needs to let
+            // a flex child actually shrink below its content's natural height instead of
+            // overflowing its parent (the classic "flexbox scroll area" gotcha — without this
+            // the message list would just keep growing and push the composer off-screen again).
             display: 'flex',
             flexDirection: 'column',
-            // The measured header/context height (see headerAreaRef above) — never a hardcoded
-            // guess. visualViewportHeight already reflects the keyboard on iOS/Android; the dvh
-            // calc is only the fallback for when that API hasn't reported yet (or doesn't exist).
-            height: visualViewportHeight != null ? `${visualViewportHeight - headerAreaHeight}px` : `calc(100dvh - ${headerAreaHeight}px)`,
+            flex: 1,
+            minHeight: 0,
             padding: '4px 20px calc(env(safe-area-inset-bottom, 0px) + 14px)',
             position: 'relative',
           }}
@@ -1387,7 +1410,7 @@ export default function CrewPage() {
             onScroll={handleListScroll}
             className="v2-chat-canvas"
             style={{
-              flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 10,
+              flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 10,
               margin: '0 -20px', padding: '10px 20px 10px',
               ['--v2-chat-wash' as string]: `radial-gradient(90% 70% at 100% 0%, ${crewPair[0]}2e, transparent 65%), radial-gradient(90% 70% at 0% 100%, ${crewPair[1]}26, transparent 65%)`,
             }}
@@ -1522,7 +1545,7 @@ export default function CrewPage() {
           {error && <div style={{ color: 'var(--v2-error)', fontSize: 12.5, marginBottom: 6 }}>{error}</div>}
 
           {!solo && (
-            <form onSubmit={send} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <form ref={composerFormRef} onSubmit={send} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexShrink: 0 }}>
               <button
                 type="button"
                 onClick={() => setActionOpen(true)}
@@ -1531,15 +1554,27 @@ export default function CrewPage() {
               >
                 +
               </button>
-              <input
+              {/* A real multi-line composer, not a fixed-height single-line input — grows with
+                  the message (see the auto-resize effect above), capped at COMPOSER_MAX_HEIGHT
+                  and internally scrollable past that. Enter sends (the iMessage/WhatsApp
+                  convention); Shift+Enter inserts a real newline. */}
+              <textarea
                 ref={composerInputRef}
+                rows={1}
                 style={{
-                  flex: 1, padding: '13px 18px', borderRadius: 100, border: 'none', outline: 'none',
+                  flex: 1, padding: '12px 18px', borderRadius: 22, border: 'none', outline: 'none', resize: 'none',
                   background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)', fontSize: 14.5, fontFamily: 'inherit', color: 'var(--v2-ink)',
+                  lineHeight: 1.35, maxHeight: COMPOSER_MAX_HEIGHT, overflowY: 'auto',
                 }}
                 placeholder={`Message ${crew.name}…`}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    composerFormRef.current?.requestSubmit();
+                  }
+                }}
                 maxLength={2000}
               />
               {/* Never disabled while a send is in flight — sending is optimistic, so there is

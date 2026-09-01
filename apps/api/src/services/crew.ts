@@ -107,7 +107,7 @@ export async function getCrewPreviewByInviteCode(inviteCode: string) {
  * gets `latestMessage: null`, not a broken row).
  */
 async function crewSummaryExtras(crewId: string, requestingUserId: string) {
-  const [latestMessage, activePlan, upcomingPlan] = await Promise.all([
+  const [latestMessage, activePlan, upcomingPlan, membership] = await Promise.all([
     prisma.crewMessage.findFirst({
       where: { crewId },
       orderBy: { createdAt: 'desc' },
@@ -127,9 +127,22 @@ async function crewSummaryExtras(crewId: string, requestingUserId: string) {
       orderBy: { createdAt: 'desc' },
       include: { experience: { include: { venue: true } } },
     }),
+    prisma.crewMember.findUnique({ where: { crewId_userId: { crewId, userId: requestingUserId } }, select: { lastReadAt: true } }),
   ]);
 
+  // Real, persisted unread count — never faked in the client. `lastReadAt: null` (never opened
+  // this Crew's chat, or joined before it existed) counts everything ever sent as unread, same
+  // as a fresh WhatsApp/iMessage thread. Your own messages never count as unread to yourself.
+  const unreadCount = await prisma.crewMessage.count({
+    where: {
+      crewId,
+      authorId: { not: requestingUserId },
+      ...(membership?.lastReadAt ? { createdAt: { gt: membership.lastReadAt } } : {}),
+    },
+  });
+
   return {
+    unreadCount,
     latestMessage: latestMessage
       ? {
           body: latestMessage.body,
@@ -269,6 +282,21 @@ export async function getCrewDetail(crewId: string, requestingUserId: string) {
 export async function isCrewMember(crewId: string, userId: string): Promise<boolean> {
   const membership = await prisma.crewMember.findUnique({ where: { crewId_userId: { crewId, userId } } });
   return Boolean(membership && membership.status === 'ACTIVE');
+}
+
+/**
+ * The one place `CrewMember.lastReadAt` is ever written — real, persisted unread state, not
+ * something the client fakes by remembering which Crews it's scrolled through this session (that
+ * resets on every reload/new device, and can't power a badge on Home before the Crew's chat has
+ * ever been opened on THIS load). Called by the frontend when a member opens a Crew's chat and
+ * again as new messages arrive while they're actively looking at it — see
+ * docs/DECISIONS.md#unread-state for exactly when.
+ */
+export async function markCrewRead(crewId: string, userId: string): Promise<void> {
+  await prisma.crewMember.updateMany({
+    where: { crewId, userId, status: 'ACTIVE' },
+    data: { lastReadAt: new Date() },
+  });
 }
 
 export class CrewMembershipError extends Error {

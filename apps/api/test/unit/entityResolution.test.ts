@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { buildCanonicalKey, similarityScore, shouldAutoMerge, normalise } from '../../src/services/entityResolution';
+import { buildCanonicalKey, similarityScore, shouldAutoMerge, normalise, dedupeNearDuplicates } from '../../src/services/entityResolution';
 import type { CanonicalListingInput } from '../../src/providers/types';
 
 function fakeInput(overrides: Partial<CanonicalListingInput> = {}): CanonicalListingInput {
@@ -54,5 +54,59 @@ describe('entity resolution', () => {
 
   test('exact name match auto-merges', () => {
     expect(shouldAutoMerge('Fred again..', 'Fred again..')).toBe(true);
+  });
+});
+
+/**
+ * The runtime suppression layer — the actual reported bug ("Jorja Smith DJ Set" shown twice,
+ * different dates, same venue family) never collided on canonicalKey, so this is what fixes it.
+ */
+describe('dedupeNearDuplicates: the actual "Jorja Smith DJ Set" bug', () => {
+  type Item = { id: string; name: string; category: string; startsAt: Date };
+  const getFields = (i: Item) => i;
+
+  test('same name, same category, one day apart — collapsed to one', () => {
+    const items: Item[] = [
+      { id: 'stafford', name: 'Jorja Smith DJ Set', category: 'LIVE_MUSIC', startsAt: new Date('2026-09-11T20:00:00Z') },
+      { id: 'stone', name: 'Jorja Smith DJ Set', category: 'LIVE_MUSIC', startsAt: new Date('2026-09-12T20:00:00Z') },
+    ];
+    const result = dedupeNearDuplicates(items, getFields);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('stafford'); // first-in-order (best-ranked/soonest) survives
+  });
+
+  test('genuinely different events with different names are both kept', () => {
+    const items: Item[] = [
+      { id: 'a', name: 'Fred again..', category: 'CLUBBING', startsAt: new Date('2026-09-11T20:00:00Z') },
+      { id: 'b', name: 'Bicep', category: 'CLUBBING', startsAt: new Date('2026-09-12T20:00:00Z') },
+    ];
+    expect(dedupeNearDuplicates(items, getFields)).toHaveLength(2);
+  });
+
+  test('same name but different category is not treated as a duplicate (e.g. a namesake)', () => {
+    const items: Item[] = [
+      { id: 'a', name: 'New Material Night', category: 'COMEDY', startsAt: new Date('2026-09-11T20:00:00Z') },
+      { id: 'b', name: 'New Material Night', category: 'LIVE_MUSIC', startsAt: new Date('2026-09-12T20:00:00Z') },
+    ];
+    expect(dedupeNearDuplicates(items, getFields)).toHaveLength(2);
+  });
+
+  test('same name but more than 3 days apart is not treated as a duplicate — a real recurring night', () => {
+    const items: Item[] = [
+      { id: 'a', name: 'Saturday Night Stand-Up Social', category: 'COMEDY', startsAt: new Date('2026-09-05T20:00:00Z') },
+      { id: 'b', name: 'Saturday Night Stand-Up Social', category: 'COMEDY', startsAt: new Date('2026-09-19T20:00:00Z') },
+    ];
+    expect(dedupeNearDuplicates(items, getFields)).toHaveLength(2);
+  });
+
+  test('a cluster of three near-duplicates collapses to one, keeping the first', () => {
+    const items: Item[] = [
+      { id: 'a', name: 'Jorja Smith DJ Set', category: 'LIVE_MUSIC', startsAt: new Date('2026-09-11T20:00:00Z') },
+      { id: 'b', name: 'Jorja Smith DJ Set', category: 'LIVE_MUSIC', startsAt: new Date('2026-09-12T20:00:00Z') },
+      { id: 'c', name: 'Jorja Smith DJ Set', category: 'LIVE_MUSIC', startsAt: new Date('2026-09-13T20:00:00Z') },
+    ];
+    const result = dedupeNearDuplicates(items, getFields);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('a');
   });
 });

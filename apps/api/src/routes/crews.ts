@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../middleware/auth';
-import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getCrewPreviewByInviteCode, isCrewMember, removeCrewMember, leaveCrew, CrewMembershipError } from '../services/crew';
+import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getCrewPreviewByInviteCode, isCrewMember, removeCrewMember, leaveCrew, markCrewRead, CrewMembershipError } from '../services/crew';
 import { sendCrewMessage, listCrewMessages, toggleReaction, createPoll, votePoll, ChatError } from '../services/chat';
 import { track } from '../services/analytics';
 import { getOrCreateSettings, updateSettings, respondToRecommendation, RecommendationError } from '../services/crewRecommendations';
@@ -172,6 +172,17 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
       if (err instanceof ChatError) return reply.code(403).send({ error: err.code, message: err.message });
       throw err;
     }
+  });
+
+  // The one write path for real, persisted unread state (CrewMember.lastReadAt) — see
+  // services/crew.ts#markCrewRead. The frontend calls this when a member opens a Crew's chat and
+  // again as new messages arrive while they're actively looking at it, not on every poll tick.
+  app.post('/crews/:id/read', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+    await markCrewRead(id, request.user.id);
+    return reply.send({ ok: true });
   });
 
   app.post('/crews/:id/messages', async (request, reply) => {
