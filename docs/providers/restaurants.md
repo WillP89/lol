@@ -1,6 +1,12 @@
 # Going live: restaurant availability providers
 
-Ships with `mockRestaurantProvider` (`apps/api/src/providers/mock/restaurantProvider.ts`).
+**Update — real restaurant/place DISCOVERY is now live**, via OpenStreetMap
+(`providers/live/openStreetMap.ts`, no credential needed) — see
+`docs/providers/food-and-places.md` for the full writeup. What's below is still accurate for
+real-time table *availability/booking* specifically, which nothing here solves — OSM has no
+booking data, only real venue identity (name/location/cuisine/website). `mockRestaurantProvider`
+(`apps/api/src/providers/mock/restaurantProvider.ts`) is no longer part of the production
+registry as of that change; it stays in the codebase for tests only.
 
 ## OpenTable
 - **Access**: the Availability API is **partner-gated**, not self-serve — requires a

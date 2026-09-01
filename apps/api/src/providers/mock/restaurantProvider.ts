@@ -114,6 +114,7 @@ export const mockRestaurantProvider: ProviderAdapter = {
       currency: 'GBP',
       bookingStatus: item.slotsAt.length > 0 ? 'AVAILABLE' : 'SOLD_OUT',
       imageUrl: null,
+      imageSource: null, // real venue identity, fabricated availability — see the file header comment
       tags: { formality: item.atmosphere.includes('date_friendly') ? 'smart_casual' : 'casual', groupFriendly: item.atmosphere.includes('group_friendly') },
       externalUrl: `https://example-provider.invalid/restaurants/${item.id}`,
       commissionEligible: false,

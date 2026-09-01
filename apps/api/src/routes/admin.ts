@@ -70,6 +70,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     priceMinMinor: z.number().int().nonnegative().nullable().default(null),
     priceMaxMinor: z.number().int().nonnegative().nullable().default(null),
     externalUrl: z.string().url(),
+    // Real gap this closes: this endpoint hardcoded `imageUrl: null` regardless of input, so an
+    // operator entering a genuine restaurant/venue photo (exactly the "direct venue
+    // relationships" pilot path docs/providers/restaurants.md describes as the realistic
+    // near-term route to real imagery for RESTAURANT/BAR) had no way to attach it — every
+    // manually-curated listing fell back to the editorial mark even when a real photo existed.
+    imageUrl: z.string().url().nullable().default(null),
   });
   app.post('/experiences/manual', async (request, reply) => {
     const parsed = ManualExperienceSchema.safeParse(request.body);
@@ -104,7 +110,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       priceMaxMinor: input.priceMaxMinor,
       currency: 'GBP',
       bookingStatus: 'AVAILABLE' as const,
-      imageUrl: null,
+      imageUrl: input.imageUrl,
+      imageSource: input.imageUrl ? ('MANUAL' as const) : null,
       tags: {},
       externalUrl: input.externalUrl,
       commissionEligible: false,

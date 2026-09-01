@@ -19,6 +19,7 @@ function fakeInput(overrides: Partial<CanonicalListingInput> = {}): CanonicalLis
     currency: 'GBP',
     bookingStatus: 'AVAILABLE',
     imageUrl: 'https://example.invalid/image.jpg',
+    imageSource: 'TICKETMASTER',
     tags: { energy: 'high', groupFriendly: true },
     externalUrl: 'https://example.invalid',
     commissionEligible: false,

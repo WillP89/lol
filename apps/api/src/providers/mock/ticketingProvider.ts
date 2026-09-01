@@ -204,6 +204,7 @@ export const mockTicketingProvider: ProviderAdapter = {
       currency: 'GBP',
       bookingStatus,
       imageUrl: item.imageUrl || null,
+      imageSource: null, // mock inventory never carries a real image — see the comment above
       tags: item.tags,
       externalUrl: `https://example-provider.invalid/events/${item.id}`,
       commissionEligible: false,

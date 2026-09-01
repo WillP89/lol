@@ -16,7 +16,7 @@ import {
   lockPlan,
 } from '../services/plan';
 import { track } from '../services/analytics';
-import { hasLiveProvider } from '../providers/registry';
+import { hasLiveTicketedProvider } from '../providers/registry';
 import { prisma } from '../lib/prisma';
 
 export async function planRoutes(app: FastifyInstance): Promise<void> {
@@ -146,7 +146,7 @@ export async function planRoutes(app: FastifyInstance): Promise<void> {
     // "sample data" message. `dataSource` on the response, not on Experience itself: whether a
     // provider is live is a deployment-wide fact (is TICKETMASTER_API_KEY set at all), not a
     // per-row property to store and risk going stale.
-    return reply.send({ plan, pulse, dataSource: hasLiveProvider ? 'live' : 'mock' });
+    return reply.send({ plan, pulse, dataSource: hasLiveTicketedProvider ? 'live' : 'mock' });
   });
 
   // "Lock it in" — see services/plan.ts#lockPlan's own comment for why this is a direct status

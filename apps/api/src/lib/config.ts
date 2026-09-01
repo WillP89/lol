@@ -39,6 +39,12 @@ const EnvSchema = z.object({
   DICE_API_KEY: z.string().optional(),
   EVENTBRITE_API_KEY: z.string().optional(),
   OPENTABLE_API_KEY: z.string().optional(),
+  // Optional upgrade path for lib/imageEnrichment.ts's SPORT-category image lookup — unset
+  // falls back to TheSportsDB's own published free test key ("123"), which their docs
+  // explicitly document as fine for light/testing use but not indefinite production volume.
+  // Register a real key at thesportsdb.com/documentation and set this once sync volume
+  // justifies it. See docs/providers/food-and-places.md.
+  SPORTSDB_API_KEY: z.string().optional(),
   POSTMARK_API_KEY: z.string().optional(),
   // An HTTP email API (not raw SMTP) — see docs/providers/email.md. Checked ahead of SMTP:
   // SMTP is CONFIRMED blocked outbound on Render (a real send attempt there timed out — Render

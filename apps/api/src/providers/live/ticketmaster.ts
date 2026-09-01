@@ -196,6 +196,7 @@ export const ticketmasterProvider: ProviderAdapter = {
       currency: priceRange?.currency ?? 'GBP',
       bookingStatus: mapBookingStatus(event.dates?.status?.code),
       imageUrl: bestImage(event.images),
+      imageSource: bestImage(event.images) ? 'TICKETMASTER' : null,
       tags: {
         provider: 'ticketmaster',
         genre: event.classifications?.[0]?.genre?.name ?? null,

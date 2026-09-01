@@ -278,8 +278,25 @@ export default function ExplorePage() {
       </div>
 
       {dataSource === 'mock' && (
-        <div style={{ fontSize: 12.5, color: 'var(--v2-ink-muted)', background: 'var(--v2-bg-deep)', borderRadius: 12, padding: '10px 14px', marginBottom: 18 }}>
-          Sample events — no live provider connected yet.
+        <div style={{ fontSize: 12.5, color: 'var(--v2-ink-muted)', background: 'var(--v2-bg-deep)', borderRadius: 12, padding: '10px 14px', marginBottom: 6 }}>
+          {/* Specifically about TICKETED events (concerts, gigs, shows) — restaurants/bars/
+              cafes/museums/markets on this page are real OpenStreetMap inventory regardless of
+              this flag, which is exactly why this no longer says "sample events" unqualified. */}
+          Sample events — no live ticketing provider connected yet.
+        </div>
+      )}
+      {/* ODbL attribution — a real licensing requirement of using OpenStreetMap data (see
+          providers/live/openStreetMap.ts), not a design flourish; shown once per page rather
+          than per-card, which satisfies it without competing with Plot's own branding. Always
+          rendered once experiences have loaded: restaurants/bars/cafes/museums/markets are
+          OpenStreetMap-sourced in every environment that can reach it, independent of whether a
+          ticketing provider is configured. */}
+      {experiences !== null && experiences.length > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--v2-ink-dim)', marginBottom: 18 }}>
+          Place data{' '}
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>
+            © OpenStreetMap contributors
+          </a>
         </div>
       )}
 

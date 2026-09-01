@@ -155,6 +155,7 @@ export const mockActivityProvider: ProviderAdapter = {
       currency: 'GBP',
       bookingStatus: 'AVAILABLE',
       imageUrl: null,
+      imageSource: null,
       tags: { groupFriendly: item.groupFriendly, indoorOutdoor: item.category === 'DAY_ACTIVITY' ? 'outdoor' : 'indoor' },
       externalUrl: `https://example-provider.invalid/activities/${item.id}`,
       commissionEligible: false,

@@ -9,20 +9,21 @@ import { UK_FALLBACK_CENTER } from '../../data/ukPlaces';
  * Real Eventbrite API v3 adapter — self-serve, free (developer.eventbrite.com), no partner
  * agreement needed to GET a key, unlike DICE/OpenTable. See docs/providers/ticketing.md.
  *
- * IMPORTANT CAVEAT, read before assuming this "just works" once a key is set: Eventbrite
- * significantly restricted its public API around 2020. A fresh self-serve key is confirmed to
- * be able to read events belonging to *your own* Eventbrite organization; whether the general
- * public search this adapter calls (`GET /v3/events/search/`, historically how a third-party
- * app browsed ALL public Eventbrite listings in a city) is still available to new apps is
- * genuinely uncertain from here — this environment can't reach api.eventbrite.com to check,
- * the same restriction that blocks Ticketmaster/Postmark. Before relying on this: set
- * EVENTBRITE_API_KEY, then from anywhere with real network access run
- *   curl -H "Authorization: Bearer $EVENTBRITE_API_KEY" \
- *     "https://www.eventbriteapi.com/v3/events/search/?location.address=Stafford,UK"
- * A 200 with real event results confirms this works as written. A 404 or an empty/
- * organization-scoped result means the search endpoint is no longer available to a new key,
- * and this adapter needs a different Eventbrite endpoint (or Eventbrite isn't a real option
- * for public discovery anymore) — tell me which you see and I'll adjust.
+ * UPDATE — the caveat this comment used to carry ("genuinely uncertain from here") is now
+ * RESOLVED, by research rather than a live call this environment still can't make: Eventbrite
+ * pulled public access to `GET /v3/events/search/` for all new keys in February 2020 (it now
+ * only returns the key-holder's own organization's events, which is a different, useless
+ * feature for a discovery app that isn't Eventbrite's own event organizers), and Eventbrite
+ * ended official API support entirely by 2025 (community-support-only since). This is not a
+ * missing-credential situation — a real EVENTBRITE_API_KEY would not fix it. Confirmed via
+ * Eventbrite's own developer changelog and API community forum, September 2026.
+ *
+ * Left implemented (not deleted) in case Eventbrite ever reopens search or exposes a
+ * replacement endpoint with a similarly-shaped response — `mapCategory`/`mapToCanonical` would
+ * still be correct, only `fetchPage`'s URL would need to change — but NOT REGISTERED in
+ * registry.ts by default any more: presenting a provider that structurally cannot return real
+ * public inventory as "live" the moment a key is set would be exactly the "quietly fake
+ * coverage" the PLOT-CONTENT directive forbids. See docs/providers/ticketing.md.
  */
 
 const SEARCH_BASE = 'https://www.eventbriteapi.com/v3/events/search/';
@@ -167,6 +168,7 @@ export const eventbriteProvider: ProviderAdapter = {
       currency: 'GBP',
       bookingStatus: 'UNKNOWN',
       imageUrl: event.logo?.url ?? null,
+      imageSource: event.logo?.url ? 'EVENTBRITE' : null,
       tags: { provider: 'eventbrite', category: event.category?.name ?? null },
       externalUrl: event.url,
       commissionEligible: false,

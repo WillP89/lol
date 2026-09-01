@@ -512,6 +512,14 @@ model Experience {
   currency      String             @default("GBP")
   bookingStatus BookingStatus      @default(UNKNOWN)
   imageUrl      String?
+  // Where imageUrl actually came from — the PLOT-CONTENT directive's "track image provenance,
+  // don't silently mix stock and real imagery" requirement. One of the ImageSource enum values
+  // below; null means imageUrl is also null (no image at all — the client falls back to
+  // v2Art.ts's branded editorial treatment, itself never a photo, so there is no "unknown-
+  // provenance photo" state to worry about). Never set for a fabricated/mock image because mock
+  // adapters never set imageUrl in the first place (see providers/mock/*) — a null imageUrl
+  // already means "no real image", exactly the honesty this field exists to preserve.
+  imageSource   ImageSource?
   tags          Json // energy/formality/crowd/etc, see shared CanonicalEvent['tags']
   qualityScore  Int                @default(0)
   createdAt     DateTime           @default(now())
@@ -524,6 +532,21 @@ model Experience {
 
   @@index([category, startsAt])
   @@index([qualityScore])
+}
+
+// Provenance for `Experience.imageUrl` — the PLOT-CONTENT directive's "each image should know
+// where it came from". One value per real source this codebase actually fetches an image from;
+// `PLOT_FALLBACK` intentionally does NOT appear here because the editorial fallback (v2Art.ts)
+// is CSS/SVG generated client-side from category + a seed, never a stored image URL at all — an
+// Experience with no real image has `imageUrl: null, imageSource: null`, which the client reads
+// as "render the branded fallback", not as a fallback source needing its own enum member.
+enum ImageSource {
+  TICKETMASTER
+  EVENTBRITE // adapter implemented but not registered by default — see providers/live/eventbrite.ts
+  OPENSTREETMAP
+  WIKIPEDIA
+  THESPORTSDB
+  MANUAL // POST /admin/experiences/manual — an operator-entered real photo URL
 }
 
 enum ExperienceCategory {

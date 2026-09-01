@@ -22,22 +22,23 @@ needs before it can replace or sit alongside the mock.
   DICE partnerships.
 - **Env**: `DICE_API_KEY` (placeholder until an agreement exists)
 
-## Eventbrite
+## Eventbrite — RESOLVED: confirmed non-functional for this use, not a credential gap
 - **Access**: self-serve OAuth app + API key, free — **implemented**
-  (`src/providers/live/eventbrite.ts`), registers automatically alongside Ticketmaster (or on
-  its own) the moment `EVENTBRITE_API_KEY` is set. Genuinely uncertain whether it actually
-  works yet: Eventbrite significantly restricted its public API around 2020, and this
-  environment can't reach `api.eventbrite.com` to confirm the general public search endpoint
-  (`/v3/events/search/`) this adapter calls is still open to a *new* self-serve key rather than
-  scoped to just the key-holder's own organisation's events. See the caveat and a one-line curl
-  test to run yourself in the adapter file's own top comment before relying on it.
-- **Env**: `EVENTBRITE_API_KEY`
-- **If search turns out to be restricted**: the adapter's `mapCategory`/`mapToCanonical` are
-  still correct for whatever Eventbrite endpoint eventually returns similarly-shaped event
-  objects — only `fetchPage`'s URL/endpoint would need to change.
-- Expect broader, lower-curation inventory than Ticketmaster (workshops, markets, local
-  meetups) if/once it works — a lower average `qualityScore` from this source is the quality
-  scorer working as intended, not a bug.
+  (`src/providers/live/eventbrite.ts`) but **deliberately not registered** in
+  `providers/registry.ts`.
+- **Update (September 2026)**: the "genuinely uncertain" caveat this section used to carry is
+  now resolved by research, not a live call this environment still can't make. Eventbrite
+  pulled public access to `GET /v3/events/search/` for all new self-serve keys in February
+  2020 — a new key can only read events belonging to the key-holder's own organisation, which
+  is a different, useless feature for a discovery app that isn't Eventbrite's own event
+  organisers — and Eventbrite ended official API support entirely by 2025 (community-forum
+  support only since). **A real `EVENTBRITE_API_KEY` would not fix this**; there is no
+  credential blocker here, the endpoint this adapter needs simply doesn't exist for new apps
+  any more.
+- **Env**: `EVENTBRITE_API_KEY` — kept in config.ts, not currently used by anything registered.
+- **If Eventbrite ever reopens search or exposes a replacement endpoint**: the adapter's
+  `mapCategory`/`mapToCanonical` would still be correct for a similarly-shaped response — only
+  `fetchPage`'s URL would need to change, and it would need re-registering in registry.ts.
 
 ## Resident Advisor / Songkick / Bandsintown
 - No public commercial API as of writing for RA; Songkick's API is deprecated for new

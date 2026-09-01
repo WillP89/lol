@@ -19,6 +19,7 @@ function fakeInput(overrides: Partial<CanonicalListingInput> = {}): CanonicalLis
     currency: 'GBP',
     bookingStatus: 'AVAILABLE',
     imageUrl: null,
+    imageSource: null,
     tags: {},
     externalUrl: 'https://example.invalid',
     commissionEligible: false,

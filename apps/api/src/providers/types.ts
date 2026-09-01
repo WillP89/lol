@@ -1,4 +1,4 @@
-import type { ExperienceCategory } from '@prisma/client';
+import type { ExperienceCategory, ImageSource } from '@prisma/client';
 
 /**
  * Every inventory source — Ticketmaster, DICE, OpenTable, a manually-curated spreadsheet —
@@ -57,6 +57,8 @@ export interface CanonicalListingInput {
   currency: string;
   bookingStatus: 'AVAILABLE' | 'LIMITED' | 'SOLD_OUT' | 'UNKNOWN';
   imageUrl: string | null;
+  /** Required whenever imageUrl is set — see the ImageSource enum's own doc comment in schema.prisma. */
+  imageSource: ImageSource | null;
   tags: Record<string, unknown>;
   externalUrl: string;
   commissionEligible: boolean;

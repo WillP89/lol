@@ -1814,3 +1814,72 @@ Profile, Crew art chosen from the Crew-creation flow, both screenshotted working
 
 Verified: 68/68 backend tests, `tsc`/`eslint` clean, full live signup → Profile → pick an owl
 avatar → create Crew → "Give it a look" → pick the Festival theme, screenshotted at every step.
+
+## #real-content-pass
+
+The PLOT-CONTENT directive: "no stock imagery anywhere a real image could exist", "massively
+expand real discovery providers", "get more content into Crew recommendations". Full research
+and provider table lives in `docs/providers/food-and-places.md` — this entry is the short
+version.
+
+**Stock imagery audit first, before adding anything**: grepped the whole repo for every common
+stock-photo host (unsplash/picsum/pexels/pixabay/shutterstock/istockphoto/generic placeholder
+services). Zero live code paths generate one — the only hit was a comment documenting that a
+`picsum.photos` seed had already been tried and removed, before this session. The premise of the
+directive ("I do not want to see a single stock image") was already true of the source code;
+this pass is additive (more real sources), not subtractive.
+
+**The one real exception, found by actually checking the database, not just the code**: this
+session's own local dev database still had `Experience` rows carrying that old removed
+`picsum.photos` URL — `inventorySync.ts`'s upsert only ever wrote `imageUrl` on create, never on
+update, so a resync from the now-honest provider (mapping to `imageUrl: null`) could never clear
+it. Real, live-caught, fixed: the update path now correctly clears a stale image when the
+current sync finds none, while still protecting an operator-entered `MANUAL` photo from being
+silently wiped by an automated resync that simply didn't find one this time. Proven with
+`test/imageProvenance.test.ts` using a fake adapter under full control of two consecutive
+syncs' output — not dependent on any real network call or another provider's non-deterministic
+mock data.
+
+**New real provider: OpenStreetMap (Overpass API)**, no credential — closes the exact gap
+`docs/providers/restaurants.md` used to describe as unsolvable ("no self-serve restaurant/pub
+API exists at all"). Real restaurants/cafes/bars/pubs/museums/galleries/markets across any UK
+city. Replaces the restaurant/activity mocks in the production registry the same way a
+configured Ticketmaster key already replaced the ticketing mock — `NODE_ENV=test` keeps using
+the mocks (same convention as `lib/mediaStorage.ts`/`lib/email.ts`), since a real HTTP call to a
+third party has no place in a deterministic test suite, and this specific sandbox's own egress
+policy blocks it outright anyway.
+
+**Real gap this surfaced and fixed while wiring it in**: `hasLiveProvider` (registry.ts) used to
+mean "is there any real provider at all" and gated Explore/Plans' "Sample events — no live
+provider connected" banner. Registering OpenStreetMap as always-live would have made that flag
+permanently `true` the moment this shipped — even with zero real *ticketed events* and
+`TICKETMASTER_API_KEY` still unset — silently hiding a banner that specifically means "these
+events are fabricated". Split into `hasLiveProvider` (any real source) and
+`hasLiveTicketedProvider` (specifically events) before this went anywhere near the banner logic.
+
+**Image enrichment** (`lib/imageEnrichment.ts`): when a provider maps to no image, tries
+Wikipedia's own summary API (a subject's real Wikipedia-infobox photo, Creative-Commons/public-
+domain licensed) before falling back to the branded editorial mark; SPORT tries TheSportsDB's
+real team badges first. Both are best-effort with a short timeout and an in-process cache — a
+miss or a network failure never fails the sync, it just leaves the editorial fallback in place,
+exactly as before this pass existed.
+
+**Researched and explicitly rejected, not silently skipped**: Yelp Fusion (paid-only since
+2024), Foursquare Places (Photos endpoint is Premium-only), Spotify Web API (Feb–Jul 2026
+Developer Mode changes cap unapproved apps at 5 users, Extended Quota needs 250k+ MAU — not a
+"get a key" problem), Bandsintown (requires a manually-approved `app_id`, not self-serve), and
+Eventbrite specifically re-researched and *resolved*: the "genuinely uncertain" caveat an earlier
+pass left on it is now confirmed — public event search was cut off for new keys in 2020 and
+Eventbrite ended official API support entirely by 2025. Implemented, deliberately not registered.
+Full reasoning for each in `docs/providers/food-and-places.md`.
+
+**Verified**: 116/116 backend tests (14 new, covering the OSM adapter's pure mapping logic, the
+Wikipedia enrichment module's parsing/caching/failure handling, and the stale-image fix
+end-to-end against a real Postgres write), `tsc`/`eslint` clean on every touched file, both
+`next build` and the API's own `tsc` production build clean. A live dev-server smoke test
+confirmed the graceful-failure path specifically (Overpass blocked by this sandbox's own egress
+policy → logged warning → empty result → 200 OK response, not a broken request). What could NOT
+be verified from here: any of these three new sources actually returning real data over the real
+internet — this environment's egress is allowlisted to `api.github.com` only (confirmed via
+direct curl to all three new hosts, and separately via the `WebFetch` tool). See
+`docs/providers/food-and-places.md`'s closing section for exactly what to check once deployed.

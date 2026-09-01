@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../middleware/auth';
 import { listExploreExperiences } from '../services/explore';
-import { hasLiveProvider } from '../providers/registry';
+import { hasLiveTicketedProvider } from '../providers/registry';
 import { prisma } from '../lib/prisma';
 import { UK_FALLBACK_CENTER, UK_PLACES } from '../data/ukPlaces';
 
@@ -28,7 +28,7 @@ export async function exploreRoutes(app: FastifyInstance): Promise<void> {
     // listings — see docs/DECISIONS.md#real-events.
     return reply.send({
       experiences,
-      dataSource: hasLiveProvider ? 'live' : 'mock',
+      dataSource: hasLiveTicketedProvider ? 'live' : 'mock',
       city: resolvedCity,
       cityLat: cityPlace.lat,
       cityLng: cityPlace.lng,

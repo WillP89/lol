@@ -6,6 +6,7 @@ import type { ProviderAdapter } from '../providers/types';
 import { buildCanonicalKey } from './entityResolution';
 import { computeQualityScore } from './qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
+import { enrichImageFromWikipedia, enrichImageFromTheSportsDb } from '../lib/imageEnrichment';
 
 /**
  * Runs one provider end-to-end: fetch -> map -> dedup -> quality-score -> upsert. Every
@@ -41,6 +42,23 @@ export async function syncProvider(
   for (const listing of listings) {
     try {
       const canonicalInput = adapter.mapToCanonical(listing);
+      // Real-image enrichment (PLOT-CONTENT directive §7 "if a provider gives weak/no imagery,
+      // try legitimate enrichment") — a provider that maps to null imageUrl (Overpass has no
+      // photos of its own; Eventbrite-shaped adapters sometimes have no logo) gets one more
+      // chance via a legitimate open source (Wikipedia's own summary API) before falling back
+      // to the branded editorial mark. Best-effort and non-blocking: a timeout or miss here
+      // never fails the sync, it just leaves imageUrl null exactly as before.
+      if (!canonicalInput.imageUrl) {
+        // SPORT gets a real team badge tried first — more reliably identifiable than an
+        // arbitrary Wikipedia photo for "Aston Villa vs Everton"-shaped titles — then both
+        // categories fall through to the generic Wikipedia lookup on a miss.
+        const sportBadge = canonicalInput.category === 'SPORT' ? await enrichImageFromTheSportsDb(canonicalInput.name) : null;
+        const enriched = sportBadge ?? (await enrichImageFromWikipedia(canonicalInput.name));
+        if (enriched) {
+          canonicalInput.imageUrl = enriched.url;
+          canonicalInput.imageSource = sportBadge ? 'THESPORTSDB' : 'WIKIPEDIA';
+        }
+      }
       const canonicalKey = buildCanonicalKey(canonicalInput);
       const now = new Date();
       const qualityScore = computeQualityScore(canonicalInput, now);
@@ -62,6 +80,21 @@ export async function syncProvider(
           },
         }));
 
+      // Real, live-caught bug this specifically fixes: an earlier version of the mock ticketing
+      // provider generated a `picsum.photos` stock-photo URL (see mock/ticketingProvider.ts's
+      // own comment on why that was removed) — rows synced back then still carry it in this
+      // dev database today. A naive "only overwrite imageUrl on an actual new truthy value"
+      // rule (this function's own previous version) can NEVER clear that: the mock provider now
+      // correctly maps to `imageUrl: null` every sync, but null was being treated as "no
+      // opinion, leave whatever's there" forever. The correct rule needs the EXISTING row's
+      // provenance, not just the new mapping: a `MANUAL`ly-entered real photo (an operator's own
+      // upload — see routes/admin.ts) is the one thing an automated resync must never silently
+      // clear; anything else (a prior real-provider image that's since disappeared, a stale mock
+      // artifact, nothing at all) should reflect what this sync run actually found.
+      const existing = await prisma.experience.findUnique({ where: { canonicalKey }, select: { imageSource: true } });
+      const preserveManualImage = existing?.imageSource === 'MANUAL' && !canonicalInput.imageUrl;
+      const imageUpdate = preserveManualImage ? {} : { imageUrl: canonicalInput.imageUrl, imageSource: canonicalInput.imageSource };
+
       const experience = await prisma.experience.upsert({
         where: { canonicalKey },
         update: {
@@ -71,6 +104,7 @@ export async function syncProvider(
           priceMinMinor: canonicalInput.priceMinMinor,
           priceMaxMinor: canonicalInput.priceMaxMinor,
           qualityScore,
+          ...imageUpdate,
           tags: canonicalInput.tags as Prisma.InputJsonValue,
           updatedAt: now,
         },
@@ -89,6 +123,7 @@ export async function syncProvider(
           currency: canonicalInput.currency,
           bookingStatus: canonicalInput.bookingStatus,
           imageUrl: canonicalInput.imageUrl,
+          imageSource: canonicalInput.imageSource,
           tags: canonicalInput.tags as Prisma.InputJsonValue,
           qualityScore,
         },

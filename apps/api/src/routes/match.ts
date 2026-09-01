@@ -5,7 +5,7 @@ import { isCrewMember } from '../services/crew';
 import { findUsSomething, suggestToCrewChat } from '../services/match';
 import { getCrewAvailabilityByDay } from '../services/availability';
 import { track } from '../services/analytics';
-import { hasLiveProvider } from '../providers/registry';
+import { hasLiveTicketedProvider } from '../providers/registry';
 
 export async function matchRoutes(app: FastifyInstance): Promise<void> {
   app.post('/crews/:crewId/find-us-something', async (request, reply) => {
@@ -21,7 +21,7 @@ export async function matchRoutes(app: FastifyInstance): Promise<void> {
     const result = await findUsSomething(crewId, request.user.id);
     // See docs/DECISIONS.md#real-events — the client shows a "sample events" banner rather
     // than presenting mock data as real listings.
-    return reply.send({ ...result, dataSource: hasLiveProvider ? 'live' : 'mock' });
+    return reply.send({ ...result, dataSource: hasLiveTicketedProvider ? 'live' : 'mock' });
   });
 
   // The core loop: find the best options AND put them straight into the Crew's conversation
@@ -37,7 +37,7 @@ export async function matchRoutes(app: FastifyInstance): Promise<void> {
     await track('FindUsSomethingOpened', { crewId, userId: request.user.id }, { userId: request.user.id, crewId });
 
     const plans = await suggestToCrewChat(crewId, request.user.id);
-    return reply.send({ plans, dataSource: hasLiveProvider ? 'live' : 'mock' });
+    return reply.send({ plans, dataSource: hasLiveTicketedProvider ? 'live' : 'mock' });
   });
 
   app.get('/crews/:crewId/availability', async (request, reply) => {
