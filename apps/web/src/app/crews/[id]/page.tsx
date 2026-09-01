@@ -8,6 +8,7 @@ import { formatPriceFrom } from '@/lib/formatPrice';
 import { displayNameOf } from '@/lib/displayName';
 import { v2Art } from '@/lib/v2Art';
 import { messagePreview } from '@/lib/messagePreview';
+import { useVisualViewportHeight } from '@/lib/useVisualViewportHeight';
 import { BottomSheet } from '@/components/BottomSheet';
 import { TabBarV2 } from '@/components/TabBarV2';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
@@ -616,6 +617,10 @@ export default function CrewPage() {
   const lastIdRef = useRef<string | undefined>(undefined);
   const composerInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+  // The real source of truth for "how much space do I actually have" on mobile — see
+  // lib/useVisualViewportHeight.ts. `null` until the API has fired once (SSR, or a browser
+  // without it), so every usage below falls back to the existing `dvh` calc in that case.
+  const visualViewportHeight = useVisualViewportHeight();
 
   // The composer's "+" action sheet — one entry point into every way of adding something to
   // the conversation beyond plain text (see docs/DECISIONS.md#decision-objects).
@@ -840,6 +845,17 @@ export default function CrewPage() {
     if (nearBottomRef.current) scrollToBottom(true);
     else setNewMessagesPill(true);
   }, [messages]);
+
+  // The keyboard opening/closing shrinks or grows visualViewportHeight, which resizes this
+  // container — if you were already reading the latest message, keep it in view through that
+  // resize instead of letting it silently scroll out of frame; if you'd scrolled up to read
+  // history, leave you exactly where you were (never yank the viewport while you're mid-read).
+  useEffect(() => {
+    if (visualViewportHeight == null) return;
+    if (nearBottomRef.current) scrollToBottom(false);
+    // Intentionally only re-runs on visualViewportHeight — scrollToBottom/nearBottomRef are
+    // stable across renders (a ref and a function declared once in this component body).
+  }, [visualViewportHeight]); // eslint-disable-line
 
   async function react(messageId: string, emoji: string) {
     setPickerFor(null);
@@ -1251,7 +1267,17 @@ export default function CrewPage() {
           </Link>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', height: context ? 'calc(100dvh - 132px)' : 'calc(100dvh - 82px)', padding: '4px 20px calc(env(safe-area-inset-bottom, 0px) + 14px)', position: 'relative' }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            // visualViewportHeight already reflects the keyboard on iOS/Android; the dvh calc is
+            // only the fallback for when that API hasn't reported yet (or doesn't exist).
+            height: visualViewportHeight != null ? `${visualViewportHeight - (context ? 132 : 82)}px` : context ? 'calc(100dvh - 132px)' : 'calc(100dvh - 82px)',
+            padding: '4px 20px calc(env(safe-area-inset-bottom, 0px) + 14px)',
+            position: 'relative',
+          }}
+        >
           {/* Restrained "new messages" affordance — only shown while you've scrolled up to read
               history and something new has arrived below; tapping it is the one thing that
               moves the viewport for you in that state. */}
