@@ -1651,3 +1651,16 @@ Continuing #plot-brand-system onto the surfaces the anchor-screen pass didn't re
 Verified live: a full fresh signup → create Crew → "Give it a look" step (screenshot shows the
 crews-list card behind the sheet already carrying the new CrewMark, confirming the list and the
 creation flow share the same live data) → invite preview as a logged-out visitor, all screenshotted.
+
+## #plot-brand-system-onboarding-avatar
+
+Added the optional avatar step the brand brief specifically asked for: "allow avatar upload
+during onboarding, but do not make it mandatory." Rather than a new wizard step (which would
+have meant restructuring the 3-step machine and its `canAdvance` gating), it sits directly above
+the name input on step 0 — the same `MediaUploadButton`/`PersonAvatar` pair used everywhere else,
+so entering Plot's world can start with a real identity if you want one, and "skip" is simply
+never tapping it. `Continue` was never gated on having a photo.
+
+Verified live: fresh signup lands on step 0 with a real identity-gradient `PersonAvatar` (initials
+derived from the not-yet-entered name's email fallback) and an edit-pencil badge, name field still
+required to advance, upload flow untouched from the Profile/Crew-info-sheet implementation.

@@ -4,6 +4,8 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 import { LocationSearch, type UkPlaceResult } from '@/components/LocationSearch';
+import { PersonAvatar } from '@/components/Avatar';
+import { MediaUploadButton } from '@/components/MediaUploadButton';
 
 const INTERESTS = [
   'Live music', 'Food', 'Pubs & drinks', 'Comedy', 'Sport', 'Festivals',
@@ -11,7 +13,9 @@ const INTERESTS = [
 ];
 
 interface ExistingProfile {
+  email: string;
   displayName: string | null;
+  avatarUrl: string | null;
   tasteProfile: { categoryAffinity: Record<string, number> } | null;
   profile: { homeCity: string | null; homeLat: number | null; homeLng: number | null } | null;
 }
@@ -32,6 +36,8 @@ function OnboardingWizard() {
   const [step, setStep] = useState(0);
 
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [place, setPlace] = useState<UkPlaceResult | null>(null);
   const [interests, setInterests] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +47,8 @@ function OnboardingWizard() {
     api
       .get<{ user: ExistingProfile }>('/users/me')
       .then((res) => {
+        setEmail(res.user.email);
+        setAvatarUrl(res.user.avatarUrl);
         if (res.user.displayName) setName(res.user.displayName);
         if (res.user.profile?.homeCity) {
           setPlace({ name: res.user.profile.homeCity, region: '', lat: res.user.profile.homeLat ?? 0, lng: res.user.profile.homeLng ?? 0 });
@@ -115,7 +123,21 @@ function OnboardingWizard() {
         {step === 0 && (
           <>
             <h1 className="v2-display" style={{ fontSize: 27, marginBottom: 8 }}>What should we call you?</h1>
-            <p className="v2-muted" style={{ marginBottom: 22 }}>Your Crew will see this name.</p>
+            <p className="v2-muted" style={{ marginBottom: 18 }}>Your Crew will see this name.</p>
+            {/* Optional, never mandatory — entering Plot's world starts with a real identity if
+                you want one, but "skip" is just leaving it alone and moving on. */}
+            {email && (
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+                <MediaUploadButton
+                  uploadPath="/users/me/avatar"
+                  deletePath="/users/me/avatar"
+                  size={76}
+                  onChange={setAvatarUrl}
+                >
+                  <PersonAvatar name={name || null} email={email} photoUrl={avatarUrl} size={76} />
+                </MediaUploadButton>
+              </div>
+            )}
             <input
               autoFocus
               style={{ width: '100%', padding: '15px 18px', borderRadius: 16, border: 'none', outline: 'none', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)', fontSize: 15.5, fontFamily: 'inherit', color: 'var(--v2-ink)', marginBottom: 22 }}
