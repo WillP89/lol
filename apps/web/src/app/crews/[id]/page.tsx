@@ -13,7 +13,8 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { TabBarV2 } from '@/components/TabBarV2';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { MediaUploadButton } from '@/components/MediaUploadButton';
-import { IconSpark, IconPlace, IconPoll, IconCalendar, IconFlag, IconLock, IconGathering } from '@/components/icons';
+import { IconSpark, IconPlace, IconPoll, IconCalendar, IconFlag, IconLock, IconGathering, IconAddPerson } from '@/components/icons';
+import { identityPair } from '@/lib/identity';
 
 interface CrewListItem {
   id: string;
@@ -127,7 +128,7 @@ interface CrewDetail {
   name: string;
   imageUrl: string | null;
   inviteCode: string;
-  members: { user: { id: string; displayName: string | null; email: string; avatarUrl?: string | null } }[];
+  members: { role: string; user: { id: string; displayName: string | null; email: string; avatarUrl?: string | null } }[];
   dna: { confidence: string; topCategories: string[]; medianSpendMinor: number; bestNights: string[]; usualAreas: string[] } | null;
   plans: Plan[];
 }
@@ -246,12 +247,14 @@ function EventCard({
           )}
           {/* The definitive-state overlay — date/venue moving from "proposed" to "confirmed" is
               the actual payoff of Lock It In, so it happens right on the card people were
-              already looking at, not only in a separate confetti layer. Plot's own converged
-              mark, not a generic checkmark — the same glyph the Lock It In button itself uses,
-              so the badge and the action that caused it are visibly the same idea. */}
+              already looking at, not only in a separate confetti layer. Deliberately NOT a
+              floating icon-in-a-circle badge (a real, reported regression: that treatment read
+              as a sticker/emoji dropped onto the photo, exactly what the brief bans) — a scrim
+              wash across the whole image, the same "the object itself changes state" idea a
+              photo caption bar uses, not a decoration stuck on top of it. */}
           {locked && (
-            <div className="v2-pop-in" style={{ position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(22,19,15,0.82)', backdropFilter: 'blur(6px)', color: '#fff', fontSize: 11, fontWeight: 800, padding: '5px 10px 5px 8px', borderRadius: 100 }}>
-              <IconLock size={13} /><span>Locked in</span>
+            <div className="v2-pop-in" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', padding: '10px 12px', background: 'linear-gradient(180deg, rgba(15,60,38,0) 55%, rgba(11,46,29,0.88) 100%)', pointerEvents: 'none' }}>
+              <span style={{ color: '#fff', fontSize: 12.5, fontWeight: 800, letterSpacing: '0.01em' }}>Locked in</span>
             </div>
           )}
           {/* The distinguishable "this is Plot, not a person" marker, moved onto the primary
@@ -614,6 +617,14 @@ export default function CrewPage() {
   const [planCards, setPlanCards] = useState<Record<string, PlanCardData | 'loading' | 'error'>>({});
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
+  // The real, primary "manage this Crew's people" surface — see the header button below and
+  // docs/DECISIONS.md#plot-design-reset. `infoOpen` (Crew photo + DNA + availability + rec
+  // settings) stays a separate, secondary sheet reachable from inside this one.
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [removingUserId, setRemovingUserId] = useState<string | null>(null);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [leavingCrew, setLeavingCrew] = useState(false);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -1148,6 +1159,34 @@ export default function CrewPage() {
     }
   }
 
+  /** Owner-only. Optimistic — the row disappears immediately, reverts if the request fails. */
+  async function removeMember(userId: string) {
+    if (!crew) return;
+    const prev = crew;
+    setConfirmRemoveId(null);
+    setRemovingUserId(userId);
+    setCrew({ ...crew, members: crew.members.filter((m) => m.user.id !== userId) });
+    try {
+      await api.delete(`/crews/${crew.id}/members/${userId}`);
+    } catch {
+      setCrew(prev);
+    } finally {
+      setRemovingUserId(null);
+    }
+  }
+
+  async function leaveThisCrew() {
+    if (!crew) return;
+    setLeavingCrew(true);
+    try {
+      await api.post(`/crews/${crew.id}/leave`);
+      router.push('/crews');
+    } catch {
+      setLeavingCrew(false);
+      setConfirmLeave(false);
+    }
+  }
+
   if (!crew) {
     return (
       <div className="v2">
@@ -1159,6 +1198,11 @@ export default function CrewPage() {
   }
 
   const solo = crew.members.length === 1;
+  const isOwner = crew.members.find((m) => m.user.id === me)?.role === 'OWNER';
+  // The same two colours the Crew's own mark already draws from (lib/identity.ts) — the header
+  // banner wash and the chat canvas tint both read from this ONE pair, never a separate palette
+  // invented for either, so a Crew's identity feels like one consistent thing across the screen.
+  const crewPair = identityPair(crew.name);
   const activePlan = crew.plans.find((p) => ACTIVE_DECISION_STATUSES.has(p.status));
   const upcomingPlan = crew.plans.find((p) => p.status === 'LOCKED' || p.status === 'BOOKED');
   const context = upcomingPlan ?? activePlan;
@@ -1227,20 +1271,36 @@ export default function CrewPage() {
           </div>
         )}
       <div className="v2-crew-main" style={{ maxWidth: 720, width: '100%' }}>
-        {/* Header — minimal, no boxed nav bar: back arrow, avatar cluster + name (tap opens
-            Crew info), that's the whole chrome. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '18px 20px 10px' }}>
-          <Link href="/crews" aria-label="Back to Crews" style={{ fontSize: 20, color: 'var(--v2-ink-muted)', flexShrink: 0 }}>←</Link>
-          {/* The Crew's own identity — a squircle, not another circle-of-initials pile that
-              looked identical to a person. Real photo when set, the identity-gradient mark
-              otherwise. See components/Avatar.tsx and docs/DECISIONS.md#plot-brand-system. */}
-          <button onClick={() => { setInfoOpen(true); loadRecSettings(); }} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 11, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-            <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={38} />
-            <div style={{ textAlign: 'left', minWidth: 0 }}>
-              <div className="v2-display" style={{ fontSize: 17, lineHeight: 1.1 }}>{crew.name}</div>
-              <div className="v2-muted" style={{ fontSize: 11.5, fontWeight: 600 }}>{crew.members.length} {crew.members.length === 1 ? 'person' : 'people'}</div>
-            </div>
-          </button>
+        {/* Header — HARD RESET. Real, reported feedback: "tiny Crew header, tiny social presence".
+            This is now a real banner, not a slim top bar: the Crew's own identity wash fills it
+            (the same two colours its mark already draws from — never a new palette invented for
+            this), the mark itself is nearly double its old size, and the whole thing IS the
+            entry point into member management, not a settings menu. */}
+        <div style={{ position: 'relative', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(160deg, ${crewPair[0]}45, ${crewPair[1]}22)` }} />
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, padding: '18px 20px 16px' }}>
+            <Link href="/crews" aria-label="Back to Crews" style={{ fontSize: 20, color: 'var(--v2-ink-muted)', flexShrink: 0 }}>←</Link>
+            {/* Tapping the people/avatar cluster is the entry point into real member management —
+                not a settings page. See docs/DECISIONS.md#plot-design-reset. Crew photo/DNA/
+                availability/recommendation settings live one step further in, off the sheet this
+                opens, not here. */}
+            <button onClick={() => setMembersOpen(true)} aria-label="Crew members" style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 13, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={54} />
+              <div style={{ textAlign: 'left', minWidth: 0 }}>
+                <div className="v2-display" style={{ fontSize: 21, lineHeight: 1.08 }}>{crew.name}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                  <div className="stack">
+                    {crew.members.slice(0, 4).map((m, mi) => (
+                      <div key={m.user.id} style={{ marginLeft: mi === 0 ? 0 : -7, borderRadius: '50%', boxShadow: '0 0 0 2px var(--v2-bg)' }}>
+                        <PersonAvatar name={m.user.displayName} email={m.user.email} photoUrl={m.user.avatarUrl} size={19} />
+                      </div>
+                    ))}
+                  </div>
+                  <span className="v2-muted" style={{ fontSize: 11.5, fontWeight: 700 }}>{crew.members.length} {crew.members.length === 1 ? 'person' : 'people'}</span>
+                </div>
+              </div>
+            </button>
+          </div>
         </div>
 
         {/* CURRENT CONTEXT — one slim, colourful strip, never a card competing with chat. */}
@@ -1287,7 +1347,23 @@ export default function CrewPage() {
               New messages ↓
             </button>
           )}
-          <div ref={listRef} onScroll={handleListScroll} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 10 }}>
+          {/* The message canvas itself — real, reported feedback: "huge empty white canvas, tiny
+              bubbles" read as unfinished, not a place a group actually lives. A soft two-colour
+              wash from the Crew's own identity pair (never a colour invented just for this)
+              replaces the flat white fill, low enough opacity that bubbles stay the highest-
+              contrast thing on screen. `background-attachment: local` (see .v2-chat-canvas) so
+              the wash scrolls with the messages instead of feeling like a fixed backdrop behind
+              them. */}
+          <div
+            ref={listRef}
+            onScroll={handleListScroll}
+            className="v2-chat-canvas"
+            style={{
+              flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 10,
+              margin: '0 -20px', padding: '10px 20px 10px',
+              ['--v2-chat-wash' as string]: `radial-gradient(90% 70% at 100% 0%, ${crewPair[0]}2e, transparent 65%), radial-gradient(90% 70% at 0% 100%, ${crewPair[1]}26, transparent 65%)`,
+            }}
+          >
             {solo && (
               <div style={{ textAlign: 'center', margin: 'auto', maxWidth: 260 }}>
                 <div className="v2-display" style={{ fontSize: 20, marginBottom: 8 }}>It&rsquo;s just you here so far.</div>
@@ -1455,36 +1531,43 @@ export default function CrewPage() {
       </div>
       </div>
 
-      {/* THE COMPOSER'S "+" ACTION SHEET — every way of adding something to the conversation
-          beyond plain text, one entry point. See docs/DECISIONS.md#decision-objects. */}
+      {/* THE COMPOSER'S "+" ACTION — HARD RESET. The previous version was five identical white
+          rows (icon, title, description) — the exact "component library" shape the brief calls
+          out ("could belong to literally any productivity application"). This is a real moment —
+          "we're trying to do something" — so every action gets its own colour and a large glyph,
+          organised by INTENT (find something / ask the Crew / check when / add something we
+          know) rather than by feature name, sized for a thumb rather than a list to scan. */}
       <BottomSheet open={actionOpen} onClose={closeActionSheet}>
         {actionView === 'menu' && (
           <div>
-            <div className="v2-eyebrow" style={{ marginBottom: 14 }}>Add to {crew.name}</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="v2-eyebrow" style={{ marginBottom: 4 }}>{crew.name}</div>
+            <h2 className="v2-display" style={{ fontSize: 21, marginBottom: 16 }}>What are we doing?</h2>
+            <div className="v2-action-grid">
               {[
-                { Icon: IconSpark, tint: 'rgba(255,47,126,0.12)', ink: 'var(--v2-brand)', label: 'Suggest something', desc: 'Plot picks a few — tap the one you want', action: () => openAction('suggest'), disabled: false },
-                { Icon: IconPlace, tint: 'rgba(47,138,255,0.12)', ink: '#2f8aff', label: 'Share a place', desc: 'Browse and send something specific', action: () => openAction('share'), disabled: false },
-                { Icon: IconPoll, tint: 'rgba(124,92,252,0.12)', ink: '#7c5cfc', label: 'Poll the group', desc: 'Ask a question, watch it settle', action: () => openAction('poll'), disabled: false },
-                { Icon: IconCalendar, tint: 'rgba(52,211,153,0.14)', ink: '#1b8a5c', label: 'Check availability', desc: "When's everyone actually free", action: () => openAction('availability'), disabled: false },
-                { Icon: IconFlag, tint: 'rgba(255,197,61,0.16)', ink: '#8a5f1f', label: 'Log a plan', desc: "Already know what you're doing", action: () => openAction('manual'), disabled: false },
+                { Icon: IconSpark, bg: 'var(--v2-confetti-1)', fg: '#fff', label: 'Find something', desc: 'Plot picks a few', action: () => openAction('suggest') },
+                { Icon: IconPoll, bg: 'var(--v2-confetti-2)', fg: '#fff', label: 'Ask the Crew', desc: 'Poll & watch it settle', action: () => openAction('poll') },
+                { Icon: IconCalendar, bg: 'var(--v2-green)', fg: '#fff', label: 'Check when', desc: "Who's actually free", action: () => openAction('availability') },
+                { Icon: IconPlace, bg: 'var(--v2-confetti-3)', fg: '#fff', label: 'Share a place', desc: 'Browse & send it', action: () => openAction('share') },
               ].map((item) => (
-                <button
-                  key={item.label}
-                  onClick={item.action}
-                  disabled={item.disabled}
-                  className="v2-card"
-                  style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', border: 'none', textAlign: 'left', cursor: item.disabled ? 'default' : 'pointer', width: '100%', opacity: item.disabled ? 0.6 : 1 }}
-                >
-                  <span style={{ flexShrink: 0, width: 38, height: 38, borderRadius: 12, background: item.tint, color: item.ink, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <item.Icon size={19} />
-                  </span>
+                <button key={item.label} onClick={item.action} className="v2-action-tile v2-tap-feedback" style={{ background: item.bg, color: item.fg }}>
+                  <item.Icon size={26} />
                   <div>
-                    <div style={{ fontWeight: 800, fontSize: 14.5 }}>{item.label}</div>
-                    <div className="v2-muted" style={{ fontSize: 12 }}>{item.desc}</div>
+                    <div style={{ fontWeight: 800, fontSize: 15 }}>{item.label}</div>
+                    <div style={{ fontSize: 11.5, fontWeight: 600, opacity: 0.85 }}>{item.desc}</div>
                   </div>
                 </button>
               ))}
+              <button
+                onClick={() => openAction('manual')}
+                className="v2-action-tile v2-tap-feedback"
+                style={{ background: 'var(--v2-confetti-4)', color: '#2b1a00', gridColumn: '1 / -1', flexDirection: 'row', alignItems: 'center', minHeight: 'auto', padding: '16px' }}
+              >
+                <IconFlag size={22} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15 }}>Add something we know</div>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, opacity: 0.75 }}>Already got a plan — log it</div>
+                </div>
+              </button>
             </div>
           </div>
         )}
@@ -1666,16 +1749,13 @@ export default function CrewPage() {
             <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={72} />
           </MediaUploadButton>
           <div className="v2-display" style={{ fontSize: 18, marginTop: 10 }}>{crew.name}</div>
-          <p className="v2-muted" style={{ fontSize: 12.5 }}>{crew.members.length} people</p>
-        </div>
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-          {crew.members.map((m) => (
-            <div key={m.user.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <PersonAvatar name={m.user.displayName} email={m.user.email} photoUrl={m.user.avatarUrl} size={26} />
-              <span style={{ fontSize: 12.5 }}>{displayNameOf(m.user.displayName, m.user.email)}</span>
-            </div>
-          ))}
+          <button
+            onClick={() => { setInfoOpen(false); setMembersOpen(true); }}
+            className="v2-muted v2-tap-feedback"
+            style={{ fontSize: 12.5, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', textDecoration: 'underline', textUnderlineOffset: 3 }}
+          >
+            {crew.members.length} {crew.members.length === 1 ? 'person' : 'people'} · manage
+          </button>
         </div>
 
         {crew.dna && (
@@ -1757,16 +1837,95 @@ export default function CrewPage() {
             )}
           </div>
         )}
+      </BottomSheet>
 
-        <div className="v2-eyebrow" style={{ marginBottom: 6 }}>Invite</div>
-        {inviteUrl ? (
-          <button onClick={copyInvite} className="v2-btn v2-btn-ghost" style={{ justifyContent: 'space-between', textAlign: 'left' }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inviteUrl}</span>
-            <span style={{ color: 'var(--v2-brand)', flexShrink: 0 }}>{copied ? '✓' : 'Copy'}</span>
-          </button>
+      {/* The real member-management surface — reachable directly from tapping the Crew header's
+          avatar cluster (see the header button above), not buried in the settings sheet above.
+          Add people is the first thing in it, not the last. */}
+      <BottomSheet open={membersOpen} onClose={() => { setMembersOpen(false); setConfirmRemoveId(null); setConfirmLeave(false); }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 18 }}>
+          <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={44} />
+          <div style={{ minWidth: 0 }}>
+            <div className="v2-display" style={{ fontSize: 17, lineHeight: 1.15 }}>{crew.name}</div>
+            <p className="v2-muted" style={{ fontSize: 12, margin: 0 }}>{crew.members.length} {crew.members.length === 1 ? 'person' : 'people'}</p>
+          </div>
+        </div>
+
+        <button
+          onClick={inviteUrl ? copyInvite : getInviteLink}
+          className="v2-btn v2-btn-brand v2-tap-feedback"
+          style={{ width: '100%', justifyContent: 'center', gap: 8, marginBottom: 20 }}
+        >
+          <IconAddPerson size={15} />
+          {inviteUrl ? (copied ? 'Copied — send it on' : 'Copy invite link') : 'Add people'}
+        </button>
+
+        <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Members</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 20 }}>
+          {crew.members.map((m) => {
+            const mine = m.user.id === me;
+            return (
+              <div key={m.user.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
+                <PersonAvatar name={m.user.displayName} email={m.user.email} photoUrl={m.user.avatarUrl} size={36} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {displayNameOf(m.user.displayName, m.user.email)}{mine && <span className="v2-dim"> (you)</span>}
+                  </div>
+                  {m.role === 'OWNER' && <div className="v2-dim" style={{ fontSize: 11, fontWeight: 700 }}>Owner</div>}
+                </div>
+                {isOwner && !mine && (
+                  confirmRemoveId === m.user.id ? (
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <button
+                        onClick={() => removeMember(m.user.id)}
+                        disabled={removingUserId === m.user.id}
+                        className="v2-tap-feedback"
+                        style={{ border: 'none', background: 'var(--v2-error)', color: '#fff', fontSize: 11.5, fontWeight: 700, padding: '6px 10px', borderRadius: 100, cursor: 'pointer' }}
+                      >
+                        Remove
+                      </button>
+                      <button onClick={() => setConfirmRemoveId(null)} className="v2-tap-feedback" style={{ border: 'none', background: 'var(--v2-bg-deep)', color: 'var(--v2-ink-muted)', fontSize: 11.5, fontWeight: 700, padding: '6px 10px', borderRadius: 100, cursor: 'pointer' }}>
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmRemoveId(m.user.id)}
+                      className="v2-tap-feedback"
+                      style={{ border: 'none', background: 'none', color: 'var(--v2-ink-dim)', fontSize: 11.5, fontWeight: 700, padding: '6px 4px', cursor: 'pointer', flexShrink: 0 }}
+                    >
+                      Remove
+                    </button>
+                  )
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {confirmLeave ? (
+          <div style={{ padding: '12px 14px', borderRadius: 14, background: 'var(--v2-bg-deep)' }}>
+            <p style={{ fontSize: 13, fontWeight: 700, margin: '0 0 10px' }}>
+              {isOwner && crew.members.length > 1 ? `Leave ${crew.name}? Ownership passes to whoever's been here longest.` : `Leave ${crew.name}?`}
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={leaveThisCrew} disabled={leavingCrew} className="v2-btn v2-btn-brand" style={{ flex: 1 }}>{leavingCrew ? 'Leaving…' : 'Leave'}</button>
+              <button onClick={() => setConfirmLeave(false)} disabled={leavingCrew} className="v2-btn v2-btn-ghost" style={{ flex: 1 }}>Stay</button>
+            </div>
+          </div>
         ) : (
-          <button onClick={getInviteLink} className="v2-btn v2-btn-ghost">Get invite link</button>
+          <button onClick={() => setConfirmLeave(true)} className="v2-tap-feedback" style={{ width: '100%', border: 'none', background: 'none', color: 'var(--v2-error)', fontSize: 13, fontWeight: 700, padding: '10px 0', cursor: 'pointer' }}>
+            Leave Crew
+          </button>
         )}
+
+        <button
+          onClick={() => { setMembersOpen(false); setInfoOpen(true); loadRecSettings(); }}
+          className="v2-tap-feedback"
+          style={{ width: '100%', border: 'none', background: 'none', color: 'var(--v2-ink-muted)', fontSize: 12.5, fontWeight: 600, padding: '10px 0 0', cursor: 'pointer' }}
+        >
+          Crew settings →
+        </button>
       </BottomSheet>
 
       {/* "Who's behind this" — the shared sheet for every group-state tally (plan votes, poll

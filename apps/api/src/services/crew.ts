@@ -243,7 +243,11 @@ export async function getCrewDetail(crewId: string, requestingUserId: string) {
     prisma.crew.findUnique({
       where: { id: crewId },
       include: {
-        members: { include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true } } } },
+        // Someone who left (or was removed) is real history for the account that left, not
+        // something every OTHER member of the Crew should still see in a member list/count —
+        // filtered here, the one place the whole member list is assembled, rather than at every
+        // call site that reads `crew.members`.
+        members: { where: { status: 'ACTIVE' }, include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true } } }, orderBy: { joinedAt: 'asc' } },
         dna: true,
         plans: { orderBy: { createdAt: 'desc' }, take: 10, include: { experience: { include: { venue: true } }, votes: true, members: true } },
       },
@@ -265,4 +269,58 @@ export async function getCrewDetail(crewId: string, requestingUserId: string) {
 export async function isCrewMember(crewId: string, userId: string): Promise<boolean> {
   const membership = await prisma.crewMember.findUnique({ where: { crewId_userId: { crewId, userId } } });
   return Boolean(membership && membership.status === 'ACTIVE');
+}
+
+export class CrewMembershipError extends Error {
+  constructor(
+    public code: 'not_owner' | 'not_found' | 'cannot_remove_self',
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Owner-only removal. Soft (status → LEFT, same as leaving voluntarily) — this pilot never
+ * hard-deletes a CrewMember row, so message history ("Sam voted IN") still resolves a real
+ * name/avatar for someone no longer in the Crew, same as any group chat.
+ */
+export async function removeCrewMember(crewId: string, actingUserId: string, targetUserId: string) {
+  if (targetUserId === actingUserId) {
+    throw new CrewMembershipError('cannot_remove_self', 'Use leave instead of remove for yourself.');
+  }
+  const acting = await prisma.crewMember.findUnique({ where: { crewId_userId: { crewId, userId: actingUserId } } });
+  if (!acting || acting.status !== 'ACTIVE' || acting.role !== 'OWNER') {
+    throw new CrewMembershipError('not_owner', 'Only the Crew owner can remove members.');
+  }
+  const target = await prisma.crewMember.findUnique({ where: { crewId_userId: { crewId, userId: targetUserId } } });
+  if (!target || target.status !== 'ACTIVE') {
+    throw new CrewMembershipError('not_found', 'That person is not an active member of this Crew.');
+  }
+  await prisma.crewMember.update({ where: { id: target.id }, data: { status: 'LEFT' } });
+  await computeCrewDna(crewId);
+  await track('CrewMemberRemoved', { crewId, removedUserId: targetUserId, userId: actingUserId }, { userId: actingUserId, crewId });
+}
+
+/**
+ * Voluntary leave, any role including the owner. An owner who leaves hands OWNER to whoever
+ * joined next-longest-ago among the remaining active members, so a Crew is never left with zero
+ * owners while it still has people in it (the last person out just leaves — nobody left to hand
+ * it to).
+ */
+export async function leaveCrew(crewId: string, userId: string) {
+  const membership = await prisma.crewMember.findUnique({ where: { crewId_userId: { crewId, userId } } });
+  if (!membership || membership.status !== 'ACTIVE') {
+    throw new CrewMembershipError('not_found', 'You are not an active member of this Crew.');
+  }
+  if (membership.role === 'OWNER') {
+    const successor = await prisma.crewMember.findFirst({
+      where: { crewId, status: 'ACTIVE', userId: { not: userId } },
+      orderBy: { joinedAt: 'asc' },
+    });
+    if (successor) await prisma.crewMember.update({ where: { id: successor.id }, data: { role: 'OWNER' } });
+  }
+  await prisma.crewMember.update({ where: { id: membership.id }, data: { status: 'LEFT' } });
+  await computeCrewDna(crewId);
+  await track('CrewLeft', { crewId, userId }, { userId, crewId });
 }

@@ -8,10 +8,9 @@ import { v2Art } from '@/lib/v2Art';
 import { formatPriceFrom } from '@/lib/formatPrice';
 import { displayNameOf } from '@/lib/displayName';
 import { messagePreview } from '@/lib/messagePreview';
-import { IconCalendar, IconPoll, IconGathering, IconLock } from '@/components/icons';
+import { IconGathering, IconLock } from '@/components/icons';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { identityGradient } from '@/lib/identity';
-import { crewArtStyle, isCrewArtUrl } from '@/lib/crewArt';
 
 interface CrewSummary {
   id: string;
@@ -109,15 +108,14 @@ function pulseLine(crews: CrewSummary[], nextPlan: UpcomingPlan | null, needsCou
 }
 
 /**
- * Home — the social engine room, recomposed (not just re-decorated) around one rule: the page
- * adapts to whichever real state is strongest, and Crews are objects you look at, not a list you
- * read. A locked plan dominates the top of the page when one exists (a real photo, full-width);
- * short of that, a decision genuinely waiting on you takes the same slot. Below that, "Your
- * people" is no longer a row of small avatar circles — every Crew is its own image tile (a real
- * photo, a chosen Plot Art theme, or the identity field), because a Crew is exactly as much a
- * real social object here as a Plan is on the Plans page, and a Crew waiting on your vote links
- * straight into that vote instead of repeating itself in a second "Needs you" list underneath.
- * See docs/DECISIONS.md#plot-design-reset.
+ * Home — HARD RESET (see docs/DECISIONS.md#plot-design-reset-3), not a restyle of the previous
+ * attempt. That version was a dashboard: a bounded hero card, a grid of Crew tiles, a sticky
+ * desktop right-rail — three separate places a Crew's people/state could live, one column/panel
+ * per concept. Deleted outright. This version is ONE column at every viewport, built around a
+ * single rule: the page adapts to whichever real state is strongest, and PEOPLE lead — a story
+ * rail of large Crew identity marks is the very first thing on the page, above the greeting, not
+ * a caption under a photo. Below it, one dominant edge-to-edge moment (a locked plan, or a
+ * decision genuinely waiting on you), then a plain editorial feed with no card chrome.
  */
 export default function HomePage() {
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
@@ -184,24 +182,22 @@ export default function HomePage() {
   return (
     <div className="v2">
       <div className="v2-shell-desktop">
-        <div className="v2-home-split">
-        <div className="v2-home-main">
-        <div className="v2-page" style={{ paddingTop: 28 }}>
-          {/* Header — a real page element, not a slim top bar. The avatar here is a mobile-only
-              affordance (desktop already has one pinned to the nav rail). */}
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 26 }}>
+        <div className="v2-page v2-home-page" style={{ paddingTop: 24 }}>
+          {/* Header — small and secondary now; the story rail below it carries the page's real
+              opening statement. The avatar here is a mobile-only affordance (desktop already has
+              one pinned to the nav rail). */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
             <div>
-              <h1 className="v2-display" style={{ fontSize: 38, marginBottom: 6 }}>
-                {greeting()}{firstName && <><br /><span style={{ fontStyle: 'italic', color: 'var(--v2-pop)' }}>{firstName}</span></>}
-              </h1>
-              {/* Real, live signal — see pulseLine above — not a caption that never changes. */}
-              <p key={pulse} className="v2-muted v2-pop-in" style={{ fontSize: 14.5, maxWidth: 260 }}>{pulse}</p>
+              <div className="v2-display" style={{ fontSize: 20 }}>
+                {greeting()}{firstName && <>, <span style={{ fontStyle: 'italic', color: 'var(--v2-pop)' }}>{firstName}</span></>}
+              </div>
+              <p key={pulse} className="v2-muted v2-pop-in" style={{ fontSize: 13, margin: '2px 0 0' }}>{pulse}</p>
             </div>
             <Link href="/profile" aria-label="Your profile" style={{ flexShrink: 0, borderRadius: '50%', boxShadow: 'var(--v2-shadow-sm)' }}>
               {me ? (
-                <PersonAvatar name={me.displayName} email={me.email} photoUrl={me.avatarUrl} size={42} />
+                <PersonAvatar name={me.displayName} email={me.email} photoUrl={me.avatarUrl} size={38} />
               ) : (
-                <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'var(--v2-ink-dim)' }} />
+                <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'var(--v2-ink-dim)' }} />
               )}
             </Link>
           </div>
@@ -210,8 +206,10 @@ export default function HomePage() {
 
           {loading && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
-              <div className="v2-skeleton" style={{ height: 320, borderRadius: 28 }} />
-              <div className="v2-skeleton" style={{ height: 88, borderRadius: 20 }} />
+              <div style={{ display: 'flex', gap: 14 }}>
+                {[1, 2, 3, 4].map((i) => <div key={i} className="v2-skeleton" style={{ width: 64, height: 64, borderRadius: 22, flexShrink: 0 }} />)}
+              </div>
+              <div className="v2-skeleton" style={{ height: 300, borderRadius: 0 }} />
             </div>
           )}
 
@@ -227,43 +225,63 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* THE DOMINANT SLOT — promoted to the very top of the page, above "Your people": the
-              single biggest thing here when something's actually locked, or a decision genuinely
-              waiting on you short of that. Brief: "if I have something tonight, that should
-              dominate." A caption line further down the page can't dominate anything — this can. */}
+          {/* THE STORY RAIL — people first. Every Crew as one large identity mark with a live-
+              state ring (a bright pulsing ring means a vote's waiting on you; a green ring means
+              a plan's locked; a plain ring means it's quiet) — the same one component at every
+              viewport, not a grid of photo tiles on mobile and a different list on desktop. This
+              replaces BOTH the old tile grid and the old desktop-only "Your Crews" rail. */}
+          {crews && crews.length > 0 && (
+            <div className="v2-story-rail" style={{ marginBottom: 28 }}>
+              {crews.map((crew) => {
+                const status = crewStatusLine(crew);
+                const tileHref = status.urgent ? `/plans/${crew.activePlan!.publicSlug}` : `/crews/${crew.id}`;
+                return (
+                  <Link key={crew.id} href={tileHref} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 72 }}>
+                    <div className={`v2-story-ring${status.urgent ? ' urgent' : crew.upcomingPlan ? ' plan' : ''}`}>
+                      <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={64} />
+                    </div>
+                    <span
+                      style={{
+                        fontSize: 11, fontWeight: status.urgent ? 800 : 600, color: status.urgent ? 'var(--v2-pop)' : 'var(--v2-ink-muted)',
+                        maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {crew.name}
+                    </span>
+                  </Link>
+                );
+              })}
+              <Link href="/crews?new=1" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 72 }}>
+                <div style={{ width: 64, height: 64, borderRadius: 22, border: '1.5px dashed var(--v2-ink-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, color: 'var(--v2-ink-dim)', fontWeight: 300 }}>+</div>
+                <span className="v2-dim" style={{ fontSize: 11, fontWeight: 600 }}>New</span>
+              </Link>
+            </div>
+          )}
+
+          {/* THE DOMINANT MOMENT — edge-to-edge, not a card floating in visible margin. The single
+              biggest thing on the page when something's actually locked, or a decision genuinely
+              waiting on you short of that. */}
           {nextPlan && (
             <Link
               href={`/plans/${nextPlan.publicSlug}`}
-              className="fade-up v2-hoverable"
+              className="fade-up v2-bleed"
               style={{
                 display: 'block',
                 position: 'relative',
-                height: 360,
-                borderRadius: 'var(--v2-r-lg)',
+                height: 420,
                 overflow: 'hidden',
-                marginBottom: 32,
-                boxShadow: 'var(--v2-shadow-lg)',
+                marginBottom: 6,
                 background: v2Art(nextPlan.imageUrl, nextPlan.category),
               }}
             >
-              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(22,19,15,0) 30%, rgba(22,19,15,0.55) 70%, rgba(22,19,15,0.88) 100%)' }} />
-              <div style={{ position: 'absolute', top: 20, left: 22 }}>
-                <span
-                  style={{
-                    fontSize: 11.5,
-                    fontWeight: 800,
-                    letterSpacing: '-0.01em',
-                    color: 'var(--v2-brand-ink)',
-                    background: 'var(--v2-brand)',
-                    padding: '7px 14px',
-                    borderRadius: 100,
-                  }}
-                >
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(22,19,15,0) 25%, rgba(22,19,15,0.6) 72%, rgba(22,19,15,0.9) 100%)' }} />
+              <div style={{ position: 'absolute', top: 20, left: 20 }}>
+                <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '-0.01em', color: 'var(--v2-brand-ink)', background: 'var(--v2-brand)', padding: '7px 14px', borderRadius: 100 }}>
                   <IconLock size={11} style={{ marginRight: 4, verticalAlign: -1.5 }} />Next up
                 </span>
               </div>
-              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '24px 26px' }}>
-                <div className="v2-display" style={{ fontSize: 32, lineHeight: 1.06, color: '#fff', marginBottom: 10, maxWidth: '90%' }}>
+              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '24px 20px' }}>
+                <div className="v2-display" style={{ fontSize: 36, lineHeight: 1.02, color: '#fff', marginBottom: 10, maxWidth: '92%' }}>
                   {nextPlan.title}
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.92)', marginBottom: 12 }}>
@@ -284,18 +302,18 @@ export default function HomePage() {
           {heroNeedsAttention && (
             <Link
               href={`/plans/${heroNeedsAttention.activePlan!.publicSlug}`}
-              className="fade-up v2-hoverable"
+              className="fade-up v2-bleed v2-hoverable"
               style={{
-                display: 'block', position: 'relative', height: 240, borderRadius: 'var(--v2-r-lg)', overflow: 'hidden',
-                marginBottom: 32, boxShadow: 'var(--v2-shadow-lg)', background: identityGradient(heroNeedsAttention.id, 155),
+                display: 'block', position: 'relative', height: 280, overflow: 'hidden',
+                marginBottom: 6, background: identityGradient(heroNeedsAttention.id, 155),
               }}
             >
-              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(22,19,15,0) 30%, rgba(22,19,15,0.5) 100%)' }} />
-              <div style={{ position: 'absolute', top: 20, left: 22, display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 800, letterSpacing: '-0.01em', color: '#fff', background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(6px)', padding: '7px 14px', borderRadius: 100 }}>
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(22,19,15,0) 25%, rgba(22,19,15,0.55) 100%)' }} />
+              <div style={{ position: 'absolute', top: 20, left: 20, display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 800, letterSpacing: '-0.01em', color: '#fff', background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(6px)', padding: '7px 14px', borderRadius: 100 }}>
                 <IconGathering size={12} />Still deciding
               </div>
-              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 24px' }}>
-                <div className="v2-display" style={{ fontSize: 24, lineHeight: 1.1, color: '#fff', marginBottom: 8, maxWidth: '90%' }}>
+              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 20px' }}>
+                <div className="v2-display" style={{ fontSize: 26, lineHeight: 1.08, color: '#fff', marginBottom: 8, maxWidth: '92%' }}>
                   {heroNeedsAttention.activePlan!.title}
                 </div>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: 'rgba(255,255,255,0.85)', marginBottom: 14 }}>
@@ -308,103 +326,31 @@ export default function HomePage() {
             </Link>
           )}
 
-          {/* YOUR PEOPLE — every Crew as its own image tile, not a row of small avatar circles.
-              A Crew is exactly as real a social object here as a Plan is on the Plans page, so it
-              gets the same treatment: a real photo, a chosen Plot Art theme, or the identity
-              field as the whole tile, the Crew's own mark + name overlaid on it. A Crew waiting
-              on your vote links straight into that vote (its own badge says so) instead of
-              repeating itself in a separate "Needs you" list underneath — one real object, one
-              real place it lives on the page, not two. */}
-          {crews && crews.length > 0 && (
-            <div style={{ marginBottom: 32 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
-                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Your people</div>
-                <Link href="/crews" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>See all</Link>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(152px, 1fr))', gap: 12 }}>
-                {crews.slice(0, 6).map((crew, i) => {
-                  const status = crewStatusLine(crew);
-                  const artTheme = isCrewArtUrl(crew.imageUrl);
-                  const realPhoto = crew.imageUrl && !artTheme ? crew.imageUrl : null;
-                  const tileHref = status.urgent ? `/plans/${crew.activePlan!.publicSlug}` : `/crews/${crew.id}`;
-                  return (
-                    <Link
-                      key={crew.id}
-                      href={tileHref}
-                      className="v2-card fade-up v2-stagger"
-                      style={{
-                        display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden',
-                        ['--stagger-i' as string]: i,
-                        boxShadow: status.urgent ? '0 0 0 1.5px var(--v2-pop), var(--v2-shadow-sm)' : undefined,
-                      }}
-                    >
-                      <div
-                        style={{
-                          position: 'relative', width: '100%', aspectRatio: '4 / 3',
-                          background: realPhoto ? `url("${realPhoto}") center/cover` : artTheme ? crewArtStyle(artTheme) : identityGradient(crew.name),
-                        }}
-                      >
-                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0) 42%, rgba(0,0,0,0.55) 100%)' }} />
-                        <div style={{ position: 'absolute', top: 8, left: 8 }}>
-                          <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={26} />
-                        </div>
-                        {status.urgent && (
-                          <div className="v2-pop-in" style={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 3, background: 'var(--v2-pop)', color: '#fff', fontSize: 9.5, fontWeight: 800, padding: '4px 8px', borderRadius: 100 }}>
-                            Vote →
-                          </div>
-                        )}
-                        <div style={{ position: 'absolute', bottom: 8, left: 10, right: 10 }}>
-                          <div className="v2-display" style={{ fontSize: 14, color: '#fff', lineHeight: 1.15, textShadow: '0 1px 3px rgba(0,0,0,0.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {crew.name}
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{ padding: '8px 10px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        {status.kind === 'calendar' && <IconCalendar size={10} style={{ flexShrink: 0, color: status.urgent ? 'var(--v2-pop)' : 'var(--v2-ink-dim)' }} />}
-                        {status.kind === 'poll' && <IconPoll size={10} style={{ flexShrink: 0, color: status.urgent ? 'var(--v2-pop)' : 'var(--v2-ink-dim)' }} />}
-                        <span style={{ fontSize: 11.5, fontWeight: status.urgent ? 700 : 600, color: status.urgent ? 'var(--v2-pop)' : 'var(--v2-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {status.text}
-                        </span>
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* IN THE GROUPS — a real activity feed (who shared/said what, and where). */}
+          {/* IN THE GROUPS — a plain editorial list (large face, real quote), no card chrome, no
+              repeated white rectangle. */}
           {recentActivity.length > 0 && (
-            <div style={{ marginBottom: 32 }}>
-              <div className="v2-eyebrow" style={{ marginBottom: 10 }}>In the groups</div>
-              <div className="v2-card" style={{ padding: '4px 18px' }}>
-                {recentActivity.map((c, i) => (
-                  <div key={c.id} style={{ display: 'flex', gap: 12, padding: '13px 0', borderBottom: i < recentActivity.length - 1 ? '1px solid var(--v2-line)' : 'none' }}>
-                    <div style={{ flexShrink: 0 }}>
-                      <PersonAvatar name={c.latestMessage!.authorName} email={c.latestMessage!.authorName} photoUrl={c.latestMessage!.authorAvatarUrl} size={34} />
+            <div style={{ marginTop: 26, marginBottom: 8 }}>
+              <div className="v2-eyebrow" style={{ marginBottom: 2 }}>In the groups</div>
+              {recentActivity.map((c) => (
+                <div key={c.id} className="v2-editorial-row">
+                  <PersonAvatar name={c.latestMessage!.authorName} email={c.latestMessage!.authorName} photoUrl={c.latestMessage!.authorAvatarUrl} size={44} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="v2-display" style={{ fontSize: 16, lineHeight: 1.3, marginBottom: 2 }}>
+                      &ldquo;{messagePreview(c.latestMessage!.body)}&rdquo;
                     </div>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13.5 }}>
-                        <strong>{c.latestMessage!.authorName}</strong> <span className="v2-muted">in {c.name}</span>
-                      </div>
-                      <div className="v2-muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
-                        {messagePreview(c.latestMessage!.body)}
-                      </div>
+                    <div className="v2-muted" style={{ fontSize: 12.5 }}>
+                      <strong style={{ color: 'var(--v2-ink)' }}>{c.latestMessage!.authorName}</strong> in {c.name} · {timeAgo(c.latestMessage!.createdAt)}
                     </div>
-                    <div className="v2-dim" style={{ flexShrink: 0, fontSize: 11, paddingTop: 2 }}>{timeAgo(c.latestMessage!.createdAt)}</div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
           )}
 
           {/* FOR YOUR CREWS — a few genuinely useful suggestions, deliberately small and last:
-              discovery feeds the social loop, it doesn't lead the page. Not an event catalogue —
-              three compact rows, not a big image grid. Also doubles as the brand-new-user Home
-              state's "3 nearby suggestions" (brief) when there are no Crews yet — same real,
-              location-resolved data, just a heading that doesn't presuppose a Crew exists. */}
+              discovery feeds the social loop, it doesn't lead the page. */}
           {ideas && ideas.length > 0 && (
-            <div>
+            <div style={{ marginTop: 8 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
                 <div className="v2-eyebrow" style={{ marginBottom: 0 }}>{crews && crews.length > 0 ? 'For your Crews' : 'Worth a look nearby'}</div>
                 <Link href="/explore" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>Discover</Link>
@@ -433,43 +379,6 @@ export default function HomePage() {
               </div>
             </div>
           )}
-        </div>
-        </div>
-
-        {/* DESKTOP CREWS RAIL — a persistent, glanceable list beside the feed (Slack/Discord-
-            shaped), not a stretched single column with a dead void next to it. Real content,
-            not decoration: every Crew, its own activity line, one tap into any of them. */}
-        {crews && crews.length > 0 && (
-          <div className="v2-home-rail">
-            <div className="v2-card" style={{ padding: '18px 16px' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 }}>
-                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Your Crews</div>
-                <Link href="/crews?new=1" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 700 }}>+ New</Link>
-              </div>
-              {crews.map((crew) => {
-                const status = crewStatusLine(crew);
-                return (
-                <Link key={crew.id} href={`/crews/${crew.id}`} className="v2-rail-crew-row">
-                  <div style={{ position: 'relative', flexShrink: 0, padding: 2, borderRadius: 13, boxShadow: status.urgent ? '0 0 0 2px var(--v2-pop)' : 'none' }}>
-                    <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={34} />
-                    {status.urgent && (
-                      <div className="v2-pop-in" style={{ position: 'absolute', top: -2, right: -2, width: 12, height: 12, borderRadius: '50%', background: 'var(--v2-pop)', border: '1.5px solid var(--v2-surface)' }} />
-                    )}
-                  </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crew.name}</div>
-                    <div className={status.urgent ? undefined : 'v2-dim'} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, overflow: 'hidden', color: status.urgent ? 'var(--v2-pop)' : undefined, fontWeight: status.urgent ? 700 : 400 }}>
-                      {status.kind === 'calendar' && <IconCalendar size={10} style={{ flexShrink: 0 }} />}
-                      {status.kind === 'poll' && <IconPoll size={10} style={{ flexShrink: 0 }} />}
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{status.text}</span>
-                    </div>
-                  </div>
-                </Link>
-                );
-              })}
-            </div>
-          </div>
-        )}
         </div>
       </div>
       <TabBarV2 />

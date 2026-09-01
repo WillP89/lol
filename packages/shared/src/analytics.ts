@@ -35,6 +35,7 @@ export const AnalyticsEvents = {
   InviteAccepted: 'InviteAccepted',
   CrewJoined: 'CrewJoined',
   CrewLeft: 'CrewLeft',
+  CrewMemberRemoved: 'CrewMemberRemoved',
   CrewMessageSent: 'CrewMessageSent',
   ReactionAdded: 'ReactionAdded',
   PollCreated: 'PollCreated',
@@ -101,6 +102,7 @@ export interface AnalyticsEventPayloads {
   InviteAccepted: { crewId: string; userId: string };
   CrewJoined: { crewId: string; userId: string; viaInvite: boolean };
   CrewLeft: { crewId: string; userId: string };
+  CrewMemberRemoved: { crewId: string; removedUserId: string; userId: string };
   CrewMessageSent: { crewId: string; userId: string };
   ReactionAdded: { crewId: string; messageId: string; emoji: string; userId: string };
   PollCreated: { crewId: string; messageId: string; kind: 'GENERAL' | 'AVAILABILITY'; optionCount: number };

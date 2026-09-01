@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../middleware/auth';
-import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getCrewPreviewByInviteCode, isCrewMember } from '../services/crew';
+import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getCrewPreviewByInviteCode, isCrewMember, removeCrewMember, leaveCrew, CrewMembershipError } from '../services/crew';
 import { sendCrewMessage, listCrewMessages, toggleReaction, createPoll, votePoll, ChatError } from '../services/chat';
 import { track } from '../services/analytics';
 import { getOrCreateSettings, updateSettings, respondToRecommendation, RecommendationError } from '../services/crewRecommendations';
@@ -125,6 +125,39 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     await track('CrewInviteSent', { crewId: id, channel: parsed.data.channel }, { userId: request.user.id, crewId: id });
 
     return reply.send({ inviteUrl: `${process.env.WEB_APP_URL ?? ''}/crews/join/${crew.inviteCode}` });
+  });
+
+  // Owner-only. Kept as a distinct route from /leave (below) rather than one "remove yourself
+  // or someone else" endpoint — the permission check and the "who succeeds the owner" logic are
+  // different enough (see services/crew.ts) that folding them together just hides which case is
+  // running.
+  app.delete('/crews/:id/members/:userId', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id, userId } = request.params as { id: string; userId: string };
+    try {
+      await removeCrewMember(id, request.user.id, userId);
+      return reply.send({ ok: true });
+    } catch (err) {
+      if (err instanceof CrewMembershipError) {
+        const status = err.code === 'not_owner' ? 403 : err.code === 'not_found' ? 404 : 400;
+        return reply.code(status).send({ error: err.code, message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post('/crews/:id/leave', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    try {
+      await leaveCrew(id, request.user.id);
+      return reply.send({ ok: true });
+    } catch (err) {
+      if (err instanceof CrewMembershipError) {
+        return reply.code(err.code === 'not_found' ? 404 : 400).send({ error: err.code, message: err.message });
+      }
+      throw err;
+    }
   });
 
   app.get('/crews/:id/messages', async (request, reply) => {

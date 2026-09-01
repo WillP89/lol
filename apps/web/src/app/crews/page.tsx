@@ -7,9 +7,10 @@ import { api, ApiError } from '@/lib/api';
 import { TabBarV2 } from '@/components/TabBarV2';
 import { BottomSheet } from '@/components/BottomSheet';
 import { messagePreview } from '@/lib/messagePreview';
-import { IconCalendar, IconPoll } from '@/components/icons';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { MediaUploadButton } from '@/components/MediaUploadButton';
+import { identityGradient } from '@/lib/identity';
+import { crewArtStyle, isCrewArtUrl } from '@/lib/crewArt';
 
 interface CrewSummary {
   id: string;
@@ -21,64 +22,36 @@ interface CrewSummary {
   upcomingPlan: { id: string; title: string; publicSlug: string; startsAt: string | null; venueName: string | null } | null;
 }
 
-function timeAgo(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return 'now';
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-}
-
 /**
- * What a Crew card actually shows, in priority order — this is what turns "a list of Crew
- * names" into "what's actually going on", per docs/DECISIONS.md#home-surface: a locked-in
- * plan beats an open decision beats a chat snippet beats nothing.
+ * What a Crew tile actually shows, in priority order — this is what turns "a Crew's name" into
+ * "what's actually going on", per docs/DECISIONS.md#home-surface: a locked-in plan beats an open
+ * decision beats a chat snippet beats nothing.
  */
-function CrewActivityLine({ crew }: { crew: CrewSummary }) {
+function crewActivityText(crew: CrewSummary): { text: string; tone: 'plan' | 'deciding' | 'chat' | 'quiet' } {
   if (crew.upcomingPlan) {
     const when = crew.upcomingPlan.startsAt
       ? new Date(crew.upcomingPlan.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
       : null;
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--v2-green)', fontWeight: 700 }}>
-        <IconCalendar size={13} style={{ flexShrink: 0 }} />
-        <span>
-          {crew.upcomingPlan.title}
-          {when && ` · ${when}`}
-        </span>
-      </div>
-    );
+    return { text: `${crew.upcomingPlan.title}${when ? ` · ${when}` : ''}`, tone: 'plan' };
   }
   if (crew.activePlan) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#8a5f1f', fontWeight: 700 }}>
-        <IconPoll size={13} style={{ flexShrink: 0 }} />
-        <span>
-          Deciding: {crew.activePlan.title} · {crew.activePlan.inCount}/{crew.activePlan.totalMembers} in
-        </span>
-      </div>
-    );
+    return { text: `Deciding: ${crew.activePlan.title} · ${crew.activePlan.inCount}/${crew.activePlan.totalMembers} in`, tone: 'deciding' };
   }
   if (crew.latestMessage) {
-    return (
-      <div className="v2-muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        <span style={{ fontWeight: 700, color: 'var(--v2-ink)' }}>{crew.latestMessage.authorName}: </span>
-        {messagePreview(crew.latestMessage.body)}
-      </div>
-    );
+    return { text: `${crew.latestMessage.authorName}: ${messagePreview(crew.latestMessage.body)}`, tone: 'chat' };
   }
-  return <div className="v2-dim" style={{ fontSize: 12.5 }}>Someone has to start it — say hi.</div>;
+  return { text: 'Someone has to start it — say hi', tone: 'quiet' };
 }
 
 type CreateStep = 'name' | 'look' | 'invite';
 
 /**
- * Crews — the list screen, in the same product language as Home/Crew/Explore: same warm ground,
- * card/eyebrow/button vocabulary and avatar identity system. See docs/DECISIONS.md#plot-design-reset.
+ * Crews — HARD RESET (see docs/DECISIONS.md#plot-design-reset-3), not a restyle. The previous
+ * version was two columns of identical white rounded rows: a Crew mark, a name, one line of
+ * status — read as a database table, not a page of people you actually know. Replaced outright
+ * with large identity tiles: real Crew photo/art fills most of the tile, faces and the live
+ * activity line sit directly on the image, the way a person actually recognises a group at a
+ * glance — not a record they scan.
  */
 export default function CrewsPage() {
   const router = useRouter();
@@ -184,7 +157,7 @@ export default function CrewsPage() {
     <div className="v2">
       <div className="v2-shell-desktop">
         <div className="v2-page v2-page-wide" style={{ paddingTop: 28 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 26 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 22 }}>
             <div>
               <h1 className="v2-display" style={{ fontSize: 30, lineHeight: 1.06, marginBottom: 4 }}>Crews</h1>
               <p className="v2-muted" style={{ fontSize: 14.5 }}>Where your groups live.</p>
@@ -202,43 +175,67 @@ export default function CrewsPage() {
           {error && <div style={{ color: 'var(--v2-error)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
           {crews === null && !error && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="v2-crews-grid">
               {[1, 2].map((i) => (
-                <div key={i} className="v2-skeleton" style={{ height: 78, borderRadius: 'var(--v2-r-lg)' }} />
+                <div key={i} className="v2-skeleton" style={{ height: 220, borderRadius: 'var(--v2-r-lg)' }} />
               ))}
             </div>
           )}
 
           {crews && crews.length > 0 && (
-            <div className="v2-card-grid" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {crews.map((crew, i) => (
-                <Link
-                  key={crew.id}
-                  href={`/crews/${crew.id}`}
-                  className="v2-card fade-up v2-stagger"
-                  style={{ display: 'block', padding: '15px 18px', ['--stagger-i' as string]: i }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-                    <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={44} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="v2-display" style={{ fontSize: 16.5 }}>{crew.name}</div>
-                      {/* Real people, not another count — the same "who's actually here" energy
-                          as the Crew info sheet, just small enough to fit a list row. */}
-                      <div className="stack" style={{ marginTop: 4 }}>
-                        {crew.members.slice(0, 4).map((m, i) => (
-                          <div key={i} style={{ marginLeft: i === 0 ? 0 : -7, borderRadius: '50%', boxShadow: '0 0 0 2px var(--v2-surface)' }}>
-                            <PersonAvatar name={m.user.displayName} email={m.user.email} photoUrl={m.user.avatarUrl} size={20} />
-                          </div>
-                        ))}
+            <div className="v2-crews-grid">
+              {crews.map((crew, i) => {
+                const activity = crewActivityText(crew);
+                const artTheme = isCrewArtUrl(crew.imageUrl);
+                const realPhoto = crew.imageUrl && !artTheme ? crew.imageUrl : null;
+                return (
+                  <Link
+                    key={crew.id}
+                    href={`/crews/${crew.id}`}
+                    className="v2-hoverable fade-up v2-stagger"
+                    style={{
+                      display: 'block', position: 'relative', height: 220, borderRadius: 'var(--v2-r-lg)', overflow: 'hidden',
+                      boxShadow: 'var(--v2-shadow-sm)', ['--stagger-i' as string]: i,
+                      background: realPhoto ? `url("${realPhoto}") center/cover` : artTheme ? crewArtStyle(artTheme) : identityGradient(crew.name, 190),
+                    }}
+                  >
+                    <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(0,0,0,0) 32%, rgba(0,0,0,0.68) 100%)' }} />
+                    <div style={{ position: 'absolute', top: 12, left: 12 }}>
+                      <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={34} />
+                    </div>
+                    {activity.tone === 'plan' && (
+                      <div style={{ position: 'absolute', top: 12, right: 12, fontSize: 10, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase', color: '#fff', background: 'var(--v2-green)', padding: '4px 9px', borderRadius: 100 }}>
+                        Locked
+                      </div>
+                    )}
+                    {activity.tone === 'deciding' && (
+                      <div className="v2-pop-in" style={{ position: 'absolute', top: 12, right: 12, fontSize: 10, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase', color: '#fff', background: 'var(--v2-pop)', padding: '4px 9px', borderRadius: 100 }}>
+                        Voting
+                      </div>
+                    )}
+                    <div style={{ position: 'absolute', left: 14, right: 14, bottom: 12 }}>
+                      <div className="v2-display" style={{ fontSize: 20, color: '#fff', lineHeight: 1.08, marginBottom: 6, textShadow: '0 1px 4px rgba(0,0,0,0.35)' }}>
+                        {crew.name}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <div className="stack">
+                          {crew.members.slice(0, 4).map((m, mi) => (
+                            <div key={mi} style={{ marginLeft: mi === 0 ? 0 : -8, borderRadius: '50%', boxShadow: '0 0 0 2px rgba(0,0,0,0.4)' }}>
+                              <PersonAvatar name={m.user.displayName} email={m.user.email} photoUrl={m.user.avatarUrl} size={22} />
+                            </div>
+                          ))}
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>
+                          {crew.members.length} {crew.members.length === 1 ? 'person' : 'people'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {activity.text}
                       </div>
                     </div>
-                  </div>
-                  <CrewActivityLine crew={crew} />
-                  {crew.latestMessage && (crew.upcomingPlan || crew.activePlan) && (
-                    <div className="v2-dim" style={{ fontSize: 10.5, marginTop: 4 }}>{timeAgo(crew.latestMessage.createdAt)} ago in chat</div>
-                  )}
-                </Link>
-              ))}
+                  </Link>
+                );
+              })}
             </div>
           )}
 

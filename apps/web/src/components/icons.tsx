@@ -160,6 +160,17 @@ export function IconFlame(props: IconProps) {
   );
 }
 
+/** Adding a person — a head/shoulders outline with a plus. "Add people" to a Crew. */
+export function IconAddPerson(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="8.2" cy="6.8" r="3.3" />
+      <path d="M2.5 17c.4-3.4 2.7-5.2 5.7-5.2s5.3 1.8 5.7 5.2" />
+      <path d="M15.8 6.5v5M13.3 9h5" />
+    </svg>
+  );
+}
+
 /** A compass. Page-not-found wayfinding. */
 export function IconCompass(props: IconProps) {
   return (

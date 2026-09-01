@@ -644,30 +644,54 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   .v2-chip-toggle:not(.selected):hover { box-shadow: var(--v2-shadow-lg) !important; }
 }
 
-/* ---- Home's desktop composition ---- */
-.v2-home-split { display: block; position: relative; z-index: 1; }
-.v2-home-rail { display: none; }
-@media (min-width: 1080px) {
-  .v2-home-split {
-    display: flex;
-    align-items: flex-start;
-    gap: 40px;
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 40px 40px 60px;
-  }
-  .v2-home-main { flex: 1; min-width: 0; }
-  /* .v2-page's own 560px cap is right for a single mobile-width reading column, but inside the
-     desktop split it just wasted the extra width this container exists to use — the actual
-     "tiny strip in a huge viewport" bug lived here, not in the outer container's own max-width. */
-  .v2-home-main .v2-page { max-width: none; padding-left: 0; padding-right: 0; padding-top: 0; }
-  .v2-home-rail {
-    display: block;
-    width: 320px;
-    flex-shrink: 0;
-    position: sticky;
-    top: 40px;
-  }
+/* ---- Home — hard reset (see docs/DECISIONS.md#plot-design-reset-3) ----
+   The previous composition was a dashboard: a bounded hero card, a grid of tiles below it, a
+   sticky right-hand "Your Crews" rail on desktop. Real, reported feedback: that's a left-column/
+   main-column/right-panel web-app shape, not a social product, on every viewport — deleted
+   outright rather than restyled. One column, mobile through desktop alike (a Crew's people and
+   its state now live in the SAME single rail at the top of the page instead of a duplicate
+   desktop-only sidebar), an edge-to-edge hero instead of a card floating in visible margin, and
+   an editorial activity feed with no card chrome instead of a boxed list. */
+.v2-home-page { max-width: 640px; margin: 0 auto; }
+
+/* Bleeds a block to the physical screen edge on mobile (out of `.v2-page`'s 20px padding) and to
+   the reading column's own edge on desktop — an image/moment that fills the space it's given
+   instead of sitting inset inside a rounded card. Plain negative-margin, not a 100vw trick, so it
+   can never introduce horizontal scroll regardless of what sits beside the page. */
+.v2-bleed { margin-left: -20px; margin-right: -20px; }
+
+/* The story rail — every Crew as a large identity mark with a live-state ring, not a grid of
+   photo tiles and not a second desktop-only list. This IS "Your people": the same one component
+   at every viewport, sized up on desktop rather than duplicated. */
+.v2-story-rail {
+  display: flex;
+  gap: 18px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px 2px 6px;
+}
+.v2-story-rail::-webkit-scrollbar { display: none; }
+.v2-story-ring {
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--v2-line);
+  transition: transform 0.15s ease;
+}
+.v2-story-ring.urgent { background: linear-gradient(135deg, var(--v2-pop), var(--v2-confetti-4)); }
+.v2-story-ring.plan { background: linear-gradient(135deg, var(--v2-green), var(--v2-confetti-3)); }
+.v2-story-ring:active { transform: scale(0.94); }
+@keyframes v2RingPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,47,126,0.35); } 50% { box-shadow: 0 0 0 5px rgba(255,47,126,0); } }
+.v2-story-ring.urgent { animation: v2RingPulse 2.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .v2-story-ring.urgent { animation: none; } }
+
+/* The editorial feed — text/avatar rows with no card background, no border-radius, no shadow;
+   only a hairline between entries. Deliberately the opposite of the "identical white rounded
+   rectangle repeated" read the dashboard version had. */
+.v2-editorial-row { display: flex; gap: 14px; padding: 18px 0; border-bottom: 1px solid var(--v2-line); }
+.v2-editorial-row:last-child { border-bottom: none; }
+
+@media (min-width: 900px) {
+  .v2-home-page { max-width: 720px; padding-top: 12px; }
 }
 
 /* The desktop Crews rail — a persistent, glanceable list beside the feed (Slack/Discord-shaped,
@@ -695,11 +719,24 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
    out as a real multi-column grid instead of one long stretched-full-width column of rows. */
 @media (min-width: 900px) {
   .v2-page-wide { max-width: 880px !important; }
-  .v2-card-grid {
-    display: grid !important;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 12px;
-  }
+}
+
+/* Crews list — hard reset. The previous "two columns of white rounded rows" (a `v2-card-grid`
+   of name+one-line-status list items) read as an admin table, not a page of people. Replaced
+   outright with large identity tiles — a real photo/Crew-art field filling most of the tile,
+   member faces and the live activity line overlaid directly on the image, the way Home's own
+   Crew tiles already worked — just now the ONLY Crews composition (mobile and desktop share the
+   same tile, sized up by the grid, not a different structure per breakpoint). */
+.v2-crews-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 640px) {
+  .v2-crews-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (min-width: 1000px) {
+  .v2-crews-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
 /* Crew chat's desktop composition — same fix as Home's rail: the conversation column staying a
@@ -753,6 +790,48 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
 }
 .v2-pulse-flame.on {
   background: var(--v2-pop);
+}
+
+/* Crew chat — the message canvas itself, not just the header, carries the Crew's identity now.
+   Real, reported feedback: "huge empty white canvas, tiny bubbles" — a flat `--v2-surface` fill
+   behind the thread read as unfinished space, not a place a group actually lives. A soft two-
+   colour wash (the Crew's own identity/art pair, the same colours its mark and tile already use
+   elsewhere — never a new palette invented for this) replaces the flat white, at low enough
+   opacity that message bubbles stay the highest-contrast thing on screen. */
+.v2-chat-canvas {
+  background-color: var(--v2-bg);
+  background-image: var(--v2-chat-wash);
+  background-repeat: repeat-y;
+  background-size: 100% 640px;
+  background-attachment: local;
+}
+
+/* The "+" action sheet — hard reset. Five identical white rows (icon/title/description) read as
+   a settings menu, not a moment in a social product. Replaced with a small grid of large, own-
+   coloured tiles — each action gets its own identity colour and a big glyph, sized for a thumb,
+   not a list to scan. */
+.v2-action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.v2-action-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 18px 16px;
+  border-radius: var(--v2-r-md);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  min-height: 118px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.v2-action-tile:active { transform: scale(0.96); }
+@media (hover: hover) {
+  .v2-action-tile:hover { transform: translateY(-2px); box-shadow: var(--v2-shadow-lg); }
 }
 
 /* Leaflet's stock light zoom control needs a little polish to match the new system. */
