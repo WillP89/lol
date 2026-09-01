@@ -42,6 +42,14 @@ const BERRY: [string, string] = ['#3d1226', '#8a2650'];
 const MOSS: [string, string] = ['#1f2e17', '#4c6e33'];
 const SLATE: [string, string] = ['#16233f', '#33528a'];
 const CLAY: [string, string] = ['#431c14', '#9c4f38'];
+// Four more tonal pairs, extending the family for the second wave of characters below — same
+// single-hue dark→mid formula, chosen to sit clearly apart from the eight above (a neutral
+// graphite, a blue-leaning violet distinct from plum's magenta, a true ocean navy distinct from
+// slate-blue's muted grey-blue, and a warm sand distinct from ochre's more golden cast).
+const GRAPHITE: [string, string] = ['#1c1f24', '#4d545e'];
+const INK_VIOLET: [string, string] = ['#1c1230', '#4a2f7a'];
+const DEEP_NAVY: [string, string] = ['#0c1f33', '#1f5fa0'];
+const SAND: [string, string] = ['#3d2f18', '#8a6a35'];
 
 function badge([dark, mid]: [string, string], id: string, art: React.ReactNode) {
   return (
@@ -192,6 +200,69 @@ export const PLOT_AVATARS: PlotAvatarDef[] = [
           <path d="M5 24 -2 18v12Z" fill="#fff" fillOpacity="0.92" />
           <circle cx="12" cy="21" r="1.8" fill="#3b1f3d" />
           <path d="M22 28.5h13l-6.5 5.5Z" fill="#3b1f3d" fillOpacity="0.5" />
+        </>
+      )),
+  },
+  {
+    id: 'wolf',
+    label: 'Wolf',
+    pair: GRAPHITE,
+    render: () =>
+      badge(GRAPHITE, 'wolf', (
+        <>
+          <path d="M10 6 3 3l3 9Z" fill="#fff" fillOpacity="0.92" />
+          <path d="M30 6 37 3l-3 9Z" fill="#fff" fillOpacity="0.92" />
+          <path d="M20 10c-8.5 0-14 6-14 13 0 6.5 6 11 14 11s14-4.5 14-11c0-7-5.5-13-14-13Z" fill="#fff" fillOpacity="0.92" />
+          <path d="M20 21 13 32h14Z" fill="#1c1f24" fillOpacity="0.85" />
+          <circle cx="14" cy="18" r="1.7" fill="#0a0b0d" />
+          <circle cx="26" cy="18" r="1.7" fill="#0a0b0d" />
+        </>
+      )),
+  },
+  {
+    id: 'panther',
+    label: 'Panther',
+    pair: INK_VIOLET,
+    render: () =>
+      badge(INK_VIOLET, 'panther', (
+        <>
+          <path d="M9 8 13 15M31 8 27 15" stroke="#fff" strokeOpacity="0.92" strokeWidth="3" strokeLinecap="round" />
+          <circle cx="20" cy="22" r="14.5" fill="#fff" fillOpacity="0.92" />
+          <path d="M12 20 16 22 12 24Z" fill="#1c1230" fillOpacity="0.85" />
+          <path d="M28 20 24 22 28 24Z" fill="#1c1230" fillOpacity="0.85" />
+          <ellipse cx="20" cy="27" rx="3.2" ry="2.2" fill="#1c1230" fillOpacity="0.85" />
+        </>
+      )),
+  },
+  {
+    id: 'seal',
+    label: 'Seal',
+    pair: DEEP_NAVY,
+    render: () =>
+      badge(DEEP_NAVY, 'seal', (
+        <>
+          <ellipse cx="20" cy="22" rx="14.5" ry="13.5" fill="#fff" fillOpacity="0.92" />
+          <circle cx="14" cy="19" r="2.2" fill="#0c1f33" />
+          <circle cx="26" cy="19" r="2.2" fill="#0c1f33" />
+          <ellipse cx="20" cy="25" rx="4" ry="3" fill="#0c1f33" fillOpacity="0.85" />
+          <path d="M10 25 4 23M10 27 3 27M30 25l6-2M30 27l7 0" stroke="#0c1f33" strokeOpacity="0.55" strokeWidth="1.3" strokeLinecap="round" />
+        </>
+      )),
+  },
+  {
+    id: 'greyhound',
+    label: 'Greyhound',
+    pair: SAND,
+    render: () =>
+      badge(SAND, 'greyhound', (
+        <>
+          <path d="M13 6 9 16M27 6 31 16" stroke="#fff" strokeOpacity="0.92" strokeWidth="3.2" strokeLinecap="round" />
+          <ellipse cx="20" cy="19" rx="12" ry="10" fill="#fff" fillOpacity="0.92" />
+          <path d="M14 26c-3 2-5 6-4 9 3 0 6-3 7-6Z" fill="#fff" fillOpacity="0.92" />
+          <path d="M26 26c3 2 5 6 4 9-3 0-6-3-7-6Z" fill="#fff" fillOpacity="0.92" />
+          <circle cx="15" cy="17" r="1.6" fill="#3d2f18" />
+          <circle cx="25" cy="17" r="1.6" fill="#3d2f18" />
+          <ellipse cx="20" cy="23" rx="2.6" ry="1.8" fill="#3d2f18" fillOpacity="0.8" />
         </>
       )),
   },

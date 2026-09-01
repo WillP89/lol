@@ -113,7 +113,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
   // web/components/PlotAvatars.tsx) — no file at all, just a `plot-avatar:<id>` marker stored
   // in the same column a real photo URL would occupy. Validated server-side against the same
   // fixed set the picker offers, never trusting the client to only ever send a real one.
-  const PresetSchema = z.object({ presetId: z.enum(['fox', 'owl', 'bear', 'tiger', 'frog', 'octopus', 'raccoon', 'shark']) });
+  const PresetSchema = z.object({ presetId: z.enum(['fox', 'owl', 'bear', 'tiger', 'frog', 'octopus', 'raccoon', 'shark', 'wolf', 'panther', 'seal', 'greyhound']) });
   app.post('/users/me/avatar/preset', async (request, reply) => {
     if (!requireUser(request, reply)) return;
     const parsed = PresetSchema.safeParse(request.body);

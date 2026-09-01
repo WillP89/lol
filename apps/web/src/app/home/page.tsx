@@ -11,6 +11,7 @@ import { messagePreview } from '@/lib/messagePreview';
 import { IconCalendar, IconPoll, IconGathering, IconLock } from '@/components/icons';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { identityGradient } from '@/lib/identity';
+import { crewArtStyle, isCrewArtUrl } from '@/lib/crewArt';
 
 interface CrewSummary {
   id: string;
@@ -108,11 +109,15 @@ function pulseLine(crews: CrewSummary[], nextPlan: UpcomingPlan | null, needsCou
 }
 
 /**
- * Home — crew/social-first by design: people (Your people), what needs a response (Needs you)
- * and what your Crews are actually saying (In the groups) all come before anything you might do
- * next. "Next up" (a plan already locked) and "For your Crews" (a small, restrained discovery
- * strip) both sit below the fold deliberately — discovery feeds the social loop here, it doesn't
- * lead the page. See docs/DECISIONS.md#plot-design-reset.
+ * Home — the social engine room, recomposed (not just re-decorated) around one rule: the page
+ * adapts to whichever real state is strongest, and Crews are objects you look at, not a list you
+ * read. A locked plan dominates the top of the page when one exists (a real photo, full-width);
+ * short of that, a decision genuinely waiting on you takes the same slot. Below that, "Your
+ * people" is no longer a row of small avatar circles — every Crew is its own image tile (a real
+ * photo, a chosen Plot Art theme, or the identity field), because a Crew is exactly as much a
+ * real social object here as a Plan is on the Plans page, and a Crew waiting on your vote links
+ * straight into that vote instead of repeating itself in a second "Needs you" list underneath.
+ * See docs/DECISIONS.md#plot-design-reset.
  */
 export default function HomePage() {
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
@@ -159,14 +164,10 @@ export default function HomePage() {
 
   const needsAttention = useMemo(() => (crews ?? []).filter((c) => c.activePlan && !c.activePlan.iVoted), [crews]);
   const pulse = pulseLine(crews ?? [], nextPlan, needsAttention.length);
-  // Home's hero adapts to whichever real state is strongest, instead of only ever showing a
-  // locked plan and leaving the dominant slot empty for every Crew still deciding — the exact
-  // "generic dashboard, not an adaptive social home" gap the brand pass called out. A locked
-  // plan always wins (the group has actually committed); short of that, a decision still
-  // waiting on you is the truest "what's happening" signal Home has. Once shown as the hero,
-  // it's dropped from the smaller "Needs you" list below so it isn't shown twice.
+  // The adaptive fallback hero — nothing locked yet, but a decision is genuinely waiting on you.
+  // A locked plan always wins the dominant slot (the group has actually committed); short of
+  // that, this is the truest "what's happening" signal Home has.
   const heroNeedsAttention = !nextPlan ? needsAttention[0] ?? null : null;
-  const needsAttentionRest = heroNeedsAttention ? needsAttention.slice(1) : needsAttention;
 
   const recentActivity = useMemo(
     () =>
@@ -226,109 +227,10 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* YOUR PEOPLE — social-first: this is the first real content on the page, not
-              discovery. A row of people, not a row of cards — a coloured ring (the Crew's own
-              identity) around a stacked-avatar bubble, name below, the way Stories rows work. */}
-          {crews && crews.length > 0 && (
-            <div style={{ marginBottom: 30 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
-                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Your people</div>
-                <Link href="/crews" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>See all</Link>
-              </div>
-              <div style={{ display: 'flex', gap: 18, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
-                {crews.slice(0, 6).map((crew, i) => {
-                  const status = crewStatusLine(crew);
-                  return (
-                  <Link
-                    key={crew.id}
-                    href={`/crews/${crew.id}`}
-                    className="fade-up v2-stagger"
-                    style={{ flex: '0 0 auto', width: 76, textAlign: 'center', ['--stagger-i' as string]: i }}
-                  >
-                    <div style={{ position: 'relative', width: 68, margin: '0 auto 8px' }}>
-                      {/* The Crew's own squircle identity — a person is a circle, a Crew is a
-                          squircle (docs/DECISIONS.md#plot-brand-system), so "Your people" reads
-                          as a row of groups at a glance, not a row of people-that-happen-to-be-
-                          bigger. A Crew waiting on your vote gets a ring in the signature pink
-                          around it — a genuinely different visual state, not just caption text. */}
-                      <div style={{ padding: 3, borderRadius: 22, boxShadow: status.urgent ? '0 0 0 2.5px var(--v2-pop)' : 'none' }}>
-                        <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={62} />
-                      </div>
-                      {status.urgent && (
-                        <div className="v2-pop-in" style={{ position: 'absolute', top: -1, right: -1, width: 16, height: 16, borderRadius: '50%', background: 'var(--v2-pop)', border: '2px solid var(--v2-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: '#fff', fontWeight: 800 }}>
-                          !
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 11.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crew.name}</div>
-                    <div className={status.urgent ? undefined : 'v2-dim'} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, marginTop: 1, overflow: 'hidden', color: status.urgent ? 'var(--v2-pop)' : undefined, fontWeight: status.urgent ? 700 : 400 }}>
-                      {status.kind === 'calendar' && <IconCalendar size={9} style={{ flexShrink: 0 }} />}
-                      {status.kind === 'poll' && <IconPoll size={9} style={{ flexShrink: 0 }} />}
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{status.text}</span>
-                    </div>
-                  </Link>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* NEEDS YOU — the first one is promoted into the hero below when there's no locked
-              plan to show instead; this list is whatever's left. */}
-          {needsAttentionRest.length > 0 && (
-            <div style={{ marginBottom: 30 }}>
-              <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Needs you</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {needsAttentionRest.map((c) => (
-                  <Link
-                    key={c.id}
-                    href={`/plans/${c.activePlan!.publicSlug}`}
-                    className="v2-card v2-needs-you-card fade-up"
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '15px 18px' }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 15 }}>{c.activePlan!.title}</div>
-                      <div className="v2-muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-                        {c.name} · {c.activePlan!.inCount}/{c.activePlan!.totalMembers} voted
-                      </div>
-                    </div>
-                    <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--v2-brand-ink)', background: 'var(--v2-brand)', padding: '9px 18px', borderRadius: 100 }}>
-                      Vote
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* IN THE GROUPS — a real activity feed (who shared/said what, and where), the social
-              signal a "what are my people up to?" Home actually needs before any hero card. */}
-          {recentActivity.length > 0 && (
-            <div style={{ marginBottom: 32 }}>
-              <div className="v2-eyebrow" style={{ marginBottom: 10 }}>In the groups</div>
-              <div className="v2-card" style={{ padding: '4px 18px' }}>
-                {recentActivity.map((c, i) => (
-                  <div key={c.id} style={{ display: 'flex', gap: 12, padding: '13px 0', borderBottom: i < recentActivity.length - 1 ? '1px solid var(--v2-line)' : 'none' }}>
-                    <div style={{ flexShrink: 0 }}>
-                      <PersonAvatar name={c.latestMessage!.authorName} email={c.latestMessage!.authorName} photoUrl={c.latestMessage!.authorAvatarUrl} size={34} />
-                    </div>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13.5 }}>
-                        <strong>{c.latestMessage!.authorName}</strong> <span className="v2-muted">in {c.name}</span>
-                      </div>
-                      <div className="v2-muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
-                        {messagePreview(c.latestMessage!.body)}
-                      </div>
-                    </div>
-                    <div className="v2-dim" style={{ flexShrink: 0, fontSize: 11, paddingTop: 2 }}>{timeAgo(c.latestMessage!.createdAt)}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* NEXT UP — the one big, confident module further down: what's already decided, not
-              what you might do. */}
+          {/* THE DOMINANT SLOT — promoted to the very top of the page, above "Your people": the
+              single biggest thing here when something's actually locked, or a decision genuinely
+              waiting on you short of that. Brief: "if I have something tonight, that should
+              dominate." A caption line further down the page can't dominate anything — this can. */}
           {nextPlan && (
             <Link
               href={`/plans/${nextPlan.publicSlug}`}
@@ -336,7 +238,7 @@ export default function HomePage() {
               style={{
                 display: 'block',
                 position: 'relative',
-                height: 340,
+                height: 360,
                 borderRadius: 'var(--v2-r-lg)',
                 overflow: 'hidden',
                 marginBottom: 32,
@@ -361,7 +263,7 @@ export default function HomePage() {
                 </span>
               </div>
               <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '24px 26px' }}>
-                <div className="v2-display" style={{ fontSize: 30, lineHeight: 1.08, color: '#fff', marginBottom: 10, maxWidth: '90%' }}>
+                <div className="v2-display" style={{ fontSize: 32, lineHeight: 1.06, color: '#fff', marginBottom: 10, maxWidth: '90%' }}>
                   {nextPlan.title}
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.92)', marginBottom: 12 }}>
@@ -379,11 +281,6 @@ export default function HomePage() {
             </Link>
           )}
 
-          {/* Home's hero when nothing is locked yet but a decision is genuinely waiting on you —
-              the adaptive fallback (see heroNeedsAttention above). Deliberately the Crew's own
-              identity-gradient as the backdrop rather than an event photo: nothing is confirmed
-              yet, so there's no "real" image to show — an abstract field for an open question,
-              a real photo once it resolves into NEXT UP. */}
           {heroNeedsAttention && (
             <Link
               href={`/plans/${heroNeedsAttention.activePlan!.publicSlug}`}
@@ -409,6 +306,96 @@ export default function HomePage() {
                 </span>
               </div>
             </Link>
+          )}
+
+          {/* YOUR PEOPLE — every Crew as its own image tile, not a row of small avatar circles.
+              A Crew is exactly as real a social object here as a Plan is on the Plans page, so it
+              gets the same treatment: a real photo, a chosen Plot Art theme, or the identity
+              field as the whole tile, the Crew's own mark + name overlaid on it. A Crew waiting
+              on your vote links straight into that vote (its own badge says so) instead of
+              repeating itself in a separate "Needs you" list underneath — one real object, one
+              real place it lives on the page, not two. */}
+          {crews && crews.length > 0 && (
+            <div style={{ marginBottom: 32 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Your people</div>
+                <Link href="/crews" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>See all</Link>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(152px, 1fr))', gap: 12 }}>
+                {crews.slice(0, 6).map((crew, i) => {
+                  const status = crewStatusLine(crew);
+                  const artTheme = isCrewArtUrl(crew.imageUrl);
+                  const realPhoto = crew.imageUrl && !artTheme ? crew.imageUrl : null;
+                  const tileHref = status.urgent ? `/plans/${crew.activePlan!.publicSlug}` : `/crews/${crew.id}`;
+                  return (
+                    <Link
+                      key={crew.id}
+                      href={tileHref}
+                      className="v2-card fade-up v2-stagger"
+                      style={{
+                        display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden',
+                        ['--stagger-i' as string]: i,
+                        boxShadow: status.urgent ? '0 0 0 1.5px var(--v2-pop), var(--v2-shadow-sm)' : undefined,
+                      }}
+                    >
+                      <div
+                        style={{
+                          position: 'relative', width: '100%', aspectRatio: '4 / 3',
+                          background: realPhoto ? `url("${realPhoto}") center/cover` : artTheme ? crewArtStyle(artTheme) : identityGradient(crew.name),
+                        }}
+                      >
+                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0) 42%, rgba(0,0,0,0.55) 100%)' }} />
+                        <div style={{ position: 'absolute', top: 8, left: 8 }}>
+                          <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={26} />
+                        </div>
+                        {status.urgent && (
+                          <div className="v2-pop-in" style={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 3, background: 'var(--v2-pop)', color: '#fff', fontSize: 9.5, fontWeight: 800, padding: '4px 8px', borderRadius: 100 }}>
+                            Vote →
+                          </div>
+                        )}
+                        <div style={{ position: 'absolute', bottom: 8, left: 10, right: 10 }}>
+                          <div className="v2-display" style={{ fontSize: 14, color: '#fff', lineHeight: 1.15, textShadow: '0 1px 3px rgba(0,0,0,0.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {crew.name}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ padding: '8px 10px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {status.kind === 'calendar' && <IconCalendar size={10} style={{ flexShrink: 0, color: status.urgent ? 'var(--v2-pop)' : 'var(--v2-ink-dim)' }} />}
+                        {status.kind === 'poll' && <IconPoll size={10} style={{ flexShrink: 0, color: status.urgent ? 'var(--v2-pop)' : 'var(--v2-ink-dim)' }} />}
+                        <span style={{ fontSize: 11.5, fontWeight: status.urgent ? 700 : 600, color: status.urgent ? 'var(--v2-pop)' : 'var(--v2-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {status.text}
+                        </span>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* IN THE GROUPS — a real activity feed (who shared/said what, and where). */}
+          {recentActivity.length > 0 && (
+            <div style={{ marginBottom: 32 }}>
+              <div className="v2-eyebrow" style={{ marginBottom: 10 }}>In the groups</div>
+              <div className="v2-card" style={{ padding: '4px 18px' }}>
+                {recentActivity.map((c, i) => (
+                  <div key={c.id} style={{ display: 'flex', gap: 12, padding: '13px 0', borderBottom: i < recentActivity.length - 1 ? '1px solid var(--v2-line)' : 'none' }}>
+                    <div style={{ flexShrink: 0 }}>
+                      <PersonAvatar name={c.latestMessage!.authorName} email={c.latestMessage!.authorName} photoUrl={c.latestMessage!.authorAvatarUrl} size={34} />
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13.5 }}>
+                        <strong>{c.latestMessage!.authorName}</strong> <span className="v2-muted">in {c.name}</span>
+                      </div>
+                      <div className="v2-muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
+                        {messagePreview(c.latestMessage!.body)}
+                      </div>
+                    </div>
+                    <div className="v2-dim" style={{ flexShrink: 0, fontSize: 11, paddingTop: 2 }}>{timeAgo(c.latestMessage!.createdAt)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
 
           {/* FOR YOUR CREWS — a few genuinely useful suggestions, deliberately small and last:

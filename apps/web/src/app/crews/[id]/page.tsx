@@ -221,9 +221,29 @@ function EventCard({
   const myVote = data.plan.votes.find((v) => v.userId === me)?.vote ?? null;
   const openBreakdown = () => onExpandVoters({ kind: 'plan', planId: data.plan.id });
   return (
-    <div className={`v2-hoverable${justLocked ? ' v2-lock-transform' : ' fade-up'}`} style={{ width: 264, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)' }}>
+    <div
+      className={`v2-hoverable${justLocked ? ' v2-lock-transform' : ' fade-up'}`}
+      style={{
+        width: 264, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)',
+        // A recommendation reads as a distinct signature object at a glance — its OWN outer
+        // ring, not just a small badge buried below the image — so scanning a conversation full
+        // of ordinary shares, a Plot-found card is visually singled out before you've read a
+        // single word on it, the way a shared Reel or a Spotify card is instantly recognisable
+        // as its own kind of object in other products (without borrowing their exact look).
+        boxShadow: data.recommendation ? '0 0 0 1.5px rgba(255,47,126,0.4), var(--v2-shadow-sm)' : 'var(--v2-shadow-sm)',
+      }}
+    >
       <Link href={`/plans/${data.plan.publicSlug}`} style={{ display: 'block' }}>
-        <div className={locked ? `v2-event-art-locked${justLocked ? ' v2-just-locked' : ''}` : undefined} style={{ height: 120, background: v2Art(exp?.imageUrl, exp?.category), position: 'relative' }}>
+        <div className={locked ? `v2-event-art-locked${justLocked ? ' v2-just-locked' : ''}` : undefined} style={{ height: 120, background: v2Art(exp?.imageUrl, exp?.category), position: 'relative', overflow: 'hidden' }}>
+          {/* The mark lives ON the image itself now, not only in a text line beneath it — large,
+              faint, watermark-scale (the same treatment the category fallback art already uses
+              for its own icon), so even glancing past the card at speed, the shape registers as
+              "Plot found this" before any text does. */}
+          {data.recommendation && (
+            <div style={{ position: 'absolute', top: -6, right: -10, opacity: 0.16, color: '#fff', transform: 'rotate(8deg)' }}>
+              <IconGathering size={72} />
+            </div>
+          )}
           {/* The definitive-state overlay — date/venue moving from "proposed" to "confirmed" is
               the actual payoff of Lock It In, so it happens right on the card people were
               already looking at, not only in a separate confetti layer. Plot's own converged
@@ -232,6 +252,18 @@ function EventCard({
           {locked && (
             <div className="v2-pop-in" style={{ position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(22,19,15,0.82)', backdropFilter: 'blur(6px)', color: '#fff', fontSize: 11, fontWeight: 800, padding: '5px 10px 5px 8px', borderRadius: 100 }}>
               <IconLock size={13} /><span>Locked in</span>
+            </div>
+          )}
+          {/* The distinguishable "this is Plot, not a person" marker, moved onto the primary
+              image real estate (top-right, clear of "Locked in" at top-left) rather than tucked
+              below it in the text area — brief: unprompted delivery must read as native to the
+              conversation but never pretend to be a human share, and specifically NOT an "AI
+              sparkle" mark (IconSpark, used elsewhere for a person's own found idea) —
+              IconGathering (loose converging points) is Plot noticing a pattern the Crew already
+              likes, not magic. See docs/DECISIONS.md#plot-brand-system. */}
+          {data.recommendation && (
+            <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 5, background: 'var(--v2-brand)', color: '#fff', fontSize: 10, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', padding: '5px 9px', borderRadius: 100 }}>
+              <IconGathering size={11} /><span>Plot found this</span>
             </div>
           )}
           {/* Who's actually converging on this, right on the object itself — not buried in a
@@ -251,17 +283,6 @@ function EventCard({
           )}
         </div>
         <div style={{ padding: '12px 14px 8px' }}>
-          {/* The distinguishable "this is Plot, not a person" marker — brief: unprompted
-              delivery must read as native to the conversation but never pretend to be a human
-              share, and specifically NOT an "AI sparkle" mark (that's what IconSpark reads as,
-              and it's used elsewhere for a person's own found idea) — IconGathering (loose
-              converging points) is Plot noticing a pattern in what the Crew already likes, not
-              magic. See docs/DECISIONS.md#plot-brand-system. */}
-          {data.recommendation && (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--v2-brand)', background: 'rgba(255,47,126,0.1)', padding: '3px 9px', borderRadius: 100, marginBottom: 8 }}>
-              <IconGathering size={11} /><span>Plot found this</span>
-            </div>
-          )}
           <div className="v2-display" style={{ fontSize: 15, marginBottom: 4 }}>{data.plan.title}</div>
           {exp && (
             <div className="v2-muted" style={{ fontSize: 12, marginBottom: 8 }}>
