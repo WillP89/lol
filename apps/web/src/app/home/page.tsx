@@ -11,6 +11,15 @@ import { messagePreview } from '@/lib/messagePreview';
 import { IconGathering, IconLock } from '@/components/icons';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { identityGradient } from '@/lib/identity';
+import { useScrollReveal } from '@/lib/useScrollReveal';
+
+// A small local label map, not a shared helper — this is the one place Home shows a category as
+// a short tag chip; Explore has its own richer category treatment.
+const CATEGORY_TAG: Record<string, string> = {
+  LIVE_MUSIC: 'Live music', CLUBBING: 'Clubbing', RESTAURANT: 'Restaurant', BAR: 'Bar',
+  COMEDY: 'Comedy', THEATRE: 'Theatre', CINEMA: 'Cinema', ART_CULTURE: 'Art & culture',
+  SPORT: 'Sport', FITNESS: 'Fitness', FESTIVAL: 'Festival', DAY_ACTIVITY: 'Day out', COMMUNITY: 'Community',
+};
 
 interface CrewSummary {
   id: string;
@@ -126,6 +135,7 @@ export default function HomePage() {
   const [ideas, setIdeas] = useState<Experience[] | null>(null);
   const [me, setMe] = useState<{ displayName: string | null; email: string; avatarUrl: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useScrollReveal();
 
   // A one-off fetch on mount would mean a crewmate's vote, message, or newly-locked plan never
   // shows up unless you manually reload — Home would look "alive" on first paint and go stale
@@ -189,14 +199,14 @@ export default function HomePage() {
           {/* Header — small and secondary now; the story rail below it carries the page's real
               opening statement. The avatar here is a mobile-only affordance (desktop already has
               one pinned to the nav rail). */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+          <div className="fade-up" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
             <div>
-              <div className="v2-display" style={{ fontSize: 20 }}>
+              <div className="v2-display" style={{ fontSize: 23 }}>
                 {greeting()}{firstName && <>, <span style={{ fontStyle: 'italic', color: 'var(--v2-pop)' }}>{firstName}</span></>}
               </div>
               <p key={pulse} className="v2-muted v2-pop-in" style={{ fontSize: 13, margin: '2px 0 0' }}>{pulse}</p>
             </div>
-            <Link href="/profile" aria-label="Your profile" style={{ flexShrink: 0, borderRadius: '50%', boxShadow: 'var(--v2-shadow-sm)' }}>
+            <Link href="/profile" aria-label="Your profile" className="v2-tap-feedback" style={{ flexShrink: 0, borderRadius: '50%', boxShadow: 'var(--v2-shadow-sm)' }}>
               {me ? (
                 <PersonAvatar name={me.displayName} email={me.email} photoUrl={me.avatarUrl} size={38} />
               ) : (
@@ -235,7 +245,7 @@ export default function HomePage() {
               replaces BOTH the old tile grid and the old desktop-only "Your Crews" rail. */}
           {crews && crews.length > 0 && (
             <div className="v2-story-rail" style={{ marginBottom: 28 }}>
-              {crews.map((crew) => {
+              {crews.map((crew, i) => {
                 const status = crewStatusLine(crew);
                 const hasUnread = crew.unreadCount > 0;
                 const tileHref = status.urgent ? `/plans/${crew.activePlan!.publicSlug}` : `/crews/${crew.id}`;
@@ -244,10 +254,15 @@ export default function HomePage() {
                 // right now, most-important-first" rule the rest of Home's hero uses.
                 const ringClass = status.urgent ? ' urgent' : hasUnread ? ' unread' : crew.upcomingPlan ? ' plan' : '';
                 return (
-                  <Link key={crew.id} href={tileHref} className="v2-tap-feedback" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 72 }}>
+                  <Link
+                    key={crew.id}
+                    href={tileHref}
+                    className="v2-tap-feedback fade-up v2-stagger"
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 76, ['--stagger-i' as string]: i }}
+                  >
                     <div style={{ position: 'relative' }}>
                       <div className={`v2-story-ring${ringClass}`}>
-                        <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={64} />
+                        <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={68} />
                       </div>
                       {/* Real, persisted unread state (never faked client-side) — see
                           apps/api/src/services/crew.ts#crewSummaryExtras. A count up to 9, then
@@ -268,7 +283,7 @@ export default function HomePage() {
                     <span
                       style={{
                         fontSize: 11, fontWeight: status.urgent || hasUnread ? 800 : 600, color: status.urgent ? 'var(--v2-pop)' : 'var(--v2-ink-muted)',
-                        maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        maxWidth: 76, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}
                     >
                       {crew.name}
@@ -276,8 +291,8 @@ export default function HomePage() {
                   </Link>
                 );
               })}
-              <Link href="/crews?new=1" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 72 }}>
-                <div style={{ width: 64, height: 64, borderRadius: 22, border: '1.5px dashed var(--v2-ink-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, color: 'var(--v2-ink-dim)', fontWeight: 300 }}>+</div>
+              <Link href="/crews?new=1" className="v2-tap-feedback fade-up v2-stagger" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 76, ['--stagger-i' as string]: crews.length }}>
+                <div style={{ width: 68, height: 68, borderRadius: 24, border: '1.5px dashed var(--v2-ink-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, color: 'var(--v2-ink-dim)', fontWeight: 300 }}>+</div>
                 <span className="v2-dim" style={{ fontSize: 11, fontWeight: 600 }}>New</span>
               </Link>
             </div>
@@ -290,15 +305,12 @@ export default function HomePage() {
             <Link
               href={`/plans/${nextPlan.publicSlug}`}
               className="fade-up v2-bleed"
-              style={{
-                display: 'block',
-                position: 'relative',
-                height: 420,
-                overflow: 'hidden',
-                marginBottom: 6,
-                background: v2Art(nextPlan.imageUrl, nextPlan.category),
-              }}
+              style={{ display: 'block', position: 'relative', height: 420, overflow: 'hidden', marginBottom: 6 }}
             >
+              <div
+                className="v2-ken-burns"
+                style={{ position: 'absolute', inset: 0, background: v2Art(nextPlan.imageUrl, nextPlan.category) }}
+              />
               <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(22,19,15,0) 25%, rgba(22,19,15,0.6) 72%, rgba(22,19,15,0.9) 100%)' }} />
               <div style={{ position: 'absolute', top: 20, left: 20 }}>
                 <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '-0.01em', color: 'var(--v2-brand-ink)', background: 'var(--v2-brand)', padding: '7px 14px', borderRadius: 100 }}>
@@ -328,11 +340,12 @@ export default function HomePage() {
             <Link
               href={`/plans/${heroNeedsAttention.activePlan!.publicSlug}`}
               className="fade-up v2-bleed v2-hoverable"
-              style={{
-                display: 'block', position: 'relative', height: 280, overflow: 'hidden',
-                marginBottom: 6, background: identityGradient(heroNeedsAttention.id, 155),
-              }}
+              style={{ display: 'block', position: 'relative', height: 280, overflow: 'hidden', marginBottom: 6 }}
             >
+              <div
+                className="v2-ken-burns"
+                style={{ position: 'absolute', inset: 0, background: identityGradient(heroNeedsAttention.id, 155) }}
+              />
               <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(22,19,15,0) 25%, rgba(22,19,15,0.55) 100%)' }} />
               <div style={{ position: 'absolute', top: 20, left: 20, display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 800, letterSpacing: '-0.01em', color: '#fff', background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(6px)', padding: '7px 14px', borderRadius: 100 }}>
                 <IconGathering size={12} />Still deciding
@@ -356,18 +369,33 @@ export default function HomePage() {
           {recentActivity.length > 0 && (
             <div style={{ marginTop: 26, marginBottom: 8 }}>
               <div className="v2-eyebrow" style={{ marginBottom: 2 }}>In the groups</div>
-              {recentActivity.map((c) => (
-                <div key={c.id} className="v2-editorial-row">
-                  <PersonAvatar name={c.latestMessage!.authorName} email={c.latestMessage!.authorName} photoUrl={c.latestMessage!.authorAvatarUrl} size={44} />
+              {recentActivity.map((c, i) => (
+                <Link
+                  key={c.id}
+                  href={`/crews/${c.id}`}
+                  className={`v2-editorial-row v2-reveal${c.unreadCount > 0 ? ' unread' : ''}`}
+                  style={{ ['--reveal-i' as string]: i, textDecoration: 'none', color: 'inherit' }}
+                >
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    <PersonAvatar name={c.latestMessage!.authorName} email={c.latestMessage!.authorName} photoUrl={c.latestMessage!.authorAvatarUrl} size={44} />
+                    {c.unreadCount > 0 && (
+                      <div className="v2-pop-in" style={{ position: 'absolute', bottom: -1, right: -1, width: 12, height: 12, borderRadius: '50%', background: 'var(--v2-pop)', boxShadow: '0 0 0 2.5px var(--v2-bg)' }} />
+                    )}
+                  </div>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="v2-display" style={{ fontSize: 16, lineHeight: 1.3, marginBottom: 2 }}>
+                    <div className="v2-display" style={{ fontSize: 16, lineHeight: 1.3, marginBottom: 2, fontWeight: c.unreadCount > 0 ? 700 : undefined }}>
                       &ldquo;{messagePreview(c.latestMessage!.body)}&rdquo;
                     </div>
                     <div className="v2-muted" style={{ fontSize: 12.5 }}>
                       <strong style={{ color: 'var(--v2-ink)' }}>{c.latestMessage!.authorName}</strong> in {c.name} · {timeAgo(c.latestMessage!.createdAt)}
                     </div>
                   </div>
-                </div>
+                  {c.unreadCount > 0 && (
+                    <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: 10.5, fontWeight: 800, color: '#fff', background: 'var(--v2-pop)', borderRadius: 100, minWidth: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>
+                      {c.unreadCount > 9 ? '9+' : c.unreadCount}
+                    </span>
+                  )}
+                </Link>
               ))}
             </div>
           )}
@@ -380,20 +408,26 @@ export default function HomePage() {
                 <div className="v2-eyebrow" style={{ marginBottom: 0 }}>{crews && crews.length > 0 ? 'For your Crews' : 'Worth a look nearby'}</div>
                 <Link href="/explore" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>Discover</Link>
               </div>
-              <div style={{ display: 'flex', gap: 10, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
-                {ideas.slice(0, 4).map((exp) => {
+              <div style={{ display: 'flex', gap: 12, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
+                {ideas.slice(0, 4).map((exp, i) => {
                   const price = formatPriceFrom(exp.priceMinMinor, exp.currency);
                   return (
                     <Link
                       key={exp.id}
                       href="/explore"
-                      className="fade-up v2-hoverable"
-                      style={{ flex: '0 0 auto', width: 140, borderRadius: 'var(--v2-r-sm)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)' }}
+                      className="v2-reveal v2-hoverable"
+                      style={{ flex: '0 0 auto', width: 172, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', ['--reveal-i' as string]: i }}
                     >
-                      <div style={{ height: 84, background: v2Art(exp.imageUrl, exp.category) }} />
-                      <div style={{ padding: '8px 10px', background: 'var(--v2-surface)' }}>
-                        <div style={{ fontWeight: 700, fontSize: 11.5, lineHeight: 1.3, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
-                        <div className="v2-dim" style={{ fontSize: 10 }}>
+                      <div style={{ position: 'relative', height: 110, background: v2Art(exp.imageUrl, exp.category) }}>
+                        {CATEGORY_TAG[exp.category] && (
+                          <span style={{ position: 'absolute', top: 8, left: 8, fontSize: 9.5, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase', color: '#fff', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', padding: '4px 8px', borderRadius: 100 }}>
+                            {CATEGORY_TAG[exp.category]}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ padding: '10px 12px', background: 'var(--v2-surface)' }}>
+                        <div style={{ fontWeight: 700, fontSize: 12.5, lineHeight: 1.3, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
+                        <div className="v2-dim" style={{ fontSize: 10.5 }}>
                           {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
                           {price && ` · ${price}`}
                         </div>

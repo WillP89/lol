@@ -683,13 +683,36 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
 .v2-story-ring:active { transform: scale(0.94); }
 @keyframes v2RingPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,47,126,0.35); } 50% { box-shadow: 0 0 0 5px rgba(255,47,126,0); } }
 .v2-story-ring.urgent { animation: v2RingPulse 2.2s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) { .v2-story-ring.urgent { animation: none; } }
+/* A quieter cousin of the urgent pulse — unread is real, live signal too (see
+   CrewMember.lastReadAt), it just isn't a decision waiting on you, so it gets a softer, slower
+   breathing glow rather than the same insistent pulse as "vote needed". Distinct enough to read
+   as "something happened here" at a glance without the two states looking identical. */
+@keyframes v2RingBreathe { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,47,126,0.22); } 50% { box-shadow: 0 0 0 4px rgba(255,47,126,0); } }
+.v2-story-ring.unread { animation: v2RingBreathe 3s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .v2-story-ring.urgent, .v2-story-ring.unread { animation: none; } }
+@media (hover: hover) {
+  .v2-story-rail a:hover .v2-story-ring { transform: translateY(-3px) scale(1.04); }
+}
 
-/* The editorial feed — text/avatar rows with no card background, no border-radius, no shadow;
-   only a hairline between entries. Deliberately the opposite of the "identical white rounded
-   rectangle repeated" read the dashboard version had. */
-.v2-editorial-row { display: flex; gap: 14px; padding: 18px 0; border-bottom: 1px solid var(--v2-line); }
-.v2-editorial-row:last-child { border-bottom: none; }
+/* The editorial feed — text/avatar rows with no repeated white-rectangle card chrome, only a
+   hairline between entries. An unread row gets a soft tinted background + bolder ink so "a Crew
+   said something you haven't seen" is visible at the row level too, not just the story rail
+   above it — see CrewMember.lastReadAt. */
+.v2-editorial-row { display: flex; gap: 14px; padding: 16px 14px; border-radius: var(--v2-r-md); transition: background-color 0.15s ease, transform 0.15s ease; }
+.v2-editorial-row + .v2-editorial-row { margin-top: 2px; }
+.v2-editorial-row.unread { background: var(--v2-brand-tint, rgba(255,47,126,0.06)); }
+@media (hover: hover) {
+  .v2-editorial-row:hover { background: var(--v2-bg-deep); }
+  .v2-editorial-row.unread:hover { background: var(--v2-brand-tint, rgba(255,47,126,0.1)); }
+}
+.v2-editorial-row:active { transform: scale(0.99); }
+
+/* Hero image slow drift — the difference between a static photo and a living moment. Contained
+   in its own layer beneath the gradient/text so the zoom never affects layout or text position.
+   Runs once toward a settled state rather than looping, so it reads as "arriving", not restless. */
+@keyframes v2KenBurns { 0% { transform: scale(1.08); } 100% { transform: scale(1); } }
+.v2-ken-burns { animation: v2KenBurns 6s cubic-bezier(.2,.7,.2,1) both; }
+@media (prefers-reduced-motion: reduce) { .v2-ken-burns { animation: none; } }
 
 @media (min-width: 900px) {
   .v2-home-page { max-width: 720px; padding-top: 12px; }
