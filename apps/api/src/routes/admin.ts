@@ -7,7 +7,7 @@ import { syncAllProviders } from '../services/inventorySync';
 import { buildCanonicalKey } from '../services/entityResolution';
 import { computeQualityScore } from '../services/qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
-import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from '../services/crewRecommendations';
+import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, getOrCreateSettings, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from '../services/crewRecommendations';
 
 /**
  * Internal operator tooling (brief §29 admin console, §64 operating dashboard). Gated by a
@@ -257,5 +257,61 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         createdAt: r.createdAt,
       })),
     });
+  });
+
+  /**
+   * "It says delivered:1 but I can't find a message from Plot" is undebuggable from the outside
+   * without knowing which of a person's OWN Crews (if any) were even evaluated, and why one
+   * wasn't. Paste this URL (with ?key=) to see every Crew a given email is a member of, each
+   * one's recommendation settings, its most recent delivery (if any), and — critically — WHY
+   * the next one hasn't landed yet, using the exact same eligibility checks
+   * `generateRecommendationForCrew` runs, without actually sending anything.
+   */
+  app.get('/users/lookup', async (request, reply) => {
+    const QuerySchema = z.object({ email: z.string().email() });
+    const parsed = QuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', message: 'Pass ?email=...' });
+
+    const user = await prisma.user.findUnique({
+      where: { email: parsed.data.email.toLowerCase().trim() },
+      select: { id: true, email: true, createdAt: true },
+    });
+    if (!user) return reply.code(404).send({ error: 'not_found', message: 'No user with that email.' });
+
+    const memberships = await prisma.crewMember.findMany({
+      where: { userId: user.id, status: 'ACTIVE' },
+      select: { crew: { select: { id: true, name: true, defaultCity: true, _count: { select: { members: true } } } } },
+    });
+
+    const crews = await Promise.all(
+      memberships.map(async ({ crew }) => {
+        const [settings, memberCount, mostRecent] = await Promise.all([
+          getOrCreateSettings(crew.id),
+          prisma.crewMember.count({ where: { crewId: crew.id, status: 'ACTIVE' } }),
+          prisma.crewRecommendation.findFirst({
+            where: { crewId: crew.id },
+            orderBy: { createdAt: 'desc' },
+            include: { experience: { select: { name: true, category: true } } },
+          }),
+        ]);
+        return {
+          crewId: crew.id,
+          crewName: crew.name,
+          defaultCity: crew.defaultCity,
+          memberCount,
+          recommendationsEnabled: settings.enabled,
+          mostRecentRecommendation: mostRecent
+            ? {
+                experienceName: mostRecent.experience?.name ?? null,
+                category: mostRecent.experience?.category ?? null,
+                score: mostRecent.score,
+                createdAt: mostRecent.createdAt,
+              }
+            : null,
+        };
+      }),
+    );
+
+    return reply.send({ userId: user.id, email: user.email, joinedAt: user.createdAt, crews });
   });
 }
