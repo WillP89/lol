@@ -669,12 +669,25 @@ export default function CrewPage() {
   const [recSettings, setRecSettings] = useState<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null } | null>(null);
   const [savingRecSettings, setSavingRecSettings] = useState(false);
 
+  // Real gap found via live multi-user testing: `crew` (and therefore `activePlan`/
+  // `upcomingPlan`, the header's own member list/image, and the top-of-page context strip's
+  // vote count) was fetched exactly once on mount and never again — a member voting IN in one
+  // browser tab genuinely did not move the SAME NUMBER shown a few lines above the plan card in
+  // a second member's tab until they hard-refreshed, even though the card itself (a separately-
+  // polled `planCards` entry) updated live. Two "how many are in" numbers on one screen,
+  // silently drifting apart — one live, one stale. Now polled on the same cadence as messages.
+  const loadCrew = useCallback(() => {
+    api.get<{ crew: CrewDetail }>(`/crews/${crewId}`).then((res) => setCrew(res.crew)).catch((err) => setError((prev) => prev ?? (err instanceof ApiError ? err.message : 'Could not load Crew.')));
+  }, [crewId]);
+
   useEffect(() => {
-    api.get<{ crew: CrewDetail }>(`/crews/${crewId}`).then((res) => setCrew(res.crew)).catch((err) => setError(err instanceof ApiError ? err.message : 'Could not load Crew.'));
+    loadCrew();
+    const interval = setInterval(loadCrew, POLL_INTERVAL_MS);
     api.get<{ availability: DayAvailability[] }>(`/crews/${crewId}/availability?days=0,1,2,3`).then((res) => setAvailability(res.availability)).catch(() => {});
     api.get<{ user: { id: string } }>('/users/me').then((res) => setMe(res.user.id)).catch(() => {});
     api.get<{ crews: CrewListItem[] }>('/crews').then((res) => setCrewList(res.crews)).catch(() => {});
-  }, [crewId]);
+    return () => clearInterval(interval);
+  }, [crewId, loadCrew]);
 
   const poll = useCallback(async () => {
     try {

@@ -1702,3 +1702,56 @@ Fixed both, not just the symptom:
 
 68/68 backend tests still pass (dev/test correctly uses the local-disk path throughout, since
 NODE_ENV is 'test' there, not 'production').
+
+## #proactive-discovery-audit
+
+Audited the automatic Crew recommendation pipeline end to end against the mandatory acceptance
+test: create two Crews in Stafford with genuinely different taste (comedy/food/music vs.
+sport/outdoors/fitness), perform zero manual search or share, trigger the exact production
+delivery mechanism, and verify each Crew's real chat receives a materially different, truthfully-
+captioned recommendation, with a second member's response visible to the first in real time.
+
+**The pipeline itself was already sound** (built in an earlier pass — see
+docs/DECISIONS.md#crew-auto-recommendations): a real gate chain (enabled → weekly cap → member
+count → inventory → dedup → taste-signal requirement → score threshold), delivered via a real
+system message that renders as the same EventCard the rest of the product uses, through the
+same `/admin/recommendations/sweep` endpoint production's periodic timer calls. The acceptance
+test passed cleanly, live, against the running app (not just vitest fixtures): Crew A received
+"Because your Crew likes comedy" (Stafford Comedy Night, score 93), Crew B received "Because
+your Crew likes sport" (Stafford Sunday 5-a-side, score 92) — genuinely different, both
+automatic, both truthfully captioned.
+
+Two real gaps found and fixed by this audit:
+
+1. **Silent failure, no observability.** Every rejection path (`disabled`, `weekly_cap_reached`,
+   `too_few_members`, `no_eligible_candidate`) just returned `null` with no trace of why —
+   during pilot, "nothing to recommend this week" and "the whole pipeline is broken" were
+   indistinguishable from outside the code. Added one structured log line per Crew per sweep
+   (`crew_recommendation_evaluated`, pino — queryable JSON in production), naming the exact
+   outcome and, for the common "no strong match" case, a full funnel breakdown (candidates
+   scored → after dedup → after radius → after taste-signal → best score seen vs. the
+   threshold) so an operator can tell "narrow taste this week" from "something's actually
+   broken" without reading message content.
+2. **A real live state-drift bug**, caught by this same acceptance run's screenshots: the
+   Crew page's top-of-screen context strip ("Saturday Night Stand-Up Social · 0/2 in") and the
+   Plan card sitting right below it ("1 in") disagreed on the same vote count in the same
+   screenshot. Root cause: `crew` (which the context strip derives `activePlan`/`upcomingPlan`
+   from) was fetched exactly once on mount and never polled again, while the Plan card's own
+   data (`planCards`) already polled correctly — two "how many are in" numbers on one screen,
+   one live, one silently stale until a hard refresh. Fixed by polling `crew` on the same
+   cadence as messages; re-ran the acceptance test and confirmed the strip now reads "1/2 in",
+   matching the card, with no page reload.
+
+**Honest, pre-existing external blocker, re-confirmed, not newly discovered**: no
+`TICKETMASTER_API_KEY`/`EVENTBRITE_API_KEY` is configured in this environment (`GET
+/admin/providers` confirms only `mock_ticketing`/`mock_restaurant`/`manual_curation` are
+active), so every recommendation delivered today — including in the acceptance test above —
+carries a `.invalid` sample booking link, not a real one. This was already correctly surfaced
+to the client (`dataSource: 'mock'|'live'` on Explore/Match/Plans responses, an Explore banner)
+before this pass; nothing was silently substituted to hide it. Real ticketed-event links
+require a real provider credential — see docs/providers/ticketing.md — which nobody can
+generate on the operator's behalf.
+
+The secure dev/pilot trigger the brief asked for already existed:
+`POST /admin/recommendations/sweep` (optionally scoped to one Crew via `{crewId}`), gated by
+the `x-admin-key` header — no insecure public endpoint.

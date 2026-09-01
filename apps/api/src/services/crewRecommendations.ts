@@ -1,10 +1,30 @@
 import { prisma } from '../lib/prisma';
+import { logger } from '../lib/logger';
 import { track } from './analytics';
 import { ensureInventory } from './inventorySync';
 import { scoreExperiencesForCrew, type MatchOption } from './match';
 import { createRecommendationPlanForCrew } from './plan';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import type { CrewRecommendation, CrewRecommendationStatus } from '@prisma/client';
+
+/**
+ * Real gap this closes: every rejection path in `generateRecommendationForCrew` just returned
+ * `null` with zero trace of *why* — during pilot, "no recommendation was sent" and "the whole
+ * pipeline is silently broken" were indistinguishable from the outside. One structured log line
+ * per Crew per sweep, always (a decision was made either way), naming the exact reason a Crew
+ * got nothing — never message/experience content, just IDs and counts. Queryable in production
+ * (pino emits JSON there) by filtering `event: "crew_recommendation_evaluated"`.
+ */
+type RecommendationOutcome =
+  | 'disabled'
+  | 'weekly_cap_reached'
+  | 'too_few_members'
+  | 'no_eligible_candidate'
+  | 'delivered'
+  | 'error';
+function logRecommendationOutcome(crewId: string, outcome: RecommendationOutcome, extra: Record<string, unknown> = {}) {
+  logger.info({ event: 'crew_recommendation_evaluated', crewId, outcome, ...extra }, `Crew recommendation sweep: ${outcome}`);
+}
 
 /**
  * THE MOST IMPORTANT NEW FEATURE (pilot brief): Plot proactively finding and delivering
@@ -113,15 +133,25 @@ async function resolveCrewCityForSweep(crewId: string): Promise<string> {
  */
 export async function generateRecommendationForCrew(crewId: string): Promise<CrewRecommendation | null> {
   const settings = await getOrCreateSettings(crewId);
-  if (!settings.enabled) return null;
+  if (!settings.enabled) {
+    logRecommendationOutcome(crewId, 'disabled');
+    return null;
+  }
 
   const since = new Date(Date.now() - LOOKBACK_DAYS_FOR_WEEKLY_CAP * 24 * 60 * 60 * 1000);
   const [recentCount, memberCount] = await Promise.all([
     prisma.crewRecommendation.count({ where: { crewId, createdAt: { gte: since } } }),
     prisma.crewMember.count({ where: { crewId, status: 'ACTIVE' } }),
   ]);
-  if (recentCount >= settings.maxPerWeek) return null;
-  if (memberCount < 2) return null; // a solo "Crew" has no one to recommend anything to yet
+  if (recentCount >= settings.maxPerWeek) {
+    logRecommendationOutcome(crewId, 'weekly_cap_reached', { recentCount, maxPerWeek: settings.maxPerWeek });
+    return null;
+  }
+  if (memberCount < 2) {
+    // a solo "Crew" has no one to recommend anything to yet
+    logRecommendationOutcome(crewId, 'too_few_members', { memberCount });
+    return null;
+  }
 
   const city = await resolveCrewCityForSweep(crewId);
   await ensureInventory(city);
@@ -146,8 +176,24 @@ export async function generateRecommendationForCrew(crewId: string): Promise<Cre
   // "Because your Crew likes X", cannot — the explanation would be a lie. See docs/DECISIONS.md
   // #crew-auto-recommendations.
   const hasTasteSignal = (o: MatchOption) => o.reasons.some((r) => r.code === 'category_affinity' || r.code === 'crew_dna_match');
-  const eligible = scored.filter((o) => !excluded.has(o.experience.id) && o.withinRadius !== false && hasTasteSignal(o) && o.matchScore >= MIN_RECOMMENDATION_SCORE);
-  if (eligible.length === 0) return null;
+  const notExcluded = scored.filter((o) => !excluded.has(o.experience.id));
+  const inRadius = notExcluded.filter((o) => o.withinRadius !== false);
+  const withTaste = inRadius.filter(hasTasteSignal);
+  const eligible = withTaste.filter((o) => o.matchScore >= MIN_RECOMMENDATION_SCORE);
+  if (eligible.length === 0) {
+    // Which filter actually killed it — "no strong match" covers a lot of genuinely different
+    // situations, and during pilot "the whole pipeline is broken" vs "this Crew's taste is just
+    // narrow this week" need to be tellable apart from the logs alone.
+    logRecommendationOutcome(crewId, 'no_eligible_candidate', {
+      totalScored: scored.length,
+      afterDedup: notExcluded.length,
+      afterRadius: inRadius.length,
+      afterTasteSignal: withTaste.length,
+      bestScoreSeen: withTaste.length > 0 ? Math.max(...withTaste.map((o) => o.matchScore)) : null,
+      scoreThreshold: MIN_RECOMMENDATION_SCORE,
+    });
+    return null;
+  }
 
   const best = eligible[0];
   const systemUserId = await getPlotSystemUserId();
@@ -169,6 +215,7 @@ export async function generateRecommendationForCrew(crewId: string): Promise<Cre
     { crewId, experienceId: best.experience.id, score: best.matchScore },
     { crewId, planId: plan.id },
   );
+  logRecommendationOutcome(crewId, 'delivered', { experienceId: best.experience.id, score: best.matchScore, planId: plan.id });
   void messageId; // kept on the created CrewMessage itself; not stored redundantly here
 
   return recommendation;
@@ -235,8 +282,9 @@ export async function runRecommendationSweep(): Promise<{ crewsEvaluated: number
     try {
       const result = await generateRecommendationForCrew(crew.id);
       if (result) delivered += 1;
-    } catch {
+    } catch (err) {
       errors += 1; // one Crew's failure (e.g. no reachable provider for its city) never halts the sweep
+      logRecommendationOutcome(crew.id, 'error', { err: err instanceof Error ? err.message : String(err) });
     }
   }
   return { crewsEvaluated: crews.length, delivered, errors };
