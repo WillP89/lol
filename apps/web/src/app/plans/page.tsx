@@ -7,13 +7,21 @@ import { TabBarV2 } from '@/components/TabBarV2';
 import { v2Art } from '@/lib/v2Art';
 import { formatPriceFrom } from '@/lib/formatPrice';
 import { useScrollReveal } from '@/lib/useScrollReveal';
-import { IconFlame, IconFlag, IconPlace } from '@/components/icons';
+import { IconFlame, IconPlace, IconLock } from '@/components/icons';
+import { CrewMark, PersonAvatar } from '@/components/Avatar';
+
+interface PlanMemberLite {
+  id: string;
+  displayName: string | null;
+  email: string;
+  avatarUrl: string | null;
+}
 
 interface UpcomingPlan {
   id: string;
   publicSlug: string;
   title: string;
-  crew: { id: string; name: string };
+  crew: { id: string; name: string; imageUrl: string | null };
   startsAt: string | null;
   venueName: string | null;
   venueCity: string | null;
@@ -21,12 +29,8 @@ interface UpcomingPlan {
   imageUrl: string | null;
   priceMinMinor: number | null;
   currency: string;
-}
-
-function dateBadge(iso: string | null): { day: string; num: string } | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  return { day: d.toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase(), num: String(d.getDate()) };
+  goingCount: number;
+  goingMembers: PlanMemberLite[];
 }
 
 /**
@@ -52,10 +56,39 @@ function timeBucket(iso: string | null): TimeBucket {
   return 'Upcoming';
 }
 
+/** "In 4 days", "In 2 weeks" — the countdown that makes a far-out Plan still feel real and
+ * anchored, not just a bucket label repeated on every row in it. */
+function countdownLabel(iso: string | null): string | null {
+  if (!iso) return null;
+  const now = new Date();
+  const target = new Date(iso);
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const daysAway = Math.round((startOfDay(target).getTime() - startOfDay(now).getTime()) / 86400000);
+  if (daysAway <= 0) return null;
+  if (daysAway === 1) return null;
+  if (daysAway < 7) return `In ${daysAway} days`;
+  const weeks = Math.round(daysAway / 7);
+  return weeks === 1 ? 'In 1 week' : `In ${weeks} weeks`;
+}
+
+function dateLine(iso: string | null): string {
+  if (!iso) return 'Time TBC';
+  const d = new Date(iso);
+  const now = new Date();
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  const daysAway = Math.round((startOfDay(d).getTime() - startOfDay(now).getTime()) / 86400000);
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  if (daysAway <= 1) return time;
+  return `${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} · ${time}`;
+}
+
 /**
  * Plans V2 — same data/logic as v1 (confirmed plans, pulled from every Crew at once rather than
  * requiring you to remember which Crew booked what — see
- * services/crew.ts#listUpcomingPlansForUser), brought onto the same v2 primitives as Home/Crews.
+ * services/crew.ts#listUpcomingPlansForUser). Redesigned so a Plan reads as a real thing your
+ * Crew is doing rather than a data row: a full-width photo, the Crew's own mark, the actual
+ * faces of who's in, a countdown, and a one-tap action — not a 56px thumbnail and three lines of
+ * text (see docs/DECISIONS.md#plot-brand-system).
  */
 export default function PlansPage() {
   useScrollReveal();
@@ -81,9 +114,9 @@ export default function PlansPage() {
           {error && <div style={{ color: 'var(--v2-error)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
           {plans === null && !error && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {[1, 2].map((i) => (
-                <div key={i} className="v2-skeleton" style={{ height: 80, borderRadius: 'var(--v2-r-lg)' }} />
+                <div key={i} className="v2-skeleton" style={{ height: 220, borderRadius: 'var(--v2-r-lg)' }} />
               ))}
             </div>
           )}
@@ -107,83 +140,112 @@ export default function PlansPage() {
             }
             let rowIndex = 0;
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
                 {BUCKET_ORDER.filter((b) => grouped.has(b)).map((bucket) => {
                   const tonight = bucket === 'Tonight';
                   return (
                     <div key={bucket}>
-                      <div className="v2-eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 10, color: tonight ? 'var(--v2-pop)' : undefined }}>
+                      <div className="v2-eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 12, color: tonight ? 'var(--v2-pop)' : undefined }}>
                         {tonight && <IconFlame size={12} />}
                         {tonight ? 'Tonight' : bucket}
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                          gap: 14,
+                        }}
+                      >
                         {grouped.get(bucket)!.map((plan) => {
-                          const badge = dateBadge(plan.startsAt);
                           const price = formatPriceFrom(plan.priceMinMinor, plan.currency);
+                          const countdown = !tonight && bucket !== 'Tomorrow' ? countdownLabel(plan.startsAt) : null;
                           const i = rowIndex++;
                           return (
                             <Link
                               key={plan.id}
                               href={`/plans/${plan.publicSlug}`}
-                              className="v2-card v2-reveal"
+                              className="v2-card v2-reveal v2-plan-card"
                               style={{
-                                display: 'flex', gap: 12, alignItems: 'stretch', padding: 10,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                padding: 0,
+                                overflow: 'hidden',
                                 ['--reveal-i' as string]: i % 4,
                                 boxShadow: tonight ? '0 0 0 1.5px var(--v2-pop), var(--v2-shadow-sm)' : undefined,
                               }}
                             >
-                              <div
-                                style={{
-                                  flexShrink: 0,
-                                  width: 44,
-                                  borderRadius: 12,
-                                  background: tonight ? 'var(--v2-pop)' : 'var(--v2-bg-deep)',
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  padding: '6px 0',
-                                }}
-                              >
-                                {badge ? (
-                                  <>
-                                    <div style={{ fontSize: 9.5, fontWeight: 800, color: tonight ? 'rgba(255,255,255,0.85)' : 'var(--v2-ink-muted)', letterSpacing: '0.03em' }}>{badge.day}</div>
-                                    <div className="v2-display" style={{ fontSize: 18, color: tonight ? '#fff' : undefined }}>{badge.num}</div>
-                                  </>
-                                ) : (
-                                  <IconFlag size={16} style={{ color: tonight ? '#fff' : 'var(--v2-ink-muted)' }} />
-                                )}
-                              </div>
-                              <div style={{ flexShrink: 0, width: 56, height: 56, borderRadius: 12, background: v2Art(plan.imageUrl, plan.category) }} />
-                              <div style={{ flex: 1, minWidth: 0, alignSelf: 'center' }}>
-                                <div className="v2-display" style={{ fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {plan.title}
+                              {/* The plan IS the image — a real event photo, or Plot's own
+                                  editorial art per category. Never a small thumbnail beside the
+                                  real content; here it IS the content, same treatment as the
+                                  EventCard this reuses (v2Art). */}
+                              <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: v2Art(plan.imageUrl, plan.category) }}>
+                                <div
+                                  style={{
+                                    position: 'absolute', inset: 0,
+                                    background: 'linear-gradient(180deg, rgba(0,0,0,0) 45%, rgba(0,0,0,0.55) 100%)',
+                                  }}
+                                />
+                                {/* The Crew's own mark, top-left — whose Plan this is, at a glance,
+                                    across a page that deliberately mixes every Crew together. */}
+                                <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(20,17,14,0.55)', backdropFilter: 'blur(6px)', borderRadius: 100, padding: '4px 10px 4px 4px' }}>
+                                  <CrewMark name={plan.crew.name} imageUrl={plan.crew.imageUrl} size={22} />
+                                  <span style={{ fontSize: 11.5, fontWeight: 800, color: '#fff' }}>{plan.crew.name}</span>
                                 </div>
-                                <div className="v2-muted" style={{ fontSize: 12.5, marginTop: 2 }}>{plan.crew.name}</div>
-                                <div className="v2-dim" style={{ fontSize: 12 }}>
-                                  {plan.startsAt
-                                    ? new Date(plan.startsAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-                                    : 'Time TBC'}
-                                  {plan.venueName && ` · ${plan.venueName}`}
-                                  {price && ` · ${price}`}
+                                {/* Locked-in signature: same IconLock badge as the Crew-chat
+                                    EventCard once a Plan is locked — this page's Plans are all
+                                    LOCKED/BOOKED by definition, so every card carries it. */}
+                                <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(20,17,14,0.55)', backdropFilter: 'blur(6px)', borderRadius: 100, padding: '5px 10px' }}>
+                                  <IconLock size={11} style={{ color: '#fff' }} />
+                                  <span style={{ fontSize: 10.5, fontWeight: 800, color: '#fff', letterSpacing: '0.02em' }}>LOCKED IN</span>
+                                </div>
+                                <div style={{ position: 'absolute', bottom: 10, left: 12, right: 12 }}>
+                                  <div className="v2-display" style={{ fontSize: 18, color: '#fff', lineHeight: 1.15, textShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
+                                    {plan.title}
+                                  </div>
                                 </div>
                               </div>
-                              {/* Contextual, not everything-all-the-time: a same-day plan gets a
-                                  one-tap Directions shortcut right on the row; further-out plans
-                                  don't need it cluttering the list yet — Details (via the row's
-                                  own link) is always enough for those. */}
-                              {tonight && plan.venueName && (
-                                <a
-                                  href={`https://maps.google.com/?q=${encodeURIComponent(`${plan.venueName}${plan.venueCity ? `, ${plan.venueCity}` : ''}`)}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="v2-tap-feedback"
-                                  style={{ display: 'flex', alignItems: 'center', gap: 4, alignSelf: 'center', flexShrink: 0, fontSize: 11.5, fontWeight: 800, color: 'var(--v2-brand)', background: 'var(--v2-bg-deep)', padding: '8px 12px', borderRadius: 100 }}
-                                >
-                                  <IconPlace size={12} />Directions
-                                </a>
-                              )}
+
+                              <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                <div className="v2-dim" style={{ fontSize: 12.5, display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                                  <span style={{ fontWeight: 700, color: tonight ? 'var(--v2-pop)' : 'var(--v2-ink)' }}>{dateLine(plan.startsAt)}</span>
+                                  {countdown && <span>&nbsp;· {countdown}</span>}
+                                  {plan.venueName && <span>&nbsp;· {plan.venueName}</span>}
+                                  {price && <span>&nbsp;· {price}</span>}
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                                  {/* Real faces of who's actually in — not a bare "3 going" count. */}
+                                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                                    <div style={{ display: 'flex' }}>
+                                      {plan.goingMembers.slice(0, 4).map((m, mi) => (
+                                        <div key={m.id} style={{ marginLeft: mi === 0 ? 0 : -8, position: 'relative', zIndex: 4 - mi }}>
+                                          <PersonAvatar name={m.displayName} email={m.email} photoUrl={m.avatarUrl} size={26} ring />
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <span className="v2-muted" style={{ fontSize: 12, marginLeft: 8 }}>
+                                      {plan.goingCount} {plan.goingCount === 1 ? 'going' : 'going'}
+                                    </span>
+                                  </div>
+
+                                  {tonight && plan.venueName ? (
+                                    <a
+                                      href={`https://maps.google.com/?q=${encodeURIComponent(`${plan.venueName}${plan.venueCity ? `, ${plan.venueCity}` : ''}`)}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="v2-tap-feedback"
+                                      style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontSize: 11.5, fontWeight: 800, color: '#fff', background: 'var(--v2-pop)', padding: '8px 12px', borderRadius: 100 }}
+                                    >
+                                      <IconPlace size={12} />Directions
+                                    </a>
+                                  ) : (
+                                    <span className="v2-tap-feedback" style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--v2-brand)', background: 'var(--v2-bg-deep)', padding: '8px 12px', borderRadius: 100, flexShrink: 0 }}>
+                                      View plan
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
                             </Link>
                           );
                         })}

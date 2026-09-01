@@ -192,28 +192,39 @@ export async function listCrewsForUser(userId: string) {
 export async function listUpcomingPlansForUser(userId: string) {
   const plans = await prisma.plan.findMany({
     where: { status: { in: ['LOCKED', 'BOOKED'] }, crew: { members: { some: { userId, status: 'ACTIVE' } } } },
-    include: { crew: { select: { id: true, name: true } }, experience: { include: { venue: true } }, votes: true, members: true },
+    include: {
+      crew: { select: { id: true, name: true, imageUrl: true } },
+      experience: { include: { venue: true } },
+      votes: { include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true } } } },
+      members: { include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true } } } },
+    },
     orderBy: { updatedAt: 'desc' },
   });
 
   return plans
-    .map((plan) => ({
-      id: plan.id,
-      publicSlug: plan.publicSlug,
-      title: plan.title,
-      crew: plan.crew,
-      startsAt: plan.experience?.startsAt ?? plan.manualStartsAt ?? null,
-      venueName: plan.experience?.venue?.name ?? plan.manualVenueName ?? null,
-      venueCity: plan.experience?.venue?.city ?? null,
-      category: plan.experience?.category ?? null,
-      imageUrl: plan.experience?.imageUrl ?? null,
-      priceMinMinor: plan.experience?.priceMinMinor ?? null,
-      currency: plan.experience?.currency ?? 'GBP',
-      // "5 going" on the Home hero — real signal, not decoration: whoever actually voted IN,
-      // falling back to the full invited-member count for a Plan nobody voted on before it
-      // was booked (e.g. a manually-confirmed soft plan).
-      goingCount: plan.votes.filter((v) => v.vote === 'IN').length || plan.members.length,
-    }))
+    .map((plan) => {
+      // Real faces, not a bare number: whoever actually voted IN, falling back to the full
+      // invited-member list for a Plan nobody voted on before it was booked (a manually-
+      // confirmed soft plan) — same fallback logic as the count below, just keeping the people.
+      const inVoters = plan.votes.filter((v) => v.vote === 'IN').map((v) => v.user);
+      const going = inVoters.length > 0 ? inVoters : plan.members.map((m) => m.user);
+      return {
+        id: plan.id,
+        publicSlug: plan.publicSlug,
+        title: plan.title,
+        crew: plan.crew,
+        startsAt: plan.experience?.startsAt ?? plan.manualStartsAt ?? null,
+        venueName: plan.experience?.venue?.name ?? plan.manualVenueName ?? null,
+        venueCity: plan.experience?.venue?.city ?? null,
+        category: plan.experience?.category ?? null,
+        imageUrl: plan.experience?.imageUrl ?? null,
+        priceMinMinor: plan.experience?.priceMinMinor ?? null,
+        currency: plan.experience?.currency ?? 'GBP',
+        // "5 going" on the Home hero — real signal, not decoration.
+        goingCount: inVoters.length || plan.members.length,
+        goingMembers: going.slice(0, 5),
+      };
+    })
     .sort((a, b) => {
       if (a.startsAt && b.startsAt) return new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();
       if (a.startsAt) return -1;
