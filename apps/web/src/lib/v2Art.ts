@@ -51,21 +51,30 @@ const ICONS = {
   sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18" stroke-linecap="round"/><circle cx="12" cy="12" r="3"/>',
 };
 
+/**
+ * Real gap found while auditing the brand pass: these were a 3-stop pink→purple→black diagonal
+ * on every category — exactly the "neon gradient blob" AI-startup look the brand brief calls
+ * out by name, despite the icon watermarks themselves being genuinely purpose-drawn. Replaced
+ * with the same tonal-duotone language as the identity-colour system (lib/identity.ts): one hue
+ * family per category moving from a near-black shade to a mid-tone, not a multi-hue blend — the
+ * difference between pigment and glow. Distinct direction/pairing per category, never the same
+ * wash for a gig vs a food festival, same as before — just no longer neon.
+ */
 const CATEGORY_ART: Record<string, CategoryArt> = {
-  LIVE_MUSIC: { gradient: 'linear-gradient(160deg, #ff2f7e 0%, #7c5cfc 45%, #0c0c0d 100%)', icon: ICONS.music },
-  CLUBBING: { gradient: 'linear-gradient(160deg, #7c5cfc 0%, #2f8aff 45%, #0c0c0d 100%)', icon: ICONS.disco },
-  RESTAURANT: { gradient: 'linear-gradient(160deg, #34d399 0%, #2f8aff 45%, #0c0c0d 100%)', icon: ICONS.dine },
-  BAR: { gradient: 'linear-gradient(160deg, #ff7a3d 0%, #ff2f7e 45%, #0c0c0d 100%)', icon: ICONS.drink },
-  COMEDY: { gradient: 'linear-gradient(160deg, #ffc53d 0%, #ff7a3d 45%, #0c0c0d 100%)', icon: ICONS.laugh },
-  THEATRE: { gradient: 'linear-gradient(160deg, #7c5cfc 0%, #ff2f7e 45%, #0c0c0d 100%)', icon: ICONS.theatre },
-  CINEMA: { gradient: 'linear-gradient(160deg, #2f8aff 0%, #7c5cfc 45%, #0c0c0d 100%)', icon: ICONS.film },
-  ART_CULTURE: { gradient: 'linear-gradient(160deg, #ffc53d 0%, #7c5cfc 45%, #0c0c0d 100%)', icon: ICONS.palette },
-  SPORT: { gradient: 'linear-gradient(160deg, #34d399 0%, #ffc53d 45%, #0c0c0d 100%)', icon: ICONS.trophy },
-  FITNESS: { gradient: 'linear-gradient(160deg, #2f8aff 0%, #34d399 45%, #0c0c0d 100%)', icon: ICONS.dumbbell },
-  FESTIVAL: { gradient: 'linear-gradient(160deg, #ff2f7e 0%, #ffc53d 45%, #0c0c0d 100%)', icon: ICONS.burst },
-  DAY_ACTIVITY: { gradient: 'linear-gradient(160deg, #34d399 0%, #ff7a3d 45%, #0c0c0d 100%)', icon: ICONS.outdoors },
-  COMMUNITY: { gradient: 'linear-gradient(160deg, #ff7a3d 0%, #2f8aff 45%, #0c0c0d 100%)', icon: ICONS.people },
-  CUSTOM: { gradient: 'linear-gradient(160deg, #ff7a3d 0%, #ff2f7e 45%, #0c0c0d 100%)', icon: ICONS.sparkle },
+  LIVE_MUSIC: { gradient: 'linear-gradient(155deg, #2a1230 0%, #74335a 100%)', icon: ICONS.music },
+  CLUBBING: { gradient: 'linear-gradient(155deg, #12142b 0%, #333866 100%)', icon: ICONS.disco },
+  RESTAURANT: { gradient: 'linear-gradient(155deg, #331c12 0%, #8f4d2c 100%)', icon: ICONS.dine },
+  BAR: { gradient: 'linear-gradient(155deg, #3a2210 0%, #99591f 100%)', icon: ICONS.drink },
+  COMEDY: { gradient: 'linear-gradient(155deg, #3d2b09 0%, #ac8020 100%)', icon: ICONS.laugh },
+  THEATRE: { gradient: 'linear-gradient(155deg, #300f1e 0%, #82234a 100%)', icon: ICONS.theatre },
+  CINEMA: { gradient: 'linear-gradient(155deg, #131a26 0%, #375670 100%)', icon: ICONS.film },
+  ART_CULTURE: { gradient: 'linear-gradient(155deg, #2c1830 0%, #6f486c 100%)', icon: ICONS.palette },
+  SPORT: { gradient: 'linear-gradient(155deg, #142013 0%, #43602c 100%)', icon: ICONS.trophy },
+  FITNESS: { gradient: 'linear-gradient(155deg, #0d2420 0%, #297058 100%)', icon: ICONS.dumbbell },
+  FESTIVAL: { gradient: 'linear-gradient(155deg, #3a190f 0%, #a8542c 100%)', icon: ICONS.burst },
+  DAY_ACTIVITY: { gradient: 'linear-gradient(155deg, #182615 0%, #4f6a33 100%)', icon: ICONS.outdoors },
+  COMMUNITY: { gradient: 'linear-gradient(155deg, #17202e 0%, #425c7c 100%)', icon: ICONS.people },
+  CUSTOM: { gradient: 'linear-gradient(155deg, #201822 0%, #5b4259 100%)', icon: ICONS.sparkle },
 };
 const DEFAULT_ART = CATEGORY_ART.LIVE_MUSIC;
 

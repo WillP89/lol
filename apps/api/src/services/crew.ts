@@ -64,11 +64,12 @@ export async function getCrewPreviewByInviteCode(inviteCode: string) {
     select: {
       id: true,
       name: true,
+      imageUrl: true,
       archivedAt: true,
       createdById: true,
       members: {
         where: { status: 'ACTIVE' },
-        select: { user: { select: { displayName: true, email: true } } },
+        select: { user: { select: { displayName: true, email: true, avatarUrl: true } } },
         orderBy: { joinedAt: 'asc' },
         take: 6,
       },
@@ -84,8 +85,15 @@ export async function getCrewPreviewByInviteCode(inviteCode: string) {
 
   return {
     name: crew.name,
+    imageUrl: crew.imageUrl,
     memberCount: crew._count.members,
     memberInitials: crew.members.map((m) => (m.user.displayName?.trim() || m.user.email).charAt(0).toUpperCase()),
+    // Real identity for the invite screen's member row (brief: show who I'd be joining, not
+    // just a count) — deliberately NOT the raw email (this endpoint is public, no-auth, and a
+    // pre-existing test correctly caught the first version of this leaking it). A resolved
+    // display name only — same "first-name-or-nothing-identifying" rule the rest of the public
+    // invite preview already follows.
+    members: crew.members.map((m) => ({ displayName: displayNameOf(m.user.displayName, m.user.email).split(' ')[0], avatarUrl: m.user.avatarUrl })),
     invitedByName: creator ? displayNameOf(creator.displayName, creator.email).split(' ')[0] : null,
   };
 }
@@ -103,7 +111,7 @@ async function crewSummaryExtras(crewId: string, requestingUserId: string) {
     prisma.crewMessage.findFirst({
       where: { crewId },
       orderBy: { createdAt: 'desc' },
-      select: { body: true, createdAt: true, author: { select: { displayName: true, email: true } } },
+      select: { body: true, createdAt: true, author: { select: { displayName: true, email: true, avatarUrl: true } } },
     }),
     prisma.plan.findFirst({
       where: { crewId, status: { in: [...ACTIVE_DECISION_STATUSES] } },
@@ -123,7 +131,12 @@ async function crewSummaryExtras(crewId: string, requestingUserId: string) {
 
   return {
     latestMessage: latestMessage
-      ? { body: latestMessage.body, authorName: displayNameOf(latestMessage.author.displayName, latestMessage.author.email), createdAt: latestMessage.createdAt }
+      ? {
+          body: latestMessage.body,
+          authorName: displayNameOf(latestMessage.author.displayName, latestMessage.author.email),
+          authorAvatarUrl: latestMessage.author.avatarUrl,
+          createdAt: latestMessage.createdAt,
+        }
       : null,
     activePlan: activePlan
       ? {
@@ -156,7 +169,7 @@ export async function listCrewsForUser(userId: string) {
   const crews = await prisma.crew.findMany({
     where: { members: { some: { userId, status: 'ACTIVE' } }, archivedAt: null },
     include: {
-      members: { where: { status: 'ACTIVE' }, include: { user: { select: { id: true, displayName: true, email: true } } } },
+      members: { where: { status: 'ACTIVE' }, include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true } } } },
       dna: true,
     },
     orderBy: { updatedAt: 'desc' },
@@ -219,7 +232,7 @@ export async function getCrewDetail(crewId: string, requestingUserId: string) {
     prisma.crew.findUnique({
       where: { id: crewId },
       include: {
-        members: { include: { user: { select: { id: true, displayName: true, email: true } } } },
+        members: { include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true } } } },
         dna: true,
         plans: { orderBy: { createdAt: 'desc' }, take: 10, include: { experience: { include: { venue: true } }, votes: true, members: true } },
       },
@@ -230,7 +243,7 @@ export async function getCrewDetail(crewId: string, requestingUserId: string) {
       where: { crewId },
       orderBy: { createdAt: 'desc' },
       take: 3,
-      select: { id: true, body: true, createdAt: true, author: { select: { id: true, displayName: true, email: true } } },
+      select: { id: true, body: true, createdAt: true, author: { select: { id: true, displayName: true, email: true, avatarUrl: true } } },
     }),
   ]);
   if (!crew) return null;

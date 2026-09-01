@@ -12,6 +12,12 @@ const EnvSchema = z.object({
   SESSION_SECRET: z.string().min(16, 'SESSION_SECRET must be at least 16 chars'),
   TOKEN_HASH_SECRET: z.string().min(16, 'TOKEN_HASH_SECRET must be at least 16 chars'),
   WEB_APP_URL: z.string().url().default('http://localhost:3000'),
+  // The API's own publicly-reachable origin — needed because uploaded media (avatars, Crew
+  // images) is served straight from this process (see lib/mediaStorage.ts) at an absolute URL,
+  // not proxied through the web app's rewrite the way JSON API calls are. Defaults to the local
+  // dev API port; a real deployment must set this to wherever the API is actually reachable
+  // from a browser (see docs/DECISIONS.md#plot-media-storage).
+  API_PUBLIC_URL: z.string().url().default('http://localhost:4000'),
   // Minimal pilot-stage protection for /admin/*: a single shared secret checked via header.
   // NOT real role-based admin auth (brief §29) — see docs/DECISIONS.md#admin-auth for the
   // upgrade path once there's more than one operator.

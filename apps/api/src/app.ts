@@ -1,6 +1,9 @@
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
+import multipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
 import { config } from './lib/config';
+import { UPLOAD_DIR } from './lib/mediaStorage';
 import { logger } from './lib/logger';
 import { prisma } from './lib/prisma';
 import { attachUser } from './middleware/auth';
@@ -26,6 +29,10 @@ export function buildApp() {
   const app = Fastify({ logger, disableRequestLogging: config.NODE_ENV === 'test' });
 
   app.register(cookie);
+  app.register(multipart, { limits: { fileSize: 6 * 1024 * 1024, files: 1 } });
+  // Serves uploaded avatars/Crew images straight from disk at an absolute API_PUBLIC_URL —
+  // see lib/mediaStorage.ts for the full "why local disk, how to swap it" rationale.
+  app.register(fastifyStatic, { root: UPLOAD_DIR, prefix: '/media/', decorateReply: false });
 
   app.addHook('onRequest', async (request) => {
     await attachUser(request);

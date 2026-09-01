@@ -10,12 +10,15 @@ import { v2Art } from '@/lib/v2Art';
 import { messagePreview } from '@/lib/messagePreview';
 import { BottomSheet } from '@/components/BottomSheet';
 import { TabBarV2 } from '@/components/TabBarV2';
-import { IconSpark, IconPlace, IconPoll, IconCalendar, IconFlag, IconLock } from '@/components/icons';
+import { PersonAvatar, CrewMark } from '@/components/Avatar';
+import { MediaUploadButton } from '@/components/MediaUploadButton';
+import { IconSpark, IconPlace, IconPoll, IconCalendar, IconFlag, IconLock, IconGathering } from '@/components/icons';
 
 interface CrewListItem {
   id: string;
   name: string;
-  members: { user: { id: string; displayName: string | null; email: string } }[];
+  imageUrl: string | null;
+  members: { user: { id: string; displayName: string | null; email: string; avatarUrl?: string | null } }[];
   latestMessage: { body: string; authorName: string; createdAt: string } | null;
   activePlan: { title: string } | null;
   upcomingPlan: { title: string } | null;
@@ -43,7 +46,7 @@ interface ChatMessage {
   id: string;
   body: string;
   createdAt: string;
-  author: { id: string; displayName: string | null; email: string };
+  author: { id: string; displayName: string | null; email: string; avatarUrl?: string | null };
   reactions: Reaction[];
   poll: Poll | null;
 }
@@ -63,7 +66,7 @@ interface ExploreExperienceLite {
 
 const REACTION_CHOICES = ['👍', '❤️', '😂', '🎉'];
 
-type MemberLite = { user: { id: string; displayName: string | null; email: string } };
+type MemberLite = { user: { id: string; displayName: string | null; email: string; avatarUrl?: string | null } };
 
 /** One named group in the "who's behind this tally" sheet — see `computeVoterSheet` below. A
  * poll option opens with a single group; an IN/MAYBE/CAN'T breakdown or a multi-emoji reaction
@@ -121,8 +124,9 @@ interface Plan {
 interface CrewDetail {
   id: string;
   name: string;
+  imageUrl: string | null;
   inviteCode: string;
-  members: { user: { id: string; displayName: string | null; email: string } }[];
+  members: { user: { id: string; displayName: string | null; email: string; avatarUrl?: string | null } }[];
   dna: { confidence: string; topCategories: string[]; medianSpendMinor: number; bestNights: string[]; usualAreas: string[] } | null;
   plans: Plan[];
 }
@@ -134,15 +138,6 @@ interface DayAvailability {
 }
 
 const ACTIVE_DECISION_STATUSES = new Set(['SHARED', 'GATHERING_INTEREST', 'LIKELY', 'READY']);
-const AVATAR_COLORS = ['#7c5cfc', '#2f8aff', '#34d399', '#ffc53d', '#ff7a3d', '#ff2f7e'];
-function avatarColor(seed: string) {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[hash];
-}
-function initials(displayName: string | null, email: string) {
-  return (displayName?.trim() || email).slice(0, 1).toUpperCase();
-}
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
@@ -156,8 +151,8 @@ const POLL_INTERVAL_MS = 3000;
 // without teaching the frontend to recognise it left it rendering as a bare text bubble
 // instead of a plan card — caught via a real multi-user Playwright run, not code reading. See
 // docs/DECISIONS.md#crew-auto-recommendations.
-const MEMBER_PLAN_ANNOUNCEMENT = /^📍 Sent "(.+)" to the Crew — \/plans\/([a-zA-Z0-9-]+)$/;
-const RECOMMENDATION_PLAN_ANNOUNCEMENT = /^✨ Plot found something your Crew might like: "(.+)" — \/plans\/([a-zA-Z0-9-]+)$/;
+const MEMBER_PLAN_ANNOUNCEMENT = /^Sent "(.+)" to the Crew — \/plans\/([a-zA-Z0-9-]+)$/;
+const RECOMMENDATION_PLAN_ANNOUNCEMENT = /^Plot found something your Crew might like: "(.+)" — \/plans\/([a-zA-Z0-9-]+)$/;
 function matchPlanAnnouncement(body: string): { title: string; slug: string } | null {
   const memberMatch = body.match(MEMBER_PLAN_ANNOUNCEMENT);
   if (memberMatch) return { title: memberMatch[1], slug: memberMatch[2] };
@@ -227,23 +222,43 @@ function EventCard({
   return (
     <div className={`v2-hoverable${justLocked ? ' v2-confirm-transition' : ' fade-up'}`} style={{ width: 264, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)' }}>
       <Link href={`/plans/${data.plan.publicSlug}`} style={{ display: 'block' }}>
-        <div style={{ height: 120, background: v2Art(exp?.imageUrl, exp?.category), position: 'relative' }}>
+        <div className={locked ? 'v2-event-art-locked' : undefined} style={{ height: 120, background: v2Art(exp?.imageUrl, exp?.category), position: 'relative', transition: 'box-shadow 0.4s ease' }}>
           {/* The definitive-state overlay — date/venue moving from "proposed" to "confirmed" is
               the actual payoff of Lock It In, so it happens right on the card people were
-              already looking at, not only in a separate confetti layer. */}
+              already looking at, not only in a separate confetti layer. Plot's own converged
+              mark, not a generic checkmark — the same glyph the Lock It In button itself uses,
+              so the badge and the action that caused it are visibly the same idea. */}
           {locked && (
-            <div className="v2-pop-in" style={{ position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 5, background: 'var(--v2-green)', color: '#fff', fontSize: 11, fontWeight: 800, padding: '5px 10px', borderRadius: 100 }}>
-              <span>✓</span><span>Confirmed</span>
+            <div className="v2-pop-in" style={{ position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(22,19,15,0.82)', backdropFilter: 'blur(6px)', color: '#fff', fontSize: 11, fontWeight: 800, padding: '5px 10px 5px 8px', borderRadius: 100 }}>
+              <IconLock size={13} /><span>Locked in</span>
+            </div>
+          )}
+          {/* Who's actually converging on this, right on the object itself — not buried in a
+              text line beneath it. Brief: "the group should visually gather around the idea." */}
+          {inVoterIds.length > 0 && (
+            <div className="stack" style={{ position: 'absolute', bottom: 9, left: 10 }}>
+              {inVoterIds.slice(0, 4).map((id) => {
+                const voter = members.find((x) => x.user.id === id)?.user;
+                if (!voter) return null;
+                return (
+                  <div key={id} className="v2-pop-in" style={{ marginLeft: -6, borderRadius: '50%', boxShadow: '0 0 0 2px rgba(22,19,15,0.5)' }}>
+                    <PersonAvatar name={voter.displayName} email={voter.email} photoUrl={voter.avatarUrl} size={22} />
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
         <div style={{ padding: '12px 14px 8px' }}>
           {/* The distinguishable "this is Plot, not a person" marker — brief: unprompted
               delivery must read as native to the conversation but never pretend to be a human
-              share. A small eyebrow badge, not a disclaimer banner. */}
+              share, and specifically NOT an "AI sparkle" mark (that's what IconSpark reads as,
+              and it's used elsewhere for a person's own found idea) — IconGathering (loose
+              converging points) is Plot noticing a pattern in what the Crew already likes, not
+              magic. See docs/DECISIONS.md#plot-brand-system. */}
           {data.recommendation && (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--v2-brand)', background: 'rgba(255,47,126,0.1)', padding: '3px 8px', borderRadius: 100, marginBottom: 8 }}>
-              <IconSpark size={11} /><span>Plot</span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--v2-brand)', background: 'rgba(255,47,126,0.1)', padding: '3px 9px', borderRadius: 100, marginBottom: 8 }}>
+              <IconGathering size={11} /><span>Plot found this</span>
             </div>
           )}
           <div className="v2-display" style={{ fontSize: 15, marginBottom: 4 }}>{data.plan.title}</div>
@@ -359,16 +374,8 @@ function OptionVoters({ voterIds, members, onExpand }: { voterIds: string[]; mem
         const m = members.find((x) => x.user.id === id)?.user;
         if (!m) return null;
         return (
-          <div
-            key={id}
-            className="v2-pop-in"
-            style={{
-              width: 18, height: 18, borderRadius: '50%', marginLeft: -5, fontSize: 7.5, fontWeight: 800, color: '#fff',
-              background: avatarColor(m.displayName ?? m.email), display: 'flex', alignItems: 'center', justifyContent: 'center',
-              border: '1.5px solid var(--v2-surface)',
-            }}
-          >
-            {initials(m.displayName, m.email)}
+          <div key={id} className="v2-pop-in" style={{ marginLeft: -5, borderRadius: '50%', boxShadow: '0 0 0 1.5px var(--v2-surface)' }}>
+            <PersonAvatar name={m.displayName} email={m.email} photoUrl={m.avatarUrl} size={18} />
           </div>
         );
       })}
@@ -1178,9 +1185,7 @@ export default function CrewPage() {
                   className="v2-rail-crew-row"
                   style={{ background: c.id === crewId ? 'var(--v2-bg-deep)' : undefined }}
                 >
-                  <div style={{ width: 34, height: 34, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: avatarColor(c.name) }}>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: '#fff' }}>{c.name.charAt(0).toUpperCase()}</span>
-                  </div>
+                  <CrewMark name={c.name} imageUrl={c.imageUrl} size={34} />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
                     <div className="v2-dim" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, overflow: 'hidden' }}>
@@ -1200,15 +1205,15 @@ export default function CrewPage() {
             Crew info), that's the whole chrome. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '18px 20px 10px' }}>
           <Link href="/crews" aria-label="Back to Crews" style={{ fontSize: 20, color: 'var(--v2-ink-muted)', flexShrink: 0 }}>←</Link>
-          <button onClick={() => { setInfoOpen(true); loadRecSettings(); }} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-            <div className="stack">
-              {crew.members.slice(0, 4).map((m) => (
-                <div key={m.user.id} style={{ width: 30, height: 30, borderRadius: '50%', marginLeft: -8, fontSize: 11, fontWeight: 800, color: '#fff', background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--v2-bg)' }}>
-                  {initials(m.user.displayName, m.user.email)}
-                </div>
-              ))}
+          {/* The Crew's own identity — a squircle, not another circle-of-initials pile that
+              looked identical to a person. Real photo when set, the identity-gradient mark
+              otherwise. See components/Avatar.tsx and docs/DECISIONS.md#plot-brand-system. */}
+          <button onClick={() => { setInfoOpen(true); loadRecSettings(); }} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 11, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+            <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={38} />
+            <div style={{ textAlign: 'left', minWidth: 0 }}>
+              <div className="v2-display" style={{ fontSize: 17, lineHeight: 1.1 }}>{crew.name}</div>
+              <div className="v2-muted" style={{ fontSize: 11.5, fontWeight: 600 }}>{crew.members.length} {crew.members.length === 1 ? 'person' : 'people'}</div>
             </div>
-            <div className="v2-display" style={{ fontSize: 17, textAlign: 'left' }}>{crew.name}</div>
           </button>
         </div>
 
@@ -1306,8 +1311,8 @@ export default function CrewPage() {
                   style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexDirection: mine ? 'row-reverse' : 'row', marginTop: grouped ? -4 : 8 }}
                 >
                   {!mine && (
-                    <div style={{ width: 24, height: 24, borderRadius: '50%', flexShrink: 0, visibility: grouped ? 'hidden' : 'visible', fontSize: 9.5, fontWeight: 800, color: '#fff', background: avatarColor(m.author.displayName ?? m.author.email), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {initials(m.author.displayName, m.author.email)}
+                    <div style={{ flexShrink: 0, visibility: grouped ? 'hidden' : 'visible' }}>
+                      <PersonAvatar name={m.author.displayName} email={m.author.email} photoUrl={m.author.avatarUrl} size={24} />
                     </div>
                   )}
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start', maxWidth: '76%' }}>
@@ -1611,15 +1616,24 @@ export default function CrewPage() {
       </BottomSheet>
 
       <BottomSheet open={infoOpen} onClose={() => setInfoOpen(false)}>
-        <div className="v2-eyebrow" style={{ marginBottom: 2 }}>{crew.name}</div>
-        <p className="v2-muted" style={{ fontSize: 12.5, marginBottom: 16 }}>{crew.members.length} people</p>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 16 }}>
+          <MediaUploadButton
+            uploadPath={`/crews/${crew.id}/image`}
+            deletePath={`/crews/${crew.id}/image`}
+            shape="squircle"
+            size={72}
+            onChange={(url) => setCrew((prev) => (prev ? { ...prev, imageUrl: url } : prev))}
+          >
+            <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={72} />
+          </MediaUploadButton>
+          <div className="v2-display" style={{ fontSize: 18, marginTop: 10 }}>{crew.name}</div>
+          <p className="v2-muted" style={{ fontSize: 12.5 }}>{crew.members.length} people</p>
+        </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
           {crew.members.map((m) => (
             <div key={m.user.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 26, height: 26, borderRadius: '50%', fontSize: 10, fontWeight: 800, color: '#fff', background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {initials(m.user.displayName, m.user.email)}
-              </div>
+              <PersonAvatar name={m.user.displayName} email={m.user.email} photoUrl={m.user.avatarUrl} size={26} />
               <span style={{ fontSize: 12.5 }}>{displayNameOf(m.user.displayName, m.user.email)}</span>
             </div>
           ))}
@@ -1739,9 +1753,7 @@ export default function CrewPage() {
                         if (!m) return null;
                         return (
                           <div key={id} className="v2-pop-in" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                            <div style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, fontSize: 10, fontWeight: 800, color: '#fff', background: avatarColor(m.displayName ?? m.email), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {initials(m.displayName, m.email)}
-                            </div>
+                            <PersonAvatar name={m.displayName} email={m.email} photoUrl={m.avatarUrl} size={26} />
                             <span style={{ fontSize: 13.5, fontWeight: 600 }}>{displayNameOf(m.displayName, m.email)}</span>
                           </div>
                         );

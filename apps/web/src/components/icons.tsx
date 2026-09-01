@@ -84,12 +84,38 @@ export function IconFlag(props: IconProps) {
   );
 }
 
-/** Committed — a padlock. Lock it in, confirmed states. */
+/**
+ * Committed — Plot's own mark for "decided", not a padlock. Three loose points (people/options
+ * around an idea — the same territory IconGathering draws mid-motion) resolved into one solid
+ * point with short converging rays, as if they'd just landed there. Deliberately the settled
+ * counterpart to IconSpark's open four-point outline: a spark is a possibility, this is a
+ * possibility that just became definite. Used for Lock It In and every "locked/confirmed" state
+ * — see docs/DECISIONS.md#plot-brand-system for why a padlock (or a lock emoji) was wrong here:
+ * this is one of Plot's two or three signature actions and deserved a mark nobody else owns.
+ */
 export function IconLock(props: IconProps) {
   return (
     <svg {...base(props)}>
-      <rect x="4.5" y="9" width="11" height="8" rx="2" />
-      <path d="M6.75 9V6.5a3.25 3.25 0 0 1 6.5 0V9" />
+      <circle cx="10" cy="10.5" r="2.6" fill="currentColor" stroke="none" />
+      <path d="M10 6.3V3.2" />
+      <path d="M13.6 12.6 16.3 14.15" />
+      <path d="M6.4 12.6 3.7 14.15" />
+    </svg>
+  );
+}
+
+/**
+ * Not yet resolved — the same three points as IconLock's rays, still loose. What a proposed
+ * idea/suggestion looks like before a Crew converges on it: an automatic recommendation
+ * ("Plot found this"), a plan still gathering votes. Deliberately not a sparkle/magic-wand mark
+ * — a recommendation is Plot noticing a pattern in what the Crew already likes, not "AI magic".
+ */
+export function IconGathering(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="10" cy="4.6" r="1.5" />
+      <circle cx="15" cy="14" r="1.5" />
+      <circle cx="5" cy="14" r="1.5" />
     </svg>
   );
 }

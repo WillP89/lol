@@ -11,3 +11,7 @@ coverage/
 .turbo/
 prisma/dev.db
 *.tsbuildinfo
+
+# Local-disk media storage (lib/mediaStorage.ts) — real uploaded files, never committed. A real
+# deployment points this at S3/R2/GCS instead; see docs/DECISIONS.md#plot-media-storage.
+apps/api/uploads/

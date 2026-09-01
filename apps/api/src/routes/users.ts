@@ -5,6 +5,7 @@ import { submitTasteSwipes, setLocationPreferences } from '../services/taste';
 import { track } from '../services/analytics';
 import { prisma } from '../lib/prisma';
 import { revokeAllSessionsForUser } from '../services/auth';
+import { saveUpload, deleteUpload, MediaValidationError } from '../lib/mediaStorage';
 
 const SwipeSchema = z.object({
   swipes: z.array(z.object({ category: z.string(), choice: z.enum(['yes', 'maybe', 'no']) })).min(1),
@@ -42,6 +43,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
         id: true,
         email: true,
         displayName: true,
+        avatarUrl: true,
         createdAt: true,
         tasteProfile: true,
         locationPrefs: { orderBy: { createdAt: 'asc' } },
@@ -74,8 +76,36 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
         create: { userId: request.user.id, homeCity: homeCity ?? null, homeLat: homeLat ?? null, homeLng: homeLng ?? null },
       });
     }
-    const user = await prisma.user.findUnique({ where: { id: request.user.id }, select: { id: true, displayName: true, email: true, profile: true } });
+    const user = await prisma.user.findUnique({ where: { id: request.user.id }, select: { id: true, displayName: true, email: true, avatarUrl: true, profile: true } });
     return reply.send({ user });
+  });
+
+  // Real upload, not a base64 blob in the User row — see lib/mediaStorage.ts. Multipart because
+  // this is a binary file, not JSON; requireUser first so an unauthenticated request never even
+  // reaches the (comparatively expensive) file-read.
+  app.post('/users/me/avatar', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const file = await request.file();
+    if (!file) return reply.code(400).send({ error: 'invalid_request', message: 'No image provided.' });
+    const buffer = await file.toBuffer();
+    try {
+      const avatarUrl = await saveUpload({ buffer, mimeType: file.mimetype, kind: 'avatar' });
+      const previous = await prisma.user.findUnique({ where: { id: request.user.id }, select: { avatarUrl: true } });
+      await prisma.user.update({ where: { id: request.user.id }, data: { avatarUrl } });
+      await deleteUpload(previous?.avatarUrl);
+      return reply.send({ avatarUrl });
+    } catch (err) {
+      if (err instanceof MediaValidationError) return reply.code(400).send({ error: 'invalid_request', message: err.message });
+      throw err;
+    }
+  });
+
+  app.delete('/users/me/avatar', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const previous = await prisma.user.findUnique({ where: { id: request.user.id }, select: { avatarUrl: true } });
+    await prisma.user.update({ where: { id: request.user.id }, data: { avatarUrl: null } });
+    await deleteUpload(previous?.avatarUrl);
+    return reply.send({ ok: true });
   });
 
   app.post('/users/me/taste', async (request, reply) => {

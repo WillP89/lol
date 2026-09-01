@@ -107,7 +107,11 @@ async function createPlanForCrew(
   // the group — the exact "nothing happens" failure mode, just one screen over from the booking
   // bug this same pass fixed. See docs/DECISIONS.md#booking-status-split.
   if (data.status !== 'IDEA') {
-    await sendCrewMessage(crewId, proposedByUserId, `📍 Sent "${plan.title}" to the Crew — /plans/${plan.publicSlug}`).catch(() => {});
+    // No emoji prefix — same brand-pass gap as lockPlan's message below. This exact string is
+    // pattern-matched client-side (MEMBER_PLAN_ANNOUNCEMENT in crews/[id]/page.tsx and
+    // lib/messagePreview.ts) to swap in the real EventCard UI, so it's never shown verbatim
+    // anyway; keep those two regexes in sync with this template if it ever changes again.
+    await sendCrewMessage(crewId, proposedByUserId, `Sent "${plan.title}" to the Crew — /plans/${plan.publicSlug}`).catch(() => {});
   }
 
   return plan;
@@ -161,10 +165,14 @@ export async function createRecommendationPlanForCrew(
 
   await track('SentToCrew', { crewId, planId: plan.id, source: 'recommendation' }, { userId: systemUserId, crewId, planId: plan.id });
 
+  // No sparkle emoji — the exact "AI sparkle mark for a recommendation" the brand pass named as
+  // wrong, just missed in the icon-system audit because this is a chat message string, not a
+  // rendered icon (the EventCard badge itself was already fixed to IconGathering). Client-side
+  // regex match (RECOMMENDATION_PLAN_ANNOUNCEMENT) updated to match.
   const message = await sendSystemMessage(
     crewId,
     systemUserId,
-    `✨ Plot found something your Crew might like: "${plan.title}" — /plans/${plan.publicSlug}`,
+    `Plot found something your Crew might like: "${plan.title}" — /plans/${plan.publicSlug}`,
   );
 
   return { plan, messageId: message.id };
@@ -278,7 +286,14 @@ export async function lockPlan(planId: string, userId: string): Promise<Plan> {
 
   const updated = await prisma.plan.update({ where: { id: planId }, data: { status: 'LOCKED' } });
   await track('PlanLocked', { planId, crewId: plan.crewId, userId }, { userId, crewId: plan.crewId, planId });
-  await sendCrewMessage(plan.crewId, userId, `🔒 "${plan.title}" was locked in — see you there.`).catch(() => {});
+  // Real gap caught via a live screenshot during the brand pass: this system message stored a
+  // literal 🔒 emoji as part of its plain-text body — exactly the "Lock It In uses a lock
+  // emoji, remove it" case the brief named specifically, just missed during the icon-system
+  // audit because it lives in a chat message string, not a rendered React icon. The words
+  // "locked in" already carry the meaning; removed outright rather than icon-replaced, same as
+  // every other decorative emoji this codebase found with nothing real left to represent once
+  // stripped. See docs/DECISIONS.md#plot-brand-system.
+  await sendCrewMessage(plan.crewId, userId, `"${plan.title}" was locked in — see you there.`).catch(() => {});
   return updated;
 }
 
@@ -288,7 +303,7 @@ export async function getPlanById(planId: string) {
     include: {
       experience: { include: { venue: true } },
       crew: { select: { id: true, name: true } },
-      members: { include: { user: { select: { id: true, displayName: true, email: true } } } },
+      members: { include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true } } } },
       votes: true,
       bookings: true,
     },

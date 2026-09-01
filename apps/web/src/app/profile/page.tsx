@@ -7,11 +7,14 @@ import { api, ApiError } from '@/lib/api';
 import { TabBarV2 } from '@/components/TabBarV2';
 import { BottomSheet } from '@/components/BottomSheet';
 import { formatPriceFrom } from '@/lib/formatPrice';
+import { PersonAvatar } from '@/components/Avatar';
+import { MediaUploadButton } from '@/components/MediaUploadButton';
 
 interface ProfileUser {
   id: string;
   email: string;
   displayName: string | null;
+  avatarUrl: string | null;
   createdAt: string;
   tasteProfile: {
     categoryAffinity: Record<string, number>;
@@ -30,17 +33,6 @@ interface ProfileUser {
   locationPrefs: { kind: string; label: string }[];
 }
 
-// Same palette as Home V2's avatar colours — one shared identity system across the app.
-const AVATAR_COLORS = ['#ff2f7e', '#7c5cfc', '#2f8aff', '#ffc53d', '#34d399', '#ff7a3d'];
-function avatarColor(seed: string) {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[hash];
-}
-
-function initials(displayName: string | null, email: string) {
-  return (displayName?.trim() || email).slice(0, 1).toUpperCase();
-}
 
 type DangerAction = 'deactivate' | 'delete' | null;
 
@@ -125,14 +117,14 @@ export default function ProfilePage() {
       <div className="v2-shell-desktop">
         <div className="v2-page v2-page-wide" style={{ paddingTop: 28 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24 }}>
-            <div
-              style={{
-                width: 56, height: 56, borderRadius: '50%', fontSize: 22, fontWeight: 800, color: '#fff',
-                background: avatarColor(user.displayName ?? user.email), display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}
+            <MediaUploadButton
+              uploadPath="/users/me/avatar"
+              deletePath="/users/me/avatar"
+              size={56}
+              onChange={(url) => setUser((prev) => (prev ? { ...prev, avatarUrl: url } : prev))}
             >
-              {initials(user.displayName, user.email)}
-            </div>
+              <PersonAvatar name={user.displayName} email={user.email} photoUrl={user.avatarUrl} size={56} />
+            </MediaUploadButton>
             <div>
               <h1 className="v2-display" style={{ fontSize: 21, marginBottom: 2 }}>{user.displayName || 'Your profile'}</h1>
               <div className="v2-muted" style={{ fontSize: 13 }}>{user.email}</div>

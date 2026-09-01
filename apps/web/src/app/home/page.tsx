@@ -8,13 +8,16 @@ import { v2Art } from '@/lib/v2Art';
 import { formatPriceFrom } from '@/lib/formatPrice';
 import { displayNameOf } from '@/lib/displayName';
 import { messagePreview } from '@/lib/messagePreview';
-import { IconCalendar, IconPoll } from '@/components/icons';
+import { IconCalendar, IconPoll, IconGathering, IconLock } from '@/components/icons';
+import { PersonAvatar, CrewMark } from '@/components/Avatar';
+import { identityGradient } from '@/lib/identity';
 
 interface CrewSummary {
   id: string;
   name: string;
-  members: { user: { id: string; displayName: string | null; email: string } }[];
-  latestMessage: { body: string; authorName: string; createdAt: string } | null;
+  imageUrl: string | null;
+  members: { user: { id: string; displayName: string | null; email: string; avatarUrl?: string | null } }[];
+  latestMessage: { body: string; authorName: string; createdAt: string; authorAvatarUrl?: string | null } | null;
   activePlan: { id: string; title: string; publicSlug: string; inCount: number; totalMembers: number; iVoted: boolean } | null;
   upcomingPlan: { id: string; title: string; publicSlug: string; startsAt: string | null; venueName: string | null } | null;
 }
@@ -43,24 +46,6 @@ interface Experience {
   venue: { name: string };
 }
 
-const AVATAR_COLORS = ['#ff2f7e', '#7c5cfc', '#2f8aff', '#ffc53d', '#34d399', '#ff7a3d'];
-// One ring tint per Crew (hashed) — the identity marker for the Crew-bubble row below.
-const CREW_RINGS = ['#7c5cfc', '#2f8aff', '#34d399', '#ffc53d', '#ff7a3d', '#ff2f7e'];
-
-function initials(displayName: string | null, email: string) {
-  return (displayName?.trim() || email).slice(0, 1).toUpperCase();
-}
-function seedHash(seed: string, mod: number) {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) % mod;
-  return hash;
-}
-function avatarColor(seed: string) {
-  return AVATAR_COLORS[seedHash(seed, AVATAR_COLORS.length)];
-}
-function crewRing(seed: string) {
-  return CREW_RINGS[seedHash(seed, CREW_RINGS.length)];
-}
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diffMs / 60000);
@@ -114,7 +99,7 @@ export default function HomePage() {
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
   const [upcoming, setUpcoming] = useState<UpcomingPlan[] | null>(null);
   const [ideas, setIdeas] = useState<Experience[] | null>(null);
-  const [me, setMe] = useState<{ displayName: string | null; email: string } | null>(null);
+  const [me, setMe] = useState<{ displayName: string | null; email: string; avatarUrl: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // A one-off fetch on mount would mean a crewmate's vote, message, or newly-locked plan never
@@ -144,7 +129,7 @@ export default function HomePage() {
       .then((res) => { if (!cancelled) setIdeas(res.experiences.slice(0, 6)); })
       .catch(() => {});
     api
-      .get<{ user: { displayName: string | null; email: string } }>('/users/me')
+      .get<{ user: { displayName: string | null; email: string; avatarUrl: string | null } }>('/users/me')
       .then((res) => { if (!cancelled) setMe(res.user); })
       .catch(() => {});
     const interval = setInterval(() => { loadCrews(); loadUpcoming(); }, 8000);
@@ -154,6 +139,14 @@ export default function HomePage() {
   const nextPlan = upcoming?.find((p) => p.startsAt && new Date(p.startsAt).getTime() > Date.now()) ?? upcoming?.[0] ?? null;
 
   const needsAttention = useMemo(() => (crews ?? []).filter((c) => c.activePlan && !c.activePlan.iVoted), [crews]);
+  // Home's hero adapts to whichever real state is strongest, instead of only ever showing a
+  // locked plan and leaving the dominant slot empty for every Crew still deciding — the exact
+  // "generic dashboard, not an adaptive social home" gap the brand pass called out. A locked
+  // plan always wins (the group has actually committed); short of that, a decision still
+  // waiting on you is the truest "what's happening" signal Home has. Once shown as the hero,
+  // it's dropped from the smaller "Needs you" list below so it isn't shown twice.
+  const heroNeedsAttention = !nextPlan ? needsAttention[0] ?? null : null;
+  const needsAttentionRest = heroNeedsAttention ? needsAttention.slice(1) : needsAttention;
 
   const recentActivity = useMemo(
     () =>
@@ -182,25 +175,12 @@ export default function HomePage() {
               </h1>
               <p className="v2-muted" style={{ fontSize: 14.5 }}>Here&rsquo;s what your people are up to.</p>
             </div>
-            <Link
-              href="/profile"
-              aria-label="Your profile"
-              style={{
-                flexShrink: 0,
-                width: 42,
-                height: 42,
-                borderRadius: '50%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 800,
-                fontSize: 15,
-                color: '#fff',
-                background: me ? avatarColor(me.displayName ?? me.email) : 'var(--v2-ink-dim)',
-                boxShadow: 'var(--v2-shadow-sm)',
-              }}
-            >
-              {me ? initials(me.displayName, me.email) : ''}
+            <Link href="/profile" aria-label="Your profile" style={{ flexShrink: 0, borderRadius: '50%', boxShadow: 'var(--v2-shadow-sm)' }}>
+              {me ? (
+                <PersonAvatar name={me.displayName} email={me.email} photoUrl={me.avatarUrl} size={42} />
+              ) : (
+                <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'var(--v2-ink-dim)' }} />
+              )}
             </Link>
           </div>
 
@@ -245,36 +225,13 @@ export default function HomePage() {
                     style={{ flex: '0 0 auto', width: 76, textAlign: 'center', ['--stagger-i' as string]: i }}
                   >
                     <div style={{ position: 'relative', width: 68, margin: '0 auto 8px' }}>
-                      <div
-                        style={{
-                          width: 68,
-                          height: 68,
-                          borderRadius: '50%',
-                          padding: 3,
-                          // A Crew waiting on you gets its own ring colour (the signature pink,
-                          // not the Crew's usual identity hue) — a genuinely different visual
-                          // state at a glance, not just smaller caption text below.
-                          background: status.urgent ? `conic-gradient(var(--v2-pop), #ff8fb8, var(--v2-pop))` : `conic-gradient(${crewRing(crew.id)}, ${crewRing(crew.id)}cc, ${crewRing(crew.id)})`,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'var(--v2-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 3 }}>
-                          <div className="stack">
-                            {crew.members.slice(0, 3).map((m) => (
-                              <div
-                                key={m.user.id}
-                                style={{
-                                  width: 20, height: 20, borderRadius: '50%', marginLeft: -6, fontSize: 8, fontWeight: 800, color: '#fff',
-                                  background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--v2-surface)',
-                                }}
-                              >
-                                {initials(m.user.displayName, m.user.email)}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
+                      {/* The Crew's own squircle identity — a person is a circle, a Crew is a
+                          squircle (docs/DECISIONS.md#plot-brand-system), so "Your people" reads
+                          as a row of groups at a glance, not a row of people-that-happen-to-be-
+                          bigger. A Crew waiting on your vote gets a ring in the signature pink
+                          around it — a genuinely different visual state, not just caption text. */}
+                      <div style={{ padding: 3, borderRadius: 22, boxShadow: status.urgent ? '0 0 0 2.5px var(--v2-pop)' : 'none' }}>
+                        <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={62} />
                       </div>
                       {status.urgent && (
                         <div className="v2-pop-in" style={{ position: 'absolute', top: -1, right: -1, width: 16, height: 16, borderRadius: '50%', background: 'var(--v2-pop)', border: '2px solid var(--v2-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: '#fff', fontWeight: 800 }}>
@@ -295,12 +252,13 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* NEEDS YOU */}
-          {needsAttention.length > 0 && (
+          {/* NEEDS YOU — the first one is promoted into the hero below when there's no locked
+              plan to show instead; this list is whatever's left. */}
+          {needsAttentionRest.length > 0 && (
             <div style={{ marginBottom: 30 }}>
               <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Needs you</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {needsAttention.map((c) => (
+                {needsAttentionRest.map((c) => (
                   <Link
                     key={c.id}
                     href={`/plans/${c.activePlan!.publicSlug}`}
@@ -330,13 +288,8 @@ export default function HomePage() {
               <div className="v2-card" style={{ padding: '4px 18px' }}>
                 {recentActivity.map((c, i) => (
                   <div key={c.id} style={{ display: 'flex', gap: 12, padding: '13px 0', borderBottom: i < recentActivity.length - 1 ? '1px solid var(--v2-line)' : 'none' }}>
-                    <div
-                      style={{
-                        flexShrink: 0, width: 34, height: 34, borderRadius: '50%', fontSize: 12, fontWeight: 800, color: '#fff',
-                        background: avatarColor(c.latestMessage!.authorName), display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                    >
-                      {c.latestMessage!.authorName.charAt(0).toUpperCase()}
+                    <div style={{ flexShrink: 0 }}>
+                      <PersonAvatar name={c.latestMessage!.authorName} email={c.latestMessage!.authorName} photoUrl={c.latestMessage!.authorAvatarUrl} size={34} />
                     </div>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ fontSize: 13.5 }}>
@@ -383,7 +336,7 @@ export default function HomePage() {
                     borderRadius: 100,
                   }}
                 >
-                  Next up
+                  <IconLock size={11} style={{ marginRight: 4, verticalAlign: -1.5 }} />Next up
                 </span>
               </div>
               <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '24px 26px' }}>
@@ -401,6 +354,38 @@ export default function HomePage() {
                     {nextPlan.crew.name} · {nextPlan.goingCount} going
                   </span>
                 </div>
+              </div>
+            </Link>
+          )}
+
+          {/* Home's hero when nothing is locked yet but a decision is genuinely waiting on you —
+              the adaptive fallback (see heroNeedsAttention above). Deliberately the Crew's own
+              identity-gradient as the backdrop rather than an event photo: nothing is confirmed
+              yet, so there's no "real" image to show — an abstract field for an open question,
+              a real photo once it resolves into NEXT UP. */}
+          {heroNeedsAttention && (
+            <Link
+              href={`/plans/${heroNeedsAttention.activePlan!.publicSlug}`}
+              className="fade-up v2-hoverable"
+              style={{
+                display: 'block', position: 'relative', height: 240, borderRadius: 'var(--v2-r-lg)', overflow: 'hidden',
+                marginBottom: 32, boxShadow: 'var(--v2-shadow-lg)', background: identityGradient(heroNeedsAttention.id, 155),
+              }}
+            >
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(22,19,15,0) 30%, rgba(22,19,15,0.5) 100%)' }} />
+              <div style={{ position: 'absolute', top: 20, left: 22, display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 800, letterSpacing: '-0.01em', color: '#fff', background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(6px)', padding: '7px 14px', borderRadius: 100 }}>
+                <IconGathering size={12} />Still deciding
+              </div>
+              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 24px' }}>
+                <div className="v2-display" style={{ fontSize: 24, lineHeight: 1.1, color: '#fff', marginBottom: 8, maxWidth: '90%' }}>
+                  {heroNeedsAttention.activePlan!.title}
+                </div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'rgba(255,255,255,0.85)', marginBottom: 14 }}>
+                  {heroNeedsAttention.name} · {heroNeedsAttention.activePlan!.inCount}/{heroNeedsAttention.activePlan!.totalMembers} have voted
+                </div>
+                <span style={{ display: 'inline-block', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand-ink)', background: '#fff', padding: '9px 18px', borderRadius: 100 }}>
+                  Cast your vote →
+                </span>
               </div>
             </Link>
           )}
@@ -457,18 +442,8 @@ export default function HomePage() {
                 const status = crewStatusLine(crew);
                 return (
                 <Link key={crew.id} href={`/crews/${crew.id}`} className="v2-rail-crew-row">
-                  <div style={{ position: 'relative', width: 38, height: 38, flexShrink: 0 }}>
-                    <div style={{ width: 38, height: 38, borderRadius: '50%', padding: 2, background: status.urgent ? `conic-gradient(var(--v2-pop), #ff8fb8, var(--v2-pop))` : `conic-gradient(${crewRing(crew.id)}, ${crewRing(crew.id)}cc, ${crewRing(crew.id)})` }}>
-                      <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'var(--v2-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <div className="stack">
-                          {crew.members.slice(0, 2).map((m) => (
-                            <div key={m.user.id} style={{ width: 15, height: 15, borderRadius: '50%', marginLeft: -5, fontSize: 6.5, fontWeight: 800, color: '#fff', background: avatarColor(m.user.displayName ?? m.user.email), display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--v2-surface)' }}>
-                              {initials(m.user.displayName, m.user.email)}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+                  <div style={{ position: 'relative', flexShrink: 0, padding: 2, borderRadius: 13, boxShadow: status.urgent ? '0 0 0 2px var(--v2-pop)' : 'none' }}>
+                    <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={34} />
                     {status.urgent && (
                       <div className="v2-pop-in" style={{ position: 'absolute', top: -2, right: -2, width: 12, height: 12, borderRadius: '50%', background: 'var(--v2-pop)', border: '1.5px solid var(--v2-surface)' }} />
                     )}

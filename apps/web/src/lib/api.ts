@@ -32,10 +32,23 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   return body as T;
 }
 
+/** A real binary upload (avatar/Crew image) — deliberately bypasses apiFetch's JSON handling,
+ * since a multipart body must NOT get a `Content-Type: application/json` header. */
+async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`/api${path}`, { method: 'POST', credentials: 'include', body: form });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(body.message ?? `Upload to ${path} failed`, res.status, body.error);
+  return body as T;
+}
+
 export const api = {
   get: <T>(path: string) => apiFetch<T>(path),
   post: <T>(path: string, data?: unknown) =>
     apiFetch<T>(path, { method: 'POST', body: data ? JSON.stringify(data) : undefined }),
   patch: <T>(path: string, data?: unknown) =>
     apiFetch<T>(path, { method: 'PATCH', body: data ? JSON.stringify(data) : undefined }),
+  delete: <T>(path: string) => apiFetch<T>(path, { method: 'DELETE' }),
+  upload: apiUpload,
 };

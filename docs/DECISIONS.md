@@ -1520,3 +1520,112 @@ same reason the input fix needed it: several buttons set their own `outline: non
 Verified live: tabbing to the New Crew button now shows a clearly visible orange ring in the
 actual screenshot (previously invisible), confirmed via both computed style
 (`outline: rgb(255, 74, 31) solid 2px`) and a real screenshot.
+
+## #plot-brand-system
+
+A second, much larger pass than #plot-iconography, prompted directly by pushback that the app
+still "doesn't look or feel like a brand" despite the earlier icon-system work — fair: that pass
+removed generic emoji, but the product still had no real *identity* underneath. Screenshotted the
+real running app first (Home, Crews list, Crew chat, a Plan card) before touching any code, and
+found the actual root causes:
+
+- **A person and a Crew were visually identical.** Both rendered as the exact same device — a
+  flat single-hue circle with one initial — duplicated across five separate files (Home, Crews,
+  Crew chat, Profile, invite preview each had their own copy-pasted `AVATAR_COLORS` array and
+  hash function). A Crew of 6 people and a single person looked like the same kind of object.
+- **Crews had no image identity at all**, despite `Crew.imageUrl` already existing on the schema
+  — nothing had ever written to it or read it. Every Crew, forever, was a wall of initials.
+- **The "editorial category artwork" from the icon-system pass was itself the exact AI-startup
+  gradient look this brand pass explicitly rules out** — a 3-stop pink→purple→black diagonal
+  blend on every category. The icon watermarks were genuinely purpose-drawn; the gradient
+  underneath them wasn't.
+- **Lock It In's icon was a padlock** — a custom SVG, but conceptually identical to a 🔒 emoji:
+  the single most generic possible symbol for "locked", carrying zero Plot identity for what the
+  brief calls one of the product's two or three signature verbs.
+- **The recommendation badge used IconSpark** — a sparkle/star shape, which reads exactly as the
+  "AI magic ✨" cliché the brief names directly, despite being a custom icon rather than an emoji.
+- **Crew creation was literally "name field → submit"** — no identity step at all, the exact
+  generic pattern quoted back at us.
+
+### What was built
+
+**Identity-colour system** (`lib/identity.ts`): 8 curated *tonal* duotone pairs — each a single
+hue moving from a near-black shade to a mid-tone (rust, plum, ink-teal, ochre, berry, moss,
+slate-blue, clay), not a multi-hue blend. Deliberately avoids the "neon gradient blob" look by
+being pigment, not glow. Deterministic (same name/id → same pair) so identity is stable across
+the whole app and across sessions.
+
+**Two shapes, one grammar** (`components/Avatar.tsx`): a **person is a circle** (`PersonAvatar`),
+a **Crew is a squircle** (`CrewMark`, ~28% corner radius) — the same distinction maps use for
+pins vs. areas. Once learned, you can tell a person from a group at a glance without reading
+anything. Both fall back to the identity gradient (never a bare grey circle) and accept a real
+photo once uploaded. `CrewMark`'s fallback carries a small "gathering" motif — three converging
+dots, the same family as the new Lock It In mark — so even a default Crew tile carries Plot's own
+geometry, not an empty gradient swatch.
+
+**Real media upload** (`lib/mediaStorage.ts`, `components/MediaUploadButton.tsx`): choose,
+preview, upload, replace, remove, with real validation (JPEG/PNG/WebP, 6MB cap) and failure
+recovery — not base64 in the database. `User.avatarUrl` (new column) and `Crew.imageUrl`
+(existing, previously unused) are now real, backed by `POST /users/me/avatar` and
+`POST /crews/:id/image` (gated by the same `isCrewMember` check every other Crew-mutating action
+already uses — no new permission model invented). Storage is local disk, served statically at
+`API_PUBLIC_URL/media/*` — a genuine, honest pilot-scale choice (no S3/R2 credentials exist in
+this environment) behind a real abstraction: every call site goes through `saveUpload`/
+`deleteUpload`, so swapping in S3 later is a one-file change, not a call-site hunt. Wired into
+Profile (avatar) and the Crew info sheet (Crew image) — see docs/DECISIONS.md#pending for
+Crew-creation's own "give it a look" step, not yet done.
+
+**Signature marks, not another icon-pack entry** (`components/icons.tsx`): `IconLock` was
+completely redrawn — a padlock reads exactly like the 🔒 emoji it was standing in for. The new
+mark is three loose points (people/options around an idea) resolved into one solid point with
+short converging rays, as if they'd just landed there — the settled counterpart to `IconSpark`'s
+open four-point outline. `IconGathering` (the same three points, still loose) replaced `IconSpark`
+specifically on the automatic-recommendation badge, whose copy also changed from bare "Plot" to
+"PLOT FOUND THIS" — a sparkle reads as AI magic; three points converging reads as Plot noticing a
+pattern in what the Crew already likes, which is what it actually is.
+
+**Tonal category artwork** (`lib/v2Art.ts`): every category's fallback gradient rebuilt from a
+3-stop pink→purple→black diagonal to the same single-hue tonal language as the identity-colour
+system — distinct pairing per category (comedy ≠ live music ≠ sport), still with the purpose-drawn
+icon watermark, just no longer the neon-blob look.
+
+**EventCard now shows social presence directly on the object**: IN voters' avatars overlay the
+image itself (bottom-left, up to 4, real PersonAvatars) rather than living only in a text line
+below — "people are real" energy borrowed from Partiful/Geneva's principle, not their palette. A
+locked plan gets a real visual frame (a subtle inset ring in the success colour) in addition to
+the badge, and the badge itself now uses the new `IconLock` mark instead of a bare `✓`.
+
+**Home adapts** instead of only ever showing a locked plan and leaving the hero slot empty for
+every Crew still deciding: a genuinely unresolved decision (a vote still owed) is promoted into
+the same large hero treatment when there's no locked plan yet, with its own "Still deciding"
+badge and the Crew's own identity gradient as an abstract backdrop (nothing is confirmed yet, so
+there's no real photo to show — a deliberate metaphor: uncertain = abstract colour, confirmed =
+real photo, echoing the brief's own "a loose idea becoming a definite destination").
+
+### Two real bugs caught by this pass's own screenshots, not reported
+
+1. **A PII leak**: the first version of the invite-preview member list included each member's
+   raw email address in a deliberately public, no-auth endpoint. Caught by a pre-existing test
+   (`social-v2.test.ts`) that specifically asserts no `@` appears in that response — fixed by
+   returning only a resolved first name and avatar, never the email, before this ever shipped.
+2. **A leftover emoji in generated chat text, not a rendered icon**: `lockPlan`'s system message
+   literally stored `🔒 "..." was locked in` as its body — invisible in most cases because that
+   exact string usually gets pattern-matched and swapped for a rich EventCard, but a real
+   screenshot of the locked-plan chat bubble caught it rendering as literal text. The same sweep
+   found `📍` and `✨` baked into two other system-message templates (`services/plan.ts`) —
+   emoji the earlier icon-system audit missed because it only scanned rendered React icons, not
+   backend-generated message strings. All three removed at the source; the two client-side
+   regexes that pattern-match these exact strings (`crews/[id]/page.tsx` and
+   `lib/messagePreview.ts`) updated in lockstep so the EventCard substitution still fires.
+
+Verified: 68/68 backend tests passing (including the PII-leak test, now genuinely fixed rather
+than weakened), `tsc`/`eslint` clean, and a full live signup → Crew → Crew image picker → manual
+plan → vote → Lock It In → Home flow screenshotted end to end — before/after comparison shows a
+real Crew squircle with its own identity gradient and gathering-dot watermark (replacing two
+identical green initial-circles), real `PersonAvatar`s throughout chat/Home/the info sheet, the
+new `IconLock` mark on both the Lock It In button and the locked-state badge, the tonal (not
+neon) category gradient on the event card, and the adaptive Home hero. This is task #51 of a
+larger brand pass (docs/DECISIONS.md forthcoming for the remaining propagation, motion language,
+and final handover) — the four anchor screens the brief named (Home, Crew/chat, Recommendation,
+Locked Plan) are covered; Crews list, Crew creation's "give it a look" step, invite preview,
+onboarding's avatar step, Explore markers, and Plans have not yet had the same treatment.

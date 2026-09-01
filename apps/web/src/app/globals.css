@@ -16,6 +16,20 @@ body {
   color: #fff6f0;
 }
 
+/* A real upload in progress (avatar/Crew image) — not a generic spinner library, a ring in the
+   brand accent that respects reduced-motion by just sitting still (still legible as "busy" via
+   the dimmed content underneath it, handled by the caller). */
+@keyframes v2Spin { to { transform: rotate(360deg); } }
+.v2-spinner {
+  border-radius: 50%;
+  border: 2.5px solid rgba(255,255,255,0.35);
+  border-top-color: #fff;
+  animation: v2Spin 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v2-spinner { animation: none; }
+}
+
 @keyframes fadeUp {
   from {
     opacity: 0;
@@ -232,6 +246,12 @@ body {
   100% { transform: scale(1); }
 }
 .v2-confirm-transition { animation: v2Confirm 0.4s cubic-bezier(.2,.8,.2,1) both; }
+
+/* The visible difference between "proposed" and "locked" on an EventCard's own artwork — an
+   inset frame in the success colour, not just a badge floating on top. Small, restrained (this
+   is the "several great moments, not dozens" mandate — one quiet signal on every locked card,
+   not a loud one). */
+.v2-event-art-locked { box-shadow: inset 0 0 0 2.5px rgba(52,211,153,0.55); }
 
 @media (prefers-reduced-motion: reduce) {
   .v2-pop-in, .v2-tap-feedback:active, .v2-settle, .v2-arrive, .v2-confirm-transition {

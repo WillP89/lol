@@ -53,7 +53,7 @@ const messageAuthorSelect = {
   authorId: true,
   body: true,
   createdAt: true,
-  author: { select: { id: true, displayName: true, email: true } },
+  author: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
   reactions: { select: { emoji: true, userId: true } },
   poll: {
     select: {

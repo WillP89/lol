@@ -5,6 +5,8 @@ import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getC
 import { sendCrewMessage, listCrewMessages, toggleReaction, createPoll, votePoll, ChatError } from '../services/chat';
 import { track } from '../services/analytics';
 import { getOrCreateSettings, updateSettings, respondToRecommendation, RecommendationError } from '../services/crewRecommendations';
+import { saveUpload, deleteUpload, MediaValidationError } from '../lib/mediaStorage';
+import { prisma } from '../lib/prisma';
 
 const CreateCrewSchema = z.object({ name: z.string().min(1).max(60), defaultCity: z.string().optional() });
 const JoinCrewSchema = z.object({ inviteCode: z.string().min(1) });
@@ -31,6 +33,40 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     const crew = await getCrewDetail(id, request.user.id);
     if (!crew) return reply.code(404).send({ error: 'not_found' });
     return reply.send({ crew });
+  });
+
+  // Real Crew identity — the schema already had `imageUrl` (unused until now, always null),
+  // and every Crew fell back to the same "initials in a coloured circle" every person also
+  // used, with zero way to tell a group from a person at a glance. Gated the same way every
+  // other Crew-mutating action is (isCrewMember, not an owner-only check) — consistent with
+  // this codebase's existing pilot-scale permission model, not a new one invented for this.
+  app.post('/crews/:id/image', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+    const file = await request.file();
+    if (!file) return reply.code(400).send({ error: 'invalid_request', message: 'No image provided.' });
+    const buffer = await file.toBuffer();
+    try {
+      const imageUrl = await saveUpload({ buffer, mimeType: file.mimetype, kind: 'crew' });
+      const previous = await prisma.crew.findUnique({ where: { id }, select: { imageUrl: true } });
+      await prisma.crew.update({ where: { id }, data: { imageUrl } });
+      await deleteUpload(previous?.imageUrl);
+      return reply.send({ imageUrl });
+    } catch (err) {
+      if (err instanceof MediaValidationError) return reply.code(400).send({ error: 'invalid_request', message: err.message });
+      throw err;
+    }
+  });
+
+  app.delete('/crews/:id/image', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+    const previous = await prisma.crew.findUnique({ where: { id }, select: { imageUrl: true } });
+    await prisma.crew.update({ where: { id }, data: { imageUrl: null } });
+    await deleteUpload(previous?.imageUrl);
+    return reply.send({ ok: true });
   });
 
   // Deliberately public — no requireUser — so tapping an invite link shows who/what you're
