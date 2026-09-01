@@ -89,6 +89,25 @@ function greeting(): string {
 }
 
 /**
+ * The header's second line — real, live signal instead of a static "here's what your people are
+ * up to" that never changes no matter what's actually happening. Same priority order as the
+ * hero below it (a locked plan beats a vote pending beats general activity), so the very first
+ * thing you read on Home is honest about what's true right now, not decoration.
+ */
+function pulseLine(crews: CrewSummary[], nextPlan: UpcomingPlan | null, needsCount: number): string {
+  if (nextPlan) {
+    const when = nextPlan.startsAt ? new Date(nextPlan.startsAt) : null;
+    const isToday = when && when.toDateString() === new Date().toDateString();
+    return isToday ? `Tonight: ${nextPlan.title} with ${nextPlan.crew.name}.` : `Next up: ${nextPlan.title} with ${nextPlan.crew.name}.`;
+  }
+  if (needsCount > 0) {
+    return needsCount === 1 ? 'One of your Crews needs your vote.' : `${needsCount} of your Crews need your vote.`;
+  }
+  if (crews.length > 0) return "Here's what your people are up to.";
+  return 'Start a Crew and Plot will find what you should do together.';
+}
+
+/**
  * Home — crew/social-first by design: people (Your people), what needs a response (Needs you)
  * and what your Crews are actually saying (In the groups) all come before anything you might do
  * next. "Next up" (a plan already locked) and "For your Crews" (a small, restrained discovery
@@ -139,6 +158,7 @@ export default function HomePage() {
   const nextPlan = upcoming?.find((p) => p.startsAt && new Date(p.startsAt).getTime() > Date.now()) ?? upcoming?.[0] ?? null;
 
   const needsAttention = useMemo(() => (crews ?? []).filter((c) => c.activePlan && !c.activePlan.iVoted), [crews]);
+  const pulse = pulseLine(crews ?? [], nextPlan, needsAttention.length);
   // Home's hero adapts to whichever real state is strongest, instead of only ever showing a
   // locked plan and leaving the dominant slot empty for every Crew still deciding — the exact
   // "generic dashboard, not an adaptive social home" gap the brand pass called out. A locked
@@ -173,7 +193,8 @@ export default function HomePage() {
               <h1 className="v2-display" style={{ fontSize: 38, marginBottom: 6 }}>
                 {greeting()}{firstName && <><br /><span style={{ fontStyle: 'italic', color: 'var(--v2-pop)' }}>{firstName}</span></>}
               </h1>
-              <p className="v2-muted" style={{ fontSize: 14.5 }}>Here&rsquo;s what your people are up to.</p>
+              {/* Real, live signal — see pulseLine above — not a caption that never changes. */}
+              <p key={pulse} className="v2-muted v2-pop-in" style={{ fontSize: 14.5, maxWidth: 260 }}>{pulse}</p>
             </div>
             <Link href="/profile" aria-label="Your profile" style={{ flexShrink: 0, borderRadius: '50%', boxShadow: 'var(--v2-shadow-sm)' }}>
               {me ? (
