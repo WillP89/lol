@@ -8,6 +8,12 @@ export interface UkPlaceResult {
   region: string;
   lat: number;
   lng: number;
+  // 'place' = a gazetteer town/city; 'postcode' = a real postcode/outward code resolved via
+  // postcodes.io (see apps/api/src/lib/postcodes.ts). Optional/omittable — onboarding's
+  // "Where are you based?" screen (also using this component) only ever deals in named places
+  // today, so it never sets this; Explore's location picker is the one place that reads it,
+  // to decide whether a selection should search by exact city name or by radius around a point.
+  kind?: 'place' | 'postcode';
 }
 
 /**
@@ -88,7 +94,9 @@ export function LocationSearch({
                 style={{ display: 'block', width: '100%', textAlign: 'left', padding: '12px 16px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
               >
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{r.name}</div>
-                <div className="v2-muted" style={{ fontSize: 12 }}>{r.region}</div>
+                <div className="v2-muted" style={{ fontSize: 12 }}>
+                  {r.kind === 'postcode' ? `Postcode · ${r.region}` : r.region}
+                </div>
               </button>
             ))
           ) : (

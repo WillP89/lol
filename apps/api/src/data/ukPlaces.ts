@@ -9,6 +9,8 @@
  * Deliberately NOT exhaustive — every UK postcode area is out of scope for a beta. Covers major
  * cities plus the Staffordshire towns this milestone's actual test group is based around.
  */
+import { haversineKm } from '../lib/geo';
+
 export interface UkPlace {
   name: string;
   region: string;
@@ -98,4 +100,34 @@ export function searchUkPlaces(query: string, limit = 8): UkPlace[] {
   const starts = UK_PLACES.filter((p) => p.name.toLowerCase().startsWith(q));
   const contains = UK_PLACES.filter((p) => !p.name.toLowerCase().startsWith(q) && p.name.toLowerCase().includes(q));
   return [...starts, ...contains].slice(0, limit);
+}
+
+/**
+ * The single closest gazetteer town/city to an arbitrary point — used to anchor a radius search
+ * centred somewhere that isn't itself one of our named places (a postcode, in particular:
+ * provider inventory is synced per named city — see mock/ticketingProvider.ts's CITY_VENUES and
+ * providers/live/openStreetMap.ts's UK_PLACES lookup — so a raw postcode centre needs at least
+ * one real place to actually sync before there's anything to search). UK_PLACES is never empty,
+ * so this always returns a real place.
+ */
+export function nearestUkPlace(lat: number, lng: number): UkPlace {
+  return UK_PLACES.reduce((closest, place) => (haversineKm(lat, lng, place.lat, place.lng) < haversineKm(lat, lng, closest.lat, closest.lng) ? place : closest));
+}
+
+/**
+ * Every gazetteer place within `radiusKm` of a point, nearest first, capped to `maxCount` —
+ * Explore's "extend the map radius" search (services/explore.ts#listExploreExperiencesByRadius)
+ * syncs and queries exactly this set of real cities/towns, never a fabricated wider catalogue.
+ * The cap exists because a large radius in a densely-covered region (the Midlands, in
+ * particular) can otherwise pull in a dozen-plus places, each needing its own provider sync —
+ * bounding it keeps a radius search's worst-case latency sane. Always includes the nearest
+ * place even if it technically falls just outside `radiusKm` (rounding, or a very tight radius
+ * around a point that isn't itself a named place), so a radius search never comes back with
+ * literally nothing to sync.
+ */
+export function placesWithinRadiusKm(lat: number, lng: number, radiusKm: number, maxCount = 10): UkPlace[] {
+  const withDistance = UK_PLACES.map((place) => ({ place, distanceKm: haversineKm(lat, lng, place.lat, place.lng) })).sort((a, b) => a.distanceKm - b.distanceKm);
+  const within = withDistance.filter((p) => p.distanceKm <= radiusKm);
+  const result = within.length > 0 ? within : withDistance.slice(0, 1); // guarantee at least the nearest place
+  return result.slice(0, maxCount).map((p) => p.place);
 }

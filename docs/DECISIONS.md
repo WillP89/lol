@@ -1883,3 +1883,76 @@ be verified from here: any of these three new sources actually returning real da
 internet — this environment's egress is allowlisted to `api.github.com` only (confirmed via
 direct curl to all three new hosts, and separately via the `WebFetch` tool). See
 `docs/providers/food-and-places.md`'s closing section for exactly what to check once deployed.
+
+## #inventory-sync-once-bug-and-explore-radius
+
+Two live, user-reported bugs fixed in the same pass, plus the Explore radius/postcode search
+feature that came out of the same investigation.
+
+**The bug**: a real user reported stock images "across the board" and a suspiciously small event
+catalogue for London — direct contradictions of the #real-content-pass work above, which was
+already live. Root cause: `services/inventorySync.ts`'s `ensureInventory(city)` synced a city's
+inventory **exactly once, ever** (`if (Experience count === 0) syncAllProviders(city)`). London
+had already been seeded, weeks earlier, before OpenStreetMap/image-enrichment/any real
+Ticketmaster key existed for this app — so none of that later work was ever going to reach it.
+Every future credential or provider improvement would have hit the same wall for any
+already-seeded city, forever.
+
+**The fix**: replaced the one-time guard with the exact same DB-backed periodic-staleness pattern
+already proven for the Crew recommendation sweep (`crewRecommendations.ts`'s
+`claimSweepIfDue`/`runSweepIfDue`) — a per-city `SchedulerState` row (`inventory_sync:<city>`),
+claimed via a single atomic conditional `UPDATE`, due once an hour. Added
+`retireSupersededMockListings(city)` alongside it: once a real provider supersedes a mock one
+(registry.ts drops the mock the moment a real replacement is registered), the mock's now-stale
+`Experience`/`ProviderListing` rows for that city are deleted rather than sitting alongside real
+listings forever with no way for a user to tell which is which.
+
+**Two real concurrency bugs surfaced and fixed while getting the existing test suite green
+again** (both caught live, not just reasoned about — see the file's own comments for the full
+account): the claim's `upsert`→`updateMany` isn't safe against two near-simultaneous callers for
+the same city (a Crew's own background recommendation check firing right after creation, then a
+member's own "Find us something" moments later) — both can hit the `upsert`'s create branch
+before either commits, tripping Postgres's unique constraint on `jobName`; and fixing that
+crash exposed a deeper gap where the caller that lost the claim used to return immediately,
+meaning it could read Experience data before the winning caller's sync had written a single row.
+Fixed with a caught `P2002` treated as "someone else just created the row" plus a per-city
+in-process single-flight promise so every concurrent caller in the same process genuinely awaits
+the same sync. Test env keeps the original "sync once, only if this city has nothing yet" rule
+(several integration tests hand-seed a small, controlled catalogue for a real city the mock
+providers also cover — an unconditional resync ran mock data over those fixtures) —
+`config.NODE_ENV === 'test'`, the same convention used throughout this codebase.
+
+**Explore radius/postcode search** ("the discover page needs more flexibility in terms of
+search, you should be able to extend the map radius and pick areas, even a postcode" — the same
+message this whole pass responds to): provider inventory is synced per named gazetteer city
+(mock and live adapters alike), so a real radius search means finding every real place in
+`data/ukPlaces.ts` within the requested radius (`placesWithinRadiusKm`, nearest-first, capped),
+syncing each one, then filtering every resulting Experience down to ones whose actual venue
+coordinates fall inside the radius via real Haversine distance (`lib/geo.ts`, extracted from a
+private copy that used to live only in `match.ts`) — never a fabricated "wider" result set.
+Widening the radius genuinely searches more real UK towns/cities, and the UI shows exactly which
+ones ("Also searching Wolverhampton (20km), Tamworth (21km), …") rather than hiding it.
+
+Postcode support is real, not a curated guess: `lib/postcodes.ts` calls postcodes.io (free, no
+API key, built on ONS/Ordnance Survey open data, widely used in production elsewhere) for both
+full postcodes and bare outward codes (`/postcodes/<postcode>`, `/outcodes/<outcode>`), merged
+into `/locations/search`'s existing gazetteer results. A postcode has no matching `venue.city`,
+so picking one always resolves to a radius search centred on its real coordinates, never an
+exact-city match. `/explore/experiences` gained optional `lat`/`lng`/`radiusKm` query params
+(clamped 1–120km) alongside the existing `city` param — omitting them preserves the exact
+original behaviour and response shape (`radius: null`), so every existing caller/test needed
+zero changes.
+
+**Verified**: 140/140 backend tests (24 new — geo math, the UK-places radius/nearest helpers
+against a real brute-force distance check, postcode-shape detection and postcodes.io response
+parsing/caching/failure-handling against a mocked fetch, and a full `/explore/experiences`
+integration test proving a wider radius genuinely searches more real cities and every returned
+result passes a real distance check), `tsc`/`eslint --max-warnings=0` clean on every touched
+file (both apps), both `next build` and the API's own `tsc` production build clean. A live
+dev-server + Playwright smoke test confirmed the actual UI: radius chips render and switch the
+header/results correctly, the "Also searching…" line shows real neighbouring towns with real
+distances, and typing a postcode into the location search correctly attempts a real postcodes.io
+call (confirmed in the API's own logs) that fails gracefully with this sandbox's now-familiar
+egress restriction (403, same as every other live provider touched this session) rather than
+crashing — the exact same "write against the documented real contract, verify on Render" posture
+already applied to Ticketmaster/Wikipedia/Overpass/TheSportsDB.

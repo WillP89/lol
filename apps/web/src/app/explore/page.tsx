@@ -130,23 +130,57 @@ export default function ExplorePage() {
   const [cityCenter, setCityCenter] = useState<[number, number]>(UK_FALLBACK_CENTER);
   const [pickingCity, setPickingCity] = useState(false);
 
+  // Radius search — "extend the map radius and pick areas, even a postcode". `radiusKm === null`
+  // is the original exact-city mode (unchanged default behaviour); a number switches to a real
+  // multi-city, distance-checked search (services/explore.ts#listExploreExperiencesByRadius).
+  // `pickedCenter` is set ONLY by explicit user actions (a postcode pick, or clicking a radius
+  // chip) — never by the fetch response — so it can safely sit in the effect's dependency array
+  // below without ever causing a refetch loop.
+  const [radiusKm, setRadiusKm] = useState<number | null>(null);
+  const [pickedCenter, setPickedCenter] = useState<{ lat: number; lng: number } | null>(null);
+  const [areaLabel, setAreaLabel] = useState<string | null>(null);
+  const [placesSearched, setPlacesSearched] = useState<{ name: string; distanceKm: number }[] | null>(null);
+
+  const usingRadius = radiusKm !== null && pickedCenter !== null;
+
   useEffect(() => {
+    const url = usingRadius
+      ? `/explore/experiences?lat=${pickedCenter!.lat}&lng=${pickedCenter!.lng}&radiusKm=${radiusKm}`
+      : `/explore/experiences${city ? `?city=${encodeURIComponent(city)}` : ''}`;
+
     api
-      .get<{ experiences: ExploreExperience[]; dataSource: 'live' | 'mock'; city: string; cityLat: number; cityLng: number }>(
-        `/explore/experiences${city ? `?city=${encodeURIComponent(city)}` : ''}`,
-      )
+      .get<{
+        experiences: ExploreExperience[];
+        dataSource: 'live' | 'mock';
+        city: string | null;
+        cityLat: number;
+        cityLng: number;
+        radius: { centerLat: number; centerLng: number; radiusKm: number; placesSearched: { name: string; distanceKm: number }[] } | null;
+      }>(url)
       .then((res) => {
         setExperiences(res.experiences);
         setDataSource(res.dataSource);
-        setCity(res.city);
         setCityCenter([res.cityLat, res.cityLng]);
+        setPlacesSearched(res.radius?.placesSearched ?? null);
+        // Exact-city mode is still the source of truth for `city`/`areaLabel` (the resolved home
+        // city on first load, in particular) — a radius search's own picked label is set by the
+        // action that started it, not by this response, since the server has no single "city"
+        // to hand back for an arbitrary point.
+        if (!usingRadius) {
+          setCity(res.city);
+          setAreaLabel(res.city);
+        }
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Could not load Explore.'));
     api
       .get<{ crews: CrewSummary[] }>('/crews')
       .then((res) => setCrews(res.crews))
       .catch(() => {});
-  }, [city]);
+    // `usingRadius` is derived from `radiusKm`/`pickedCenter`, already listed below — including
+    // it too would be redundant, not incorrect.
+  }, [city, radiusKm, pickedCenter]);
+
+  const RADIUS_OPTIONS_KM = [10, 25, 50, 100];
 
   const searched = useMemo(() => {
     if (!experiences) return [];
@@ -248,7 +282,9 @@ export default function ExplorePage() {
   const discovery = (
     <div>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
-        <h1 className="v2-display" style={{ fontSize: 32 }}>Discover {city ?? ''}</h1>
+        <h1 className="v2-display" style={{ fontSize: 32 }}>
+          Discover {usingRadius ? `within ${radiusKm}km of ${areaLabel ?? ''}` : (city ?? '')}
+        </h1>
         <button
           onClick={() => setPickingCity(true)}
           style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, marginTop: 8, border: 'none', background: 'var(--v2-bg-deep)', borderRadius: 100, padding: '7px 14px', fontSize: 12.5, fontWeight: 700, color: 'var(--v2-ink-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}
@@ -256,18 +292,68 @@ export default function ExplorePage() {
           <IconPlace size={13} />Change
         </button>
       </div>
-      <p className="v2-muted" style={{ fontSize: 14.5, marginBottom: 20 }}>Real things happening near you, picked for tonight.</p>
+      <p className="v2-muted" style={{ fontSize: 14.5, marginBottom: 14 }}>Real things happening near you, picked for tonight.</p>
       {pickingCity && (
         <div className="fade-up" style={{ marginBottom: 18 }}>
           <LocationSearch
-            placeholder="Search a UK town or city…"
+            placeholder="Search a UK town or city, or a postcode…"
             onSelect={(place) => {
-              setCity(place.name);
-              setCityCenter([place.lat, place.lng]);
               setPickingCity(false);
+              setAreaLabel(place.name);
+              if (place.kind === 'postcode') {
+                // A postcode has no matching venue.city — it can only ever work as a radius
+                // centre, not an exact-city match, so picking one forces radius mode on.
+                setCity(null);
+                setPickedCenter({ lat: place.lat, lng: place.lng });
+                setRadiusKm((current) => current ?? 15);
+              } else if (radiusKm !== null) {
+                // Already searching by radius — re-centre the same radius on the newly picked city.
+                setPickedCenter({ lat: place.lat, lng: place.lng });
+                setCity(place.name);
+              } else {
+                setCity(place.name);
+                setCityCenter([place.lat, place.lng]); // immediate feedback before the fetch resolves
+              }
             }}
           />
         </div>
+      )}
+      {/* Radius control — "extend the map radius", the directive this exists for. "This area"
+          only appears once a real named city is resolved (a postcode alone has no exact-city
+          equivalent to fall back to). Widening genuinely re-queries a wider real set of gazetteer
+          places (see services/explore.ts#listExploreExperiencesByRadius) — never a fabricated
+          "more results" — which is exactly why `placesSearched` below is shown, not hidden. */}
+      <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: placesSearched && placesSearched.length > 1 ? 6 : 18 }}>
+        {city !== null && (
+          <button
+            onClick={() => { setRadiusKm(null); setPickedCenter(null); }}
+            style={{
+              border: 'none', borderRadius: 100, padding: '6px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              background: radiusKm === null ? 'var(--v2-ink)' : 'var(--v2-bg-deep)',
+              color: radiusKm === null ? 'var(--v2-surface)' : 'var(--v2-ink-muted)',
+            }}
+          >
+            This area
+          </button>
+        )}
+        {RADIUS_OPTIONS_KM.map((km) => (
+          <button
+            key={km}
+            onClick={() => { setPickedCenter({ lat: cityCenter[0], lng: cityCenter[1] }); setRadiusKm(km); }}
+            style={{
+              border: 'none', borderRadius: 100, padding: '6px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              background: radiusKm === km ? 'var(--v2-ink)' : 'var(--v2-bg-deep)',
+              color: radiusKm === km ? 'var(--v2-surface)' : 'var(--v2-ink-muted)',
+            }}
+          >
+            {km}km
+          </button>
+        ))}
+      </div>
+      {usingRadius && placesSearched && placesSearched.length > 1 && (
+        <p className="v2-muted" style={{ fontSize: 12, marginBottom: 18 }}>
+          Also searching {placesSearched.slice(1).map((p) => `${p.name} (${p.distanceKm}km)`).join(', ')}
+        </p>
       )}
       <div className="v2-search" style={{ marginBottom: 22 }}>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--v2-ink-dim)', flexShrink: 0 }}>

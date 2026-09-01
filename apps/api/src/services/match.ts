@@ -5,6 +5,7 @@ import { getMemberAvailability } from './availability';
 import { ensureInventory } from './inventorySync';
 import { dedupeNearDuplicates } from './entityResolution';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
+import { haversineMiles } from '../lib/geo';
 import { track } from './analytics';
 import { sendExperienceToCrew } from './plan';
 import type { Experience, TasteProfile, Plan } from '@prisma/client';
@@ -50,16 +51,6 @@ const RESULT_COUNT = 3;
 // member has a real TasteProfile.travelRadiusMeters yet, so a brand-new Crew still gets a
 // sane "worth travelling for" distance rather than an unbounded or zero radius.
 const DEFAULT_RADIUS_METERS = 24000;
-
-/** Great-circle distance in miles — UK convention (brief: "miles not raw coordinates"). */
-function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 3958.8; // Earth radius, miles
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
 
 async function resolveCrewCity(crewId: string, fallbackUserId?: string): Promise<string> {
   const [crew, requester] = await Promise.all([
