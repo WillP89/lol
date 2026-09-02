@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { BottomSheet } from '@/components/BottomSheet';
 import { identityPair } from '@/lib/identity';
 
@@ -30,15 +30,22 @@ interface TasteTerritory {
 export function CrewTuneSheet({
   open,
   onClose,
+  crewId,
   interestPreferences,
   onToggle,
+  onAiApplied,
   crewTasteInterestIds = [],
   saving = false,
 }: {
   open: boolean;
   onClose: () => void;
+  crewId: string;
   interestPreferences: string[];
   onToggle: (interestId: string) => void;
+  /** Called with the full, already-updated interestPreferences array once an AI setup call
+   *  lands — the parent's own recSettings state is the single source of truth, this sheet never
+   *  keeps a second copy of it. */
+  onAiApplied: (interestPreferences: string[]) => void;
   /** Interest ids at least one Crew member has a real positive affinity for (from
    *  computeCrewTasteSummary) — surfaced as a highlight outline so picking something the Crew is
    *  already, genuinely into is easy to spot. A hint only; never gates what can be picked. */
@@ -49,9 +56,22 @@ export function CrewTuneSheet({
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  // "Describe this Crew and Plot sets up its preferences for you" — same fast-path idea as
+  // TuneMyPlotSheet's own AI setup, one level up: adds to (never replaces) interestPreferences,
+  // and the result is reviewable/removable via the same tap-to-toggle chips below.
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiText, setAiText] = useState('');
+  const [aiSubmitting, setAiSubmitting] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiAppliedCount, setAiAppliedCount] = useState<number | null>(null);
+
   useEffect(() => {
     if (!open) return;
     api.get<{ territories: TasteTerritory[] }>('/taste/taxonomy').then((res) => setTerritories(res.territories)).catch(() => setTerritories([]));
+    setAiOpen(false);
+    setAiText('');
+    setAiError(null);
+    setAiAppliedCount(null);
     setQuery('');
     setExpanded(null);
   }, [open]);
@@ -64,6 +84,32 @@ export function CrewTuneSheet({
     if (q.length < 2) return [];
     return allInterests.filter((i) => i.label.toLowerCase().includes(q) || i.synonyms.some((s) => s.includes(q))).slice(0, 14);
   }, [allInterests, query]);
+
+  async function submitAiSetup() {
+    const text = aiText.trim();
+    if (!text || aiSubmitting) return;
+    setAiSubmitting(true);
+    setAiError(null);
+    try {
+      const res = await api.post<{ settings: { interestPreferences: string[] }; applied: { interestIds: string[] } }>(
+        `/crews/${crewId}/taste/ai-setup`,
+        { description: text },
+      );
+      onAiApplied(res.settings.interestPreferences);
+      setAiAppliedCount(res.applied.interestIds.length);
+      setAiText('');
+    } catch (err) {
+      setAiError(
+        err instanceof ApiError
+          ? err.status === 503
+            ? "Plot's AI setup isn't switched on yet — pick from the list below instead."
+            : err.message
+          : 'Could not set that up — try again, or pick from the list below.',
+      );
+    } finally {
+      setAiSubmitting(false);
+    }
+  }
 
   const isActive = (id: string) => interestPreferences.includes(id);
 
@@ -90,6 +136,68 @@ export function CrewTuneSheet({
           Pick anything this Crew is specifically into — boosts those on top of everyone&rsquo;s own taste, it doesn&rsquo;t
           replace it. Interests outlined in colour are ones your Crew already leans towards.
         </p>
+
+        {/* THE FAST PATH — "describe this Crew and Plot sets this up for you" (services/
+            aiTasteSetup.ts). Collapsed by default; whatever it selects lands in the exact same
+            interestPreferences state a manual tap would, reviewable/removable immediately after. */}
+        <div style={{ marginBottom: 16 }}>
+          {!aiOpen ? (
+            <button
+              type="button"
+              onClick={() => setAiOpen(true)}
+              className="v2-tap-feedback"
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 9, border: '1.5px dashed var(--v2-brand)', borderRadius: 14,
+                padding: '11px 14px', background: 'rgba(230,80,60,0.06)', cursor: 'pointer', textAlign: 'left',
+              }}
+            >
+              <span style={{ fontSize: 17 }}>✨</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--v2-brand)' }}>Describe this Crew — let Plot set this up</span>
+            </button>
+          ) : (
+            <div style={{ border: '1.5px solid var(--v2-brand)', borderRadius: 14, padding: 12, background: 'rgba(230,80,60,0.06)' }}>
+              <textarea
+                autoFocus
+                value={aiText}
+                onChange={(e) => setAiText(e.target.value)}
+                placeholder="e.g. we're five friends who love UK garage nights, trying new restaurants, and football on a Saturday"
+                rows={3}
+                style={{
+                  width: '100%', padding: '10px 12px', borderRadius: 10, border: 'none', outline: 'none', resize: 'vertical',
+                  background: 'var(--v2-surface)', fontSize: 13.5, fontFamily: 'inherit', color: 'var(--v2-ink)', marginBottom: 8,
+                }}
+              />
+              {aiError && <p style={{ color: 'var(--v2-error)', fontSize: 12, marginBottom: 8 }}>{aiError}</p>}
+              {aiAppliedCount !== null && !aiError && (
+                <p style={{ color: 'var(--v2-brand)', fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
+                  {aiAppliedCount > 0
+                    ? `Added ${aiAppliedCount} interest${aiAppliedCount === 1 ? '' : 's'} based on that — have a look below, tap to adjust anything.`
+                    : "Nothing specific enough in there to pick out — try naming an artist, cuisine, team, or genre."}
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={submitAiSetup}
+                  disabled={aiSubmitting || !aiText.trim() || saving}
+                  className="v2-btn v2-btn-brand v2-tap-feedback"
+                  style={{ flex: 1, padding: '10px 0', fontSize: 13 }}
+                >
+                  {aiSubmitting ? 'Setting up…' : 'Set it up'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAiOpen(false); setAiError(null); }}
+                  disabled={aiSubmitting}
+                  className="v2-btn v2-btn-ghost v2-tap-feedback"
+                  style={{ padding: '10px 16px', fontSize: 13 }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         <div style={{ position: 'relative', marginBottom: 10 }}>
           <input

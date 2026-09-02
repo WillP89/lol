@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { BottomSheet } from '@/components/BottomSheet';
 import { identityPair } from '@/lib/identity';
 
@@ -60,6 +60,16 @@ export function TuneMyPlotSheet({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
+  // "Describe yourself and Plot sets up your taste for you" — the fast path onto exactly this
+  // same picker below (see services/aiTasteSetup.ts): whatever it selects lands in `local`/
+  // `signals` below through the normal state, so it's reviewable and editable by hand
+  // immediately afterwards, never a separate black box.
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiText, setAiText] = useState('');
+  const [aiSubmitting, setAiSubmitting] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiAppliedCount, setAiAppliedCount] = useState<number | null>(null);
+
   useEffect(() => {
     if (!open) return;
     api.get<{ territories: TasteTerritory[] }>('/taste/taxonomy').then((res) => setTerritories(res.territories)).catch(() => setTerritories([]));
@@ -69,10 +79,43 @@ export function TuneMyPlotSheet({
     setSignals(freeTextSignals);
     setQuery('');
     setExpanded(null);
+    setAiOpen(false);
+    setAiText('');
+    setAiError(null);
+    setAiAppliedCount(null);
     // Deliberately only re-seeds when the sheet actually opens (`open` is the only real
     // dependency) — re-running on every parent re-render (interestAffinity is a fresh object
     // each time) would stomp an in-progress tap.
   }, [open]);
+
+  async function submitAiSetup() {
+    const text = aiText.trim();
+    if (!text || aiSubmitting) return;
+    setAiSubmitting(true);
+    setAiError(null);
+    try {
+      const res = await api.post<{ tasteProfile: { interestAffinity: Record<string, number>; freeTextSignals: FreeTextSignal[] }; applied: { interestIds: string[]; freeText: string[] } }>(
+        '/users/me/taste/ai-setup',
+        { description: text },
+      );
+      const seeded: Record<string, Strength> = {};
+      for (const [id, v] of Object.entries(res.tasteProfile.interestAffinity)) seeded[id] = strengthFromAffinity(v);
+      setLocal(seeded);
+      setSignals(res.tasteProfile.freeTextSignals);
+      setAiAppliedCount(res.applied.interestIds.length + res.applied.freeText.length);
+      setAiText('');
+    } catch (err) {
+      setAiError(
+        err instanceof ApiError
+          ? err.status === 503
+            ? "Plot's AI setup isn't switched on yet — pick from the list below instead."
+            : err.message
+          : 'Could not set that up — try again, or pick from the list below.',
+      );
+    } finally {
+      setAiSubmitting(false);
+    }
+  }
 
   const allInterests = useMemo(() => (territories ?? []).flatMap((t) => t.interests.map((i) => ({ ...i, territoryId: t.id }))), [territories]);
 
@@ -131,6 +174,67 @@ export function TuneMyPlotSheet({
         <p className="v2-muted" style={{ fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>
           The more specific, the better Plot gets — tap to say what you&rsquo;re into, tap again for &ldquo;love it&rdquo;.
         </p>
+
+        {/* THE FAST PATH — "describe yourself and Plot sets this up for you" (services/
+            aiTasteSetup.ts). Collapsed by default so it never competes with the picker below;
+            whatever it selects lands in the exact same `local`/`signals` state a manual tap
+            would, reviewable and editable immediately after, never a separate black box. */}
+        <div style={{ marginBottom: 16 }}>
+          {!aiOpen ? (
+            <button
+              type="button"
+              onClick={() => setAiOpen(true)}
+              className="v2-tap-feedback"
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 9, border: '1.5px dashed var(--v2-brand)', borderRadius: 14,
+                padding: '11px 14px', background: 'rgba(230,80,60,0.06)', cursor: 'pointer', textAlign: 'left',
+              }}
+            >
+              <span style={{ fontSize: 17 }}>✨</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--v2-brand)' }}>Describe it — let Plot set this up for you</span>
+            </button>
+          ) : (
+            <div style={{ border: '1.5px solid var(--v2-brand)', borderRadius: 14, padding: 12, background: 'rgba(230,80,60,0.06)' }}>
+              <textarea
+                autoFocus
+                value={aiText}
+                onChange={(e) => setAiText(e.target.value)}
+                placeholder="e.g. I'm into UK garage and house, love trying new restaurants, and always up for football on a Saturday"
+                rows={3}
+                style={{
+                  width: '100%', padding: '10px 12px', borderRadius: 10, border: 'none', outline: 'none', resize: 'vertical',
+                  background: 'var(--v2-surface)', fontSize: 13.5, fontFamily: 'inherit', color: 'var(--v2-ink)', marginBottom: 8,
+                }}
+              />
+              {aiError && <p style={{ color: 'var(--v2-error)', fontSize: 12, marginBottom: 8 }}>{aiError}</p>}
+              {aiAppliedCount !== null && !aiError && (
+                <p style={{ color: 'var(--v2-brand)', fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
+                  Set up {aiAppliedCount} thing{aiAppliedCount === 1 ? '' : 's'} based on that — have a look below, tap to adjust anything.
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={submitAiSetup}
+                  disabled={aiSubmitting || !aiText.trim()}
+                  className="v2-btn v2-btn-brand v2-tap-feedback"
+                  style={{ flex: 1, padding: '10px 0', fontSize: 13 }}
+                >
+                  {aiSubmitting ? 'Setting up…' : 'Set it up'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAiOpen(false); setAiError(null); }}
+                  disabled={aiSubmitting}
+                  className="v2-btn v2-btn-ghost v2-tap-feedback"
+                  style={{ padding: '10px 16px', fontSize: 13 }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* THE ESCAPE HATCH — always available, never limited to the fixed list below. */}
         <div style={{ position: 'relative', marginBottom: 10 }}>

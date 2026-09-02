@@ -2116,8 +2116,10 @@ export default function CrewPage() {
       <CrewTuneSheet
         open={tuneCrewOpen}
         onClose={() => setTuneCrewOpen(false)}
+        crewId={crewId}
         interestPreferences={recSettings?.interestPreferences ?? []}
         onToggle={toggleInterestPreference}
+        onAiApplied={(interestPreferences) => setRecSettings((prev) => (prev ? { ...prev, interestPreferences } : prev))}
         crewTasteInterestIds={crewTaste?.topInterests.map((i) => i.interestId) ?? []}
         saving={savingRecSettings}
       />

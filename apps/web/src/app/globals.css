@@ -963,22 +963,6 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   font-weight: 700;
 }
 
-/* Plan Card's "how many are in" strip (VoteForm) — same idea as the old .pulse-flame, v2 tone. */
-.v2-pulse-flames {
-  display: flex;
-  gap: 3px;
-  margin: 10px 0 4px;
-}
-.v2-pulse-flame {
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  background: var(--v2-bg-deep);
-}
-.v2-pulse-flame.on {
-  background: var(--v2-pop);
-}
-
 /* Crew chat — the message canvas itself, not just the header, carries the Crew's identity now.
    Real, reported feedback: "huge empty white canvas, tiny bubbles" — a flat `--v2-surface` fill
    behind the thread read as unfinished space, not a place a group actually lives. A soft two-

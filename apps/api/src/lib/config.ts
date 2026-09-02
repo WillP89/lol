@@ -49,6 +49,12 @@ const EnvSchema = z.object({
   // Register a real key at thesportsdb.com/documentation and set this once sync volume
   // justifies it. See docs/providers/food-and-places.md.
   SPORTSDB_API_KEY: z.string().optional(),
+  // "Describe your Crew/yourself and Plot sets up your taste for you" — services/aiTasteSetup.ts.
+  // Same optional-provider pattern as every key above: unset means the feature returns a clear
+  // "not configured yet" error rather than crashing, never a silent no-op. Get a key at
+  // console.anthropic.com — this is a real, separate Anthropic API key for the deployed app
+  // server to call, not this Claude Code session's own credentials (which the app can't reach).
+  ANTHROPIC_API_KEY: z.string().optional(),
   POSTMARK_API_KEY: z.string().optional(),
   // An HTTP email API (not raw SMTP) — see docs/providers/email.md. Checked ahead of SMTP:
   // SMTP is CONFIRMED blocked outbound on Render (a real send attempt there timed out — Render
