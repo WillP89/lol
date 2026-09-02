@@ -2,7 +2,7 @@
 
 import { identityGradient, initialsOf, crewInitial } from '@/lib/identity';
 import { PLOT_AVATAR_PREFIX, getPlotAvatarDef } from '@/components/PlotAvatars';
-import { crewArtStyle, isCrewArtUrl } from '@/lib/crewArt';
+import { crewArtAvatarStyle, isCrewArtUrl } from '@/lib/crewArt';
 
 /**
  * The two identity primitives used everywhere a person or a Crew is shown — replacing five
@@ -95,7 +95,7 @@ export function CrewMark({
       <div
         style={{
           width: size, height: size, borderRadius: radius, flexShrink: 0,
-          background: crewArtStyle(artTheme), backgroundSize: 'cover',
+          background: crewArtAvatarStyle(artTheme), backgroundSize: 'cover',
         }}
       />
     );

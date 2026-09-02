@@ -61,8 +61,8 @@ const THEMES: Record<string, CrewArtTheme> = {
 export const CREW_ART_THEME_IDS = Object.keys(THEMES);
 export const CREW_ART_PREFIX = 'plot-crew-art:';
 
-function iconDataUri(svgInner: string, opacity: number): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,${opacity})" stroke-width="1.4">${svgInner}</svg>`;
+function iconDataUri(svgInner: string, opacity: number, strokeWidth = 1.4): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,${opacity})" stroke-width="${strokeWidth}">${svgInner}</svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
 
@@ -80,6 +80,26 @@ export function crewArtStyle(themeId: string): string {
   const echo = `${iconDataUri(theme.echo, 0.35)} no-repeat 14% 82% / 22% auto`;
   const wash = `radial-gradient(120% 100% at 20% 0%, ${mid} 0%, ${dark} 72%)`;
   return `${hero}, ${echo}, ${wash}`;
+}
+
+/**
+ * Real bug this closes, not a taste call: `crewArtStyle`'s composition — an off-centre hero mark
+ * plus a small, faint echo mark in the opposite corner — is what makes it read as a designed
+ * poster at real card size (the IdentityPicker's own carousel slide, hundreds of px). `CrewMark`
+ * (components/Avatar.tsx) reuses the exact same background at 22-96px, avatar/badge scale
+ * throughout the rest of the app (Home's story rail, Crews list, chat headers) — at that size the
+ * echo mark is too small to register as anything, the off-centre 58%-wide hero often gets
+ * partially cropped by the squircle mask, and a thin 1.4-stroke icon nearly disappears, so what's
+ * left reads as exactly the "flat generic icon on a colour blob" complaint, not the intended
+ * poster. This is a dedicated small-scale composition — one bold, fully centred, thicker-stroke
+ * mark and no echo — rather than a shrunk version of the poster.
+ */
+export function crewArtAvatarStyle(themeId: string): string {
+  const theme = THEMES[themeId] ?? THEMES.night_out;
+  const [dark, mid] = theme.pair;
+  const hero = `${iconDataUri(theme.icon, 1, 2.1)} no-repeat center / 62% auto`;
+  const wash = `radial-gradient(120% 120% at 30% 15%, ${mid} 0%, ${dark} 78%)`;
+  return `${hero}, ${wash}`;
 }
 
 export function crewArtLabel(themeId: string): string {

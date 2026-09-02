@@ -80,11 +80,26 @@ function Card({
         background: v2Art(exp.imageUrl, exp.category),
       }}
     >
-      {/* Just enough of a scrim for white text to stay legible over a bright photo — tuned down
-          from an earlier version (0% at 42%, 0.82 at 100%) that compounded with genuinely dark
-          real event photography (gig/tour promo shots, common from a live provider) into what
-          read as a plain black card rather than a photo with a caption on it. */}
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(22,19,15,0) 55%, rgba(22,19,15,0.62) 100%)' }} />
+      {/* A real live legibility bug, not a taste call: a diagonal scrim alone reads fine over
+          dark tour-poster photography but genuinely fails over the bright, busy, high-contrast
+          flyer art a live events provider (Skiddle in particular) actually returns — faces,
+          bold colour blocks, dense type, right where the caption sits. Replaced with a proper
+          frosted caption panel — the same "glass bar over a photo" pattern iOS/Music/Spotify use
+          — rather than trying to tune one more gradient stop: a backdrop-blur softens whatever
+          busy imagery is directly behind the text (killing the eye's contrast fight at the
+          source, not just dimming it), and the colour wash layered on top gives a real, high,
+          guaranteed-legible floor (0.93 at the very baseline) no photo can defeat, while staying
+          essentially invisible over the top ~55% of the card so the photo itself still reads as
+          a photo, not a tinted rectangle. */}
+      <div
+        style={{
+          position: 'absolute', left: 0, right: 0, bottom: 0, height: size === 'hero' ? '52%' : '58%',
+          backdropFilter: 'blur(14px) saturate(115%)', WebkitBackdropFilter: 'blur(14px) saturate(115%)',
+          maskImage: 'linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.5) 30%, #000 62%)',
+          WebkitMaskImage: 'linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.5) 30%, #000 62%)',
+        }}
+      />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: size === 'hero' ? '52%' : '58%', background: 'linear-gradient(180deg, rgba(17,14,11,0) 0%, rgba(17,14,11,0.42) 46%, rgba(14,11,9,0.93) 100%)' }} />
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: size === 'hero' ? '20px 22px' : '14px 16px' }}>
         <div className="v2-display" style={{ fontSize: size === 'hero' ? 24 : 16, color: '#fff', lineHeight: 1.15, marginBottom: 6 }}>
           {exp.name}
