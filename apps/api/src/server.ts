@@ -1,6 +1,7 @@
 import { buildApp } from './app';
 import { config } from './lib/config';
 import { runSweepIfDue, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from './services/crewRecommendations';
+import { backfillImageQuality } from './services/inventorySync';
 
 const app = buildApp();
 
@@ -56,6 +57,18 @@ const checkSweep = () => {
 if (config.NODE_ENV !== 'test') {
   setTimeout(checkSweep, 10_000); // let the server finish coming up first
   setInterval(checkSweep, RECOMMENDATION_SWEEP_CHECK_INTERVAL_MS);
+}
+
+// The retroactive half of the image-quality floor (services/inventorySync.ts#backfillImageQuality's
+// own comment has the full reasoning) — a row synced before that gate existed doesn't self-heal
+// until its city's next resync, which on a pilot-scale app with sparse traffic can be a real,
+// user-visible delay. Runs once per boot, staggered after the sweep check so it isn't competing
+// with server startup, and is cheap/idempotent to repeat on every restart (an already-clean row
+// just gets re-confirmed). Also triggerable on demand via POST /admin/image-quality-backfill.
+if (config.NODE_ENV !== 'test') {
+  setTimeout(() => {
+    backfillImageQuality().catch((err) => app.log.error({ err }, 'Image quality backfill failed'));
+  }, 20_000);
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
