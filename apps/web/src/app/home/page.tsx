@@ -300,10 +300,27 @@ export default function HomePage() {
                       <div className={`v2-story-ring${ringClass}`}>
                         <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={68} />
                       </div>
-                      {/* Real, persisted unread state (never faked client-side) — see
-                          apps/api/src/services/crew.ts#crewSummaryExtras. A count up to 9, then
-                          "9+" rather than a badge that keeps growing wider than the avatar. */}
-                      {hasUnread && (
+                      {/* Real, reported feedback: an urgent (vote-needed) Crew only ever got a
+                          coloured ring + pulse to tell it apart from an unread one — real signal,
+                          but one you have to already know the colour code to read at a glance.
+                          A genuine icon badge (the same amber "vote needed" language the feed row
+                          below uses) beats the plain numeric unread badge in priority, since a
+                          vote waiting on you is the more actionable of the two. */}
+                      {status.urgent ? (
+                        <div
+                          className="v2-pop-in"
+                          style={{
+                            position: 'absolute', top: -2, right: -2, width: 22, height: 22, borderRadius: '50%',
+                            background: '#b9832a', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            boxShadow: '0 0 0 2.5px var(--v2-bg)',
+                          }}
+                        >
+                          <IconPoll size={11} />
+                        </div>
+                      ) : hasUnread ? (
+                        // Real, persisted unread state (never faked client-side) — see
+                        // apps/api/src/services/crew.ts#crewSummaryExtras. A count up to 9, then
+                        // "9+" rather than a badge that keeps growing wider than the avatar.
                         <div
                           className="v2-pop-in"
                           style={{
@@ -314,7 +331,7 @@ export default function HomePage() {
                         >
                           {crew.unreadCount > 9 ? '9+' : crew.unreadCount}
                         </div>
-                      )}
+                      ) : null}
                     </div>
                     <span
                       style={{
@@ -562,11 +579,18 @@ export default function HomePage() {
                   );
                 }
                 const justArrived = Date.now() - new Date(c.latestMessage!.createdAt).getTime() < 5 * 60_000;
+                // Plot's own voice, not lumped in with an ordinary human message — real, reported
+                // feedback: this fell through to the exact same plain grey/pink row as anyone
+                // else's text, generic "PL" initials included, the moment a plotfound plan wasn't
+                // ALSO still awaiting a vote (the only case the big plotfound card above catches).
+                // A message Plot itself posted is a branded product moment every time, not just
+                // when it happens to coincide with an unvoted plan.
+                const isPlotMessage = c.latestMessage!.authorName === 'Plot';
                 return (
                   <Link
                     key={`message-${c.id}`}
                     href={`/crews/${c.id}`}
-                    className={`v2-notify-row tone-message v2-reveal${c.unreadCount > 0 ? ' unread' : ''}`}
+                    className={`v2-notify-row v2-reveal${isPlotMessage ? ' tone-plot' : ` tone-message${c.unreadCount > 0 ? ' unread' : ''}`}`}
                     style={{ ['--reveal-i' as string]: i, textDecoration: 'none', color: 'inherit' }}
                   >
                     <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -576,18 +600,26 @@ export default function HomePage() {
                       )}
                     </div>
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <div className="v2-display" style={{ fontSize: 15.5, lineHeight: 1.3, marginBottom: 2, fontWeight: c.unreadCount > 0 ? 700 : undefined }}>
-                        &ldquo;{messagePreview(c.latestMessage!.body)}&rdquo;
+                      {isPlotMessage && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--v2-pop)', marginBottom: 3 }}>
+                          <IconGathering size={11} />
+                          Plot
+                        </div>
+                      )}
+                      <div className="v2-display" style={{ fontSize: 15.5, lineHeight: 1.3, marginBottom: 2, fontWeight: isPlotMessage || c.unreadCount > 0 ? 700 : undefined }}>
+                        {isPlotMessage ? messagePreview(c.latestMessage!.body) : <>&ldquo;{messagePreview(c.latestMessage!.body)}&rdquo;</>}
                       </div>
                       <div className="v2-muted" style={{ fontSize: 12 }}>
-                        <strong style={{ color: 'var(--v2-ink)' }}>{c.latestMessage!.authorName}</strong> in {c.name} · {justArrived ? 'just now' : timeAgo(c.latestMessage!.createdAt)}
+                        {isPlotMessage ? c.name : (<><strong style={{ color: 'var(--v2-ink)' }}>{c.latestMessage!.authorName}</strong> in {c.name}</>)} · {justArrived ? 'just now' : timeAgo(c.latestMessage!.createdAt)}
                       </div>
                     </div>
-                    {c.unreadCount > 0 && (
+                    {isPlotMessage ? (
+                      <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 800, color: '#fff', background: 'var(--v2-pop)', padding: '8px 14px', borderRadius: 100 }}>View →</span>
+                    ) : c.unreadCount > 0 ? (
                       <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: 10.5, fontWeight: 800, color: '#fff', background: 'var(--v2-pop)', borderRadius: 100, minWidth: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>
                         {c.unreadCount > 9 ? '9+' : c.unreadCount}
                       </span>
-                    )}
+                    ) : null}
                   </Link>
                 );
               })}

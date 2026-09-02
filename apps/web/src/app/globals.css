@@ -798,11 +798,19 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
 .v2-notify-row.tone-vote { background: rgba(185,131,42,0.08); border-left-color: #b9832a; }
 .v2-notify-row.tone-event { background: rgba(27,122,77,0.07); border-left-color: var(--v2-green); }
 .v2-notify-row.tone-message.unread { background: var(--v2-brand-tint, rgba(255,47,126,0.06)); border-left-color: var(--v2-pop); }
+/* Plot's own voice in the feed — real, reported feedback: a message Plot itself posted ("Plot
+   found X") used to render with the exact same plain grey/pink treatment as any human's message,
+   with a generic "PL" initials circle standing in for it — nothing about it read as a live,
+   branded product moment. Same "solid gradient wash" language as .v2-story-ring.urgent and the
+   Plot-found hero card, at row scale, so this is recognisably the same signal every time rather
+   than blending into an ordinary chat-message row. */
+.v2-notify-row.tone-plot { background: linear-gradient(100deg, rgba(255,47,126,0.11), rgba(255,197,61,0.09)); border-left-color: var(--v2-pop); }
 @media (hover: hover) {
   .v2-notify-row:hover { background-color: var(--v2-bg-deep); }
   .v2-notify-row.tone-vote:hover { background: rgba(185,131,42,0.13); }
   .v2-notify-row.tone-event:hover { background: rgba(27,122,77,0.12); }
   .v2-notify-row.tone-message.unread:hover { background: var(--v2-brand-tint, rgba(255,47,126,0.1)); }
+  .v2-notify-row.tone-plot:hover { background: linear-gradient(100deg, rgba(255,47,126,0.17), rgba(255,197,61,0.14)); }
 }
 .v2-notify-row:active { transform: scale(0.99); }
 
