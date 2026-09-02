@@ -3,6 +3,15 @@
 import { identityGradient, initialsOf, crewInitial } from '@/lib/identity';
 import { PLOT_AVATAR_PREFIX, getPlotAvatarDef } from '@/components/PlotAvatars';
 import { crewArtAvatarStyle, isCrewArtUrl } from '@/lib/crewArt';
+import { IconGathering } from '@/components/icons';
+
+// The system account Plot itself posts recommendation messages as (apps/api/src/services/
+// crewRecommendations.ts#PLOT_SYSTEM_EMAIL — mirrored here since the web client has no reason to
+// import server code for one string). Matched against `name` too: at least one existing call
+// site (Home's "In the groups" message row) passes the message's `authorName` into BOTH the
+// `name` and `email` props (no real author email in that DTO), so an email-only check would
+// silently miss it there.
+const PLOT_SYSTEM_EMAIL = 'system+plot-recommendations@plot.internal';
 
 /**
  * The two identity primitives used everywhere a person or a Crew is shown — replacing five
@@ -36,6 +45,12 @@ export function PersonAvatar({
   const plotAvatarId = photoUrl?.startsWith(PLOT_AVATAR_PREFIX) ? photoUrl.slice(PLOT_AVATAR_PREFIX.length) : null;
   const plotAvatar = plotAvatarId ? getPlotAvatarDef(plotAvatarId) : null;
   const realPhoto = photoUrl && !plotAvatarId ? photoUrl : null;
+  // Plot itself, posting as the system account — real, reported feedback: a generic "PL"
+  // initials circle (the same treatment any two-letter-name human gets) read as an unfinished
+  // placeholder, not a product with an actual identity, exactly where it matters most (Plot's
+  // own recommendation messages). Takes priority over the realPhoto/plotAvatar checks above —
+  // the system account never has either set, but this makes that a guarantee, not an assumption.
+  const isPlot = !realPhoto && !plotAvatar && (name === 'Plot' || email === PLOT_SYSTEM_EMAIL);
 
   return (
     <div
@@ -45,7 +60,11 @@ export function PersonAvatar({
         borderRadius: '50%',
         flexShrink: 0,
         position: 'relative',
-        background: realPhoto || plotAvatar ? undefined : identityGradient(seed),
+        // Plot's own signature gradient — the SAME two stops as the story rail's "urgent" ring
+        // and the Plot-found hero card's own language (docs/DECISIONS.md#plot-brand-system) —
+        // deliberately fixed, never the per-seed hash-varying gradient every other name gets, so
+        // Plot looks like the same one thing everywhere it shows up, not a random colour.
+        background: isPlot ? 'linear-gradient(135deg, var(--v2-brand), var(--v2-pop))' : realPhoto || plotAvatar ? undefined : identityGradient(seed),
         boxShadow: ring ? '0 0 0 2px var(--v2-surface), 0 0 0 3.5px rgba(12,12,13,0.14)' : 'none',
         overflow: 'hidden',
         display: 'flex',
@@ -53,7 +72,11 @@ export function PersonAvatar({
         justifyContent: 'center',
       }}
     >
-      {realPhoto ? (
+      {isPlot ? (
+        <span style={{ color: '#fff', display: 'flex' }}>
+          <IconGathering size={Math.round(size * 0.52)} />
+        </span>
+      ) : realPhoto ? (
         <img src={realPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
       ) : plotAvatar ? (
         <svg width={size} height={size} viewBox="0 0 40 40">
