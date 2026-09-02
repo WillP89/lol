@@ -262,7 +262,7 @@ export default function HomePage() {
                   >
                     <div style={{ position: 'relative' }}>
                       <div className={`v2-story-ring${ringClass}`}>
-                        <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={68} />
+                        <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={68} allowThemeArt />
                       </div>
                       {/* Real, persisted unread state (never faked client-side) — see
                           apps/api/src/services/crew.ts#crewSummaryExtras. A count up to 9, then

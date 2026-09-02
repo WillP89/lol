@@ -10,7 +10,7 @@ import { messagePreview } from '@/lib/messagePreview';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { MediaUploadButton } from '@/components/MediaUploadButton';
 import { identityGradient } from '@/lib/identity';
-import { crewArtStyle, isCrewArtUrl } from '@/lib/crewArt';
+import { isCrewArtUrl } from '@/lib/crewArt';
 
 interface CrewSummary {
   id: string;
@@ -188,8 +188,11 @@ export default function CrewsPage() {
             <div className="v2-crews-grid">
               {crews.map((crew, i) => {
                 const activity = crewActivityText(crew);
-                const artTheme = isCrewArtUrl(crew.imageUrl);
-                const realPhoto = crew.imageUrl && !artTheme ? crew.imageUrl : null;
+                // Crew theme art (crewArtStyle) is deliberately shown ONLY inside a Crew's own
+                // chat and Home's story rail — the Crews list falls back straight to the plain
+                // identity-gradient mark for a Crew with no real photo, same as everywhere else
+                // outside those two places. See CrewMark's own `allowThemeArt` comment.
+                const realPhoto = crew.imageUrl && !isCrewArtUrl(crew.imageUrl) ? crew.imageUrl : null;
                 return (
                   <Link
                     key={crew.id}
@@ -198,7 +201,7 @@ export default function CrewsPage() {
                     style={{
                       display: 'block', position: 'relative', height: 220, borderRadius: 'var(--v2-r-lg)', overflow: 'hidden',
                       boxShadow: 'var(--v2-shadow-sm)', ['--stagger-i' as string]: i,
-                      background: realPhoto ? `url("${realPhoto}") center/cover` : artTheme ? crewArtStyle(artTheme) : identityGradient(crew.name, 190),
+                      background: realPhoto ? `url("${realPhoto}") center/cover` : identityGradient(crew.name, 190),
                     }}
                   >
                     <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(0,0,0,0) 32%, rgba(0,0,0,0.68) 100%)' }} />

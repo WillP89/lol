@@ -76,19 +76,31 @@ export function PersonAvatar({
   );
 }
 
-/** A squircle (~28% corner radius) — Plot's shape for a Crew, distinct from a person's circle. */
+/**
+ * A squircle (~28% corner radius) — Plot's shape for a Crew, distinct from a person's circle.
+ *
+ * `allowThemeArt` (default false): a real, explicit product decision, not a bug — a Crew's
+ * chosen theme art (crewArtAvatarStyle) is deliberately shown ONLY inside that Crew's own chat
+ * and in Home's story rail (the one place it doubles as a live-state notification, via the ring
+ * around it) — everywhere else a Crew is referenced in passing (Plans, Profile's Crews row, the
+ * Crews list, an invite preview) falls back to the plain identity-gradient + initial mark, never
+ * the theme icon. Pass `allowThemeArt` explicitly true at exactly those two call sites; every
+ * other call site is correct by doing nothing.
+ */
 export function CrewMark({
   name,
   imageUrl,
   size = 44,
+  allowThemeArt = false,
 }: {
   name: string;
   imageUrl?: string | null;
   size?: number;
+  allowThemeArt?: boolean;
 }) {
   const radius = Math.round(size * 0.28);
-  const artTheme = isCrewArtUrl(imageUrl);
-  const realPhoto = imageUrl && !artTheme ? imageUrl : null;
+  const artTheme = allowThemeArt ? isCrewArtUrl(imageUrl) : null;
+  const realPhoto = imageUrl && !isCrewArtUrl(imageUrl) ? imageUrl : null;
 
   if (artTheme) {
     return (
