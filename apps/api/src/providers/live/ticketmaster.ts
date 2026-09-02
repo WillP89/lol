@@ -119,15 +119,10 @@ function mapBookingStatus(statusCode: string | undefined): CanonicalListingInput
 // A real, specific floor, not an arbitrary one — matches lib/imageDimensions.ts's own
 // MIN_IMAGE_WIDTH exactly, since that's the real, final authority now (this is just a coarse
 // first pass so bestImage() doesn't pick a candidate the central byte-probe would only reject a
-// moment later). Cards render this image full-bleed via CSS `background: url(...) center/cover`
-// up to a ~900px-wide desktop hero — `cover` never distorts the aspect ratio (it crops, it
-// doesn't stretch), but a bitmap narrower than this gets visibly blown up past its native
-// resolution and reads as blurry/pixelated, which is exactly what "stretched and distorted" was
-// actually describing. Ticketmaster's own image set for a real touring artist/venue reliably
-// includes at least one candidate at or above this, so this is a real quality floor, not a
-// coverage cut — see v2Art.ts's own comment for the fallback this exists to prefer over a blurry
-// photo.
-const MIN_IMAGE_WIDTH = 1000;
+// moment later). See that file's own comment for the exact math this number is derived from —
+// Home's hero renders at up to 760px of real CSS width, which needs 1520px+ for a genuinely
+// crisp render on any standard 2x retina/HiDPI display, not just "not technically tiny".
+const MIN_IMAGE_WIDTH = 1600;
 
 function bestImage(images: TmImage[] | undefined): string | null {
   if (!images?.length) return null;
