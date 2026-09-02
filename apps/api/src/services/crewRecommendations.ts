@@ -180,7 +180,7 @@ export interface CrewEligibilityResult {
   details: Record<string, unknown>;
   best?: MatchOption;
 }
-async function evaluateCrewEligibility(crewId: string): Promise<CrewEligibilityResult> {
+async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: boolean } = {}): Promise<CrewEligibilityResult> {
   const settings = await getOrCreateSettings(crewId);
   if (!settings.enabled) {
     return { outcome: 'disabled', details: {} };
@@ -252,6 +252,19 @@ async function evaluateCrewEligibility(crewId: string): Promise<CrewEligibilityR
     bestScoreSeen: withTaste.length > 0 ? Math.max(...withTaste.map((o) => o.matchScore)) : null,
     scoreThreshold: MIN_RECOMMENDATION_SCORE,
   };
+  if (opts.guaranteeFirst && eligible.length === 0 && inRadius.length > 0) {
+    // Real, live product requirement: a brand-new Crew's very first moment must not come up
+    // empty — "it should immediately hit them with at LEAST 1 event line with the preferences"
+    // — even when nothing yet clears the periodic sweep's deliberately conservative confidence
+    // bar (a fresh Crew's members often haven't swiped enough for real affinity/DNA signal, and
+    // may not have set a crew_preference yet either). The candidate pool itself is never
+    // relaxed — still real, in-radius, quality-checked, not already shown/recommended — only
+    // the confidence bar is skipped for this one moment, ranked by whatever score IS there
+    // (taste signal, if any, still sorts first via match.ts's own scoring).
+    const bestAvailable = [...inRadius].sort((a, b) => b.matchScore - a.matchScore)[0];
+    return { outcome: 'eligible', details: { ...details, guaranteedFirst: true }, best: bestAvailable };
+  }
+
   if (eligible.length === 0) {
     // Which filter actually killed it — "no strong match" covers a lot of genuinely different
     // situations, and during pilot "the whole pipeline is broken" vs "this Crew's taste is just
@@ -268,9 +281,13 @@ async function evaluateCrewEligibility(crewId: string): Promise<CrewEligibilityR
  * not-previously-recommended experience clears the confidence floor, and (unlike the manual
  * "Find us something" flow) actually within the Crew's travel radius. Returns null whenever
  * nothing was sent, which is the expected common case, not an error.
+ *
+ * `guaranteeFirst` is for exactly one caller — the immediate 1->2-member join trigger
+ * (routes/crews.ts) — never the periodic sweep, which stays deliberately conservative. See
+ * evaluateCrewEligibility's own comment on what it relaxes and what it never does.
  */
-export async function generateRecommendationForCrew(crewId: string): Promise<CrewRecommendation | null> {
-  const evaluation = await evaluateCrewEligibility(crewId);
+export async function generateRecommendationForCrew(crewId: string, opts: { guaranteeFirst?: boolean } = {}): Promise<CrewRecommendation | null> {
+  const evaluation = await evaluateCrewEligibility(crewId, opts);
   if (evaluation.outcome !== 'eligible' || !evaluation.best) {
     logRecommendationOutcome(crewId, evaluation.outcome as RecommendationOutcome, evaluation.details);
     return null;

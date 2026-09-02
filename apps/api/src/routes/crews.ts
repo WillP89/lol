@@ -127,7 +127,11 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     // shouldn't hold up the join response.
     const activeMemberCount = await prisma.crewMember.count({ where: { crewId: result.crew.id, status: 'ACTIVE' } });
     if (activeMemberCount === 2) {
-      generateRecommendationForCrew(result.crew.id).catch((err) => {
+      // guaranteeFirst: true — real, live product requirement: this exact moment must not come
+      // up empty just because two brand-new members haven't swiped enough yet for real taste
+      // signal. See generateRecommendationForCrew's own comment on what this relaxes (never the
+      // candidate pool itself — always real, in-radius, quality-checked).
+      generateRecommendationForCrew(result.crew.id, { guaranteeFirst: true }).catch((err) => {
         logger.error({ err, crewId: result.crew.id }, 'Immediate post-join recommendation attempt failed');
       });
     }

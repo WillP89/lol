@@ -178,6 +178,26 @@ const RADIUS_CHIPS: { label: string; meters: number }[] = [
   { label: 'Worth travelling', meters: 160934 }, // ~100 miles
 ];
 
+// Every real ExperienceCategory (see apps/api/prisma/schema.prisma) a Crew can explicitly say
+// it's about — CUSTOM excluded, same as admin.ts's own manual-entry category list, since it's
+// not a real discoverable category. Human labels, not raw enum strings — this is what members
+// actually pick from, see the "What's this Crew about?" section below.
+const CATEGORY_PREFERENCE_CHIPS: { label: string; value: string }[] = [
+  { label: 'Live music', value: 'LIVE_MUSIC' },
+  { label: 'Clubbing', value: 'CLUBBING' },
+  { label: 'Restaurants', value: 'RESTAURANT' },
+  { label: 'Bars', value: 'BAR' },
+  { label: 'Comedy', value: 'COMEDY' },
+  { label: 'Theatre', value: 'THEATRE' },
+  { label: 'Cinema', value: 'CINEMA' },
+  { label: 'Art & culture', value: 'ART_CULTURE' },
+  { label: 'Sport', value: 'SPORT' },
+  { label: 'Fitness', value: 'FITNESS' },
+  { label: 'Festivals', value: 'FESTIVAL' },
+  { label: 'Day activities', value: 'DAY_ACTIVITY' },
+  { label: 'Community', value: 'COMMUNITY' },
+];
+
 /** A status → what-to-say map for the shared-idea life cycle (services/plan.ts#derivePulseStatus).
  * The point: the SAME card should not read identically at every stage — "Robin shared this" is a
  * different moment from "3 in · likely happening" is a different moment from "Confirmed". */
@@ -700,7 +720,7 @@ export default function CrewPage() {
   const [responding, setResponding] = useState(false);
   // The auto-recommendation system's Crew-level controls (on/off, frequency, travel range) -
   // fetched lazily the first time the Crew info sheet opens.
-  const [recSettings, setRecSettings] = useState<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null } | null>(null);
+  const [recSettings, setRecSettings] = useState<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null; categoryPreferences: string[] } | null>(null);
   const [savingRecSettings, setSavingRecSettings] = useState(false);
 
   // Real gap found via live multi-user testing: `crew` (and therefore `activePlan`/
@@ -1158,13 +1178,13 @@ export default function CrewPage() {
   async function loadRecSettings() {
     if (recSettings) return;
     try {
-      const res = await api.get<{ settings: { enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null } }>(`/crews/${crewId}/recommendation-settings`);
+      const res = await api.get<{ settings: { enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null; categoryPreferences: string[] } }>(`/crews/${crewId}/recommendation-settings`);
       setRecSettings(res.settings);
     } catch {
       // Non-critical - the sheet just won't show this section if it fails.
     }
   }
-  async function patchRecSettings(patch: Partial<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null }>) {
+  async function patchRecSettings(patch: Partial<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null; categoryPreferences: string[] }>) {
     if (!recSettings) return;
     const prev = recSettings;
     setRecSettings({ ...prev, ...patch });
@@ -1177,6 +1197,14 @@ export default function CrewPage() {
     } finally {
       setSavingRecSettings(false);
     }
+  }
+  /** Toggles one category in/out of the Crew's preference set — a plain array patch, but kept
+   * as its own helper since every chip's onClick needs the same add-or-remove logic. */
+  function toggleCategoryPreference(value: string) {
+    if (!recSettings) return;
+    const current = recSettings.categoryPreferences;
+    const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+    patchRecSettings({ categoryPreferences: next });
   }
   async function copyInvite() {
     if (!inviteUrl) return;
@@ -1318,7 +1346,16 @@ export default function CrewPage() {
             </div>
           </div>
         )}
-      <div className="v2-crew-main" style={{ maxWidth: 720, width: '100%', height: '100dvh', display: 'flex', flexDirection: 'column' }}>
+      {/* `height: 100dvh` here is correct on mobile (`.v2-crew-split` is a plain block there, so
+          this needs the real viewport unit to fill it) but wrong on desktop: `.v2-crew-split`
+          becomes a flex row with its own `padding-top: 18px` (globals.css) there, and this
+          element re-measuring against the FULL viewport instead of its actual flex-allotted
+          height overflowed the bottom by that padding — the composer, the last flex child,
+          sitting past the visible edge, reading as "the text box isn't locked in place". Fixed
+          with a desktop-scoped `!important` override (globals.css's `.v2-crew-main`, same
+          established pattern as `.v2-sheet-root`'s own height guard) rather than changing this
+          inline value, which would break the exact case `100dvh` exists for on mobile. */}
+      <div className="v2-crew-main" style={{ maxWidth: 980, width: '100%', height: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <div style={{ flexShrink: 0 }}>
         {/* Header — HARD RESET. Real, reported feedback: "tiny Crew header, tiny social presence".
             This is now a real banner, not a slim top bar: the Crew's own identity wash fills it
@@ -1899,6 +1936,27 @@ export default function CrewPage() {
                       {chip.label}
                     </button>
                   ))}
+                </div>
+                <div className="v2-dim" style={{ fontSize: 11, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>What&rsquo;s this Crew about?</div>
+                <p className="v2-muted" style={{ fontSize: 11.5, marginBottom: 8, lineHeight: 1.5 }}>
+                  Optional — pick anything this Crew is specifically into. Boosts those on top of everyone&rsquo;s own taste, it doesn&rsquo;t replace it.
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {CATEGORY_PREFERENCE_CHIPS.map((chip) => {
+                    const active = recSettings.categoryPreferences.includes(chip.value);
+                    return (
+                      <button
+                        key={chip.value}
+                        onClick={() => toggleCategoryPreference(chip.value)}
+                        disabled={savingRecSettings}
+                        className="v2-tap-feedback"
+                        aria-pressed={active}
+                        style={{ padding: '7px 12px', borderRadius: 100, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: active ? 'var(--v2-brand)' : 'var(--v2-bg-deep)', color: active ? '#fff' : 'var(--v2-ink-muted)' }}
+                      >
+                        {chip.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </>
             )}

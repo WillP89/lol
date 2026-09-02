@@ -12,7 +12,14 @@ import { resetDatabase } from './helpers/resetDb';
  */
 const app = buildApp();
 const ADMIN_KEY = 'dev_admin_key_change_me';
-const STAFFORD = { city: 'Stafford', lat: 52.8062, lng: -2.1169 };
+// Truro deliberately, not Stafford — Stafford has real mock-provider coverage (restaurants,
+// ticketed events) for every common category, which contaminated an earlier version of this
+// test: members swiping "restaurant" as a liked category matched a genuine mock restaurant
+// candidate on the very first sweep, unrelated to anything this test is actually proving. Truro
+// has zero coverage in any of the three mock providers' own CITY_* maps, so the ONLY candidate
+// ensureInventory can ever find here is the one this test manually seeds — a clean, isolated
+// proof of crew_preference's own effect, not an artifact of shared mock inventory.
+const TEST_CITY = { city: 'Truro', lat: 50.2632, lng: -5.051 };
 
 async function loginByEmail(email: string): Promise<{ userId: string; cookie: string }> {
   const magicLinkRes = await app.inject({ method: 'POST', url: '/auth/magic-link', payload: { email } });
@@ -31,7 +38,7 @@ async function setUpMember(email: string, categories: string[]): Promise<{ userI
     method: 'POST',
     url: '/users/me/profile',
     headers: { cookie: member.cookie },
-    payload: { displayName: email.split('@')[0], homeCity: STAFFORD.city, homeLat: STAFFORD.lat, homeLng: STAFFORD.lng },
+    payload: { displayName: email.split('@')[0], homeCity: TEST_CITY.city, homeLat: TEST_CITY.lat, homeLng: TEST_CITY.lng },
   });
   await app.inject({
     method: 'POST',
@@ -58,9 +65,9 @@ async function seedExperience(name: string, category: string, venueName: string)
       description: `${name} — a real test fixture with enough description to pass quality scoring.`,
       category,
       venueName,
-      city: STAFFORD.city,
-      latitude: STAFFORD.lat,
-      longitude: STAFFORD.lng,
+      city: TEST_CITY.city,
+      latitude: TEST_CITY.lat,
+      longitude: TEST_CITY.lng,
       startsAt,
       priceMinMinor: 1500,
       priceMaxMinor: 3000,
@@ -78,24 +85,33 @@ describe('crew-level category preferences: tailoring a Crew beyond member-derive
   beforeAll(async () => {
     await resetDatabase();
 
-    // Both members' own taste is comedy/live-music/restaurant — nothing to do with the
-    // DAY_ACTIVITY event seeded below. Seeded before the second member joins so the immediate
-    // post-join trigger sees it too (same pattern as crewRecommendations.test.ts).
-    await seedExperience('Stafford Walking Tour', 'DAY_ACTIVITY', 'Stafford Castle');
-
+    // Deliberately NOTHING seeded yet — the immediate post-join trigger (routes/crews.ts) now
+    // guarantees a first delivery when ANY real in-radius candidate exists (see
+    // guaranteedFirstRecommendation.test.ts), which would otherwise confound this test's own
+    // proof. Seeding the actual candidate only AFTER the Crew is formed keeps that trigger
+    // honestly finding nothing (there's genuinely nothing to guarantee), isolating what THIS
+    // test actually checks: the periodic/manual sweep path, which stays deliberately
+    // conservative and is where crew_preference's own effect needs to be proven in isolation.
     owner = await setUpMember('crew-pref-owner@plot-test.invalid', ['comedy', 'live_music', 'restaurant']);
     const mate = await setUpMember('crew-pref-mate@plot-test.invalid', ['comedy', 'live_music', 'restaurant']);
-    const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name: 'Preference Test Crew', defaultCity: STAFFORD.city } });
+    const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name: 'Preference Test Crew', defaultCity: TEST_CITY.city } });
     const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
     crewId = crew.id;
     await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
-    await new Promise((resolve) => setTimeout(resolve, 500)); // let the immediate post-join trigger settle
+    await new Promise((resolve) => setTimeout(resolve, 500)); // let the immediate post-join trigger settle (honestly finds nothing yet)
+
+    // Now seed the actual candidate — both members' own taste is comedy/live-music/restaurant,
+    // nothing to do with this DAY_ACTIVITY event, so member-derived taste alone will not clear
+    // the sweep's confidence bar for it.
+    await seedExperience('Truro Walking Tour', 'DAY_ACTIVITY', 'Truro Cathedral');
   });
 
-  test('without a crew preference, member taste alone does not clear the bar for an unrelated category', async () => {
-    const res = await app.inject({ method: 'GET', url: `/crews/${crewId}/messages`, headers: { cookie: owner.cookie } });
-    const { messages } = res.json() as { messages: { body: string }[] };
-    expect(messages.some((m) => m.body.includes('Stafford Walking Tour'))).toBe(false);
+  test('without a crew preference, a manual sweep does not deliver an event unrelated to member taste', async () => {
+    const res = await app.inject({ method: 'POST', url: '/admin/recommendations/sweep', headers: { 'x-admin-key': ADMIN_KEY }, payload: { crewId } });
+    expect((res.json() as { delivered: number }).delivered).toBe(0);
+    const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crewId}/messages`, headers: { cookie: owner.cookie } });
+    const { messages } = messagesRes.json() as { messages: { body: string }[] };
+    expect(messages.some((m) => m.body.includes('Truro Walking Tour'))).toBe(false);
   });
 
   test('setting a crew-level category preference is readable back via GET, defaulting to empty', async () => {
@@ -121,7 +137,7 @@ describe('crew-level category preferences: tailoring a Crew beyond member-derive
 
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crewId}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Stafford Walking Tour'));
+    const announcement = messages.find((m) => m.body.includes('Truro Walking Tour'));
     expect(announcement).toBeDefined();
 
     const slug = announcement!.body.match(/\/plans\/([a-zA-Z0-9-]+)$/)![1];
@@ -135,7 +151,7 @@ describe('crew-level category preferences: tailoring a Crew beyond member-derive
     expect(res.statusCode).toBe(200);
     const body = res.json() as { crews: { crewId: string; mostRecentRecommendation: { experienceName: string; category: string } | null }[] };
     const crew = body.crews.find((c) => c.crewId === crewId);
-    expect(crew?.mostRecentRecommendation?.experienceName).toBe('Stafford Walking Tour');
+    expect(crew?.mostRecentRecommendation?.experienceName).toBe('Truro Walking Tour');
     expect(crew?.mostRecentRecommendation?.category).toBe('DAY_ACTIVITY');
   });
 });

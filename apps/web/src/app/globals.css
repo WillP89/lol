@@ -875,7 +875,14 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
     max-height: calc(100dvh - 36px);
     overflow-y: auto;
   }
-  .v2-crew-main { flex-shrink: 0; }
+  /* Real, reported bug: this element's own inline `height: 100dvh` (correct on mobile, where
+     `.v2-crew-split` is a plain block with no height of its own) re-measured against the FULL
+     viewport here too, ignoring that `.v2-crew-split` is now a flex row with `padding-top: 18px`
+     above — overflowing the bottom of the actually-visible area by that padding and pushing the
+     composer (the last flex child) past the visible edge, reading as "the text box isn't locked
+     in place". `!important` is required to win over the inline style at all; scoped to this one
+     desktop media query so mobile's own `100dvh` (genuinely correct there) is untouched. */
+  .v2-crew-main { flex-shrink: 0; height: calc(100dvh - 18px) !important; }
 }
 
 /* Static (non-interactive) tag pill — Profile's "Into" list. */

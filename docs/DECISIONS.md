@@ -2009,3 +2009,67 @@ every touched file (both apps), both `next build` and the API's own `tsc` produc
 clean. The map fix was verified with real Playwright screenshots against a live dev server, not
 just code reasoning — see this section's own note on why a transform-string check alone was
 insufficient and had to be replaced with actual visual comparison.
+
+## #crew-settings-ui-guaranteed-first-layout-fixes
+
+Direct follow-ups from the same live thread, after the crew-preferences backend shipped with no
+UI to actually use it.
+
+**Crew settings UI was genuinely missing the category-preference picker** — the backend
+(previous section) shipped `categoryPreferences` end-to-end but no control ever rendered it.
+Added a "What's this Crew about?" chip row to the existing Crew settings sheet
+(`crews/[id]/page.tsx`), reusing the exact same toggle-chip pattern already used for "How
+often"/"How far" — multi-select, PATCHes `/crews/:id/recommendation-settings` on every tap.
+Verified live: toggling "Comedy" visibly activates and persists.
+
+**"It should immediately hit them with at LEAST 1 event"**: the 1->2-member join trigger now
+guarantees a first delivery whenever ANY real, in-radius, quality-checked candidate exists —
+`evaluateCrewEligibility`'s new `guaranteeFirst` option relaxes the confidence-bar/taste-signal
+requirement for exactly this one caller, never the periodic sweep (which stays deliberately
+conservative — a fresh Crew's members not having swiped enough yet is real, but that's not a
+reason to spam an established Crew weekly with low-confidence picks). The candidate pool itself
+is never relaxed: still real, within radius, not already shown. Genuinely zero candidates (a
+city with no inventory at all) still honestly delivers nothing — never fabricated. Verified live
+against a real dev server: two members with zero taste history got a real seeded event the
+moment the second one joined.
+
+**Crews page desktop layout — two real, distinct bugs, not one**, both found by direct visual
+comparison against the user's own screenshot:
+1. *"Far too much spacing"*: `.v2-crew-main`'s `maxWidth` (720px) combined with the rail (280px)
+   left large, genuinely excessive dead margins on both sides of a wide desktop window (verified
+   via Playwright screenshot: ~240px of empty grey per side at 1728px viewport width). Widened
+   to 980px — a meaningful, visible reduction, not a full redesign; the "conversation column
+   stays a fixed readable width" principle (WhatsApp/Slack/Discord desktop's own convention,
+   already the deliberate design here) is kept, just less needlessly narrow.
+2. *"The text box is not locked"*: a real structural bug, not vague description. `.v2-crew-main`'s
+   own inline `height: 100dvh` is correct on mobile (`.v2-crew-split` is a plain block there,
+   genuinely needs the real viewport unit) but wrong on desktop, where `.v2-crew-split` becomes a
+   flex row carrying its own `padding-top: 18px` (globals.css) — the child re-measuring against
+   the FULL viewport instead of its actual flex-allotted height overflowed the bottom by that
+   padding, pushing the composer (the last flex child) past the visible edge. Fixed with a
+   desktop-scoped `!important` CSS override (`height: calc(100dvh - 18px) !important`) rather
+   than changing the inline value itself, which would have broken the exact case `100dvh` exists
+   for on mobile — same established pattern as `.v2-sheet-root`'s own height guard elsewhere in
+   this file. Verified live: the composer now sits with real breathing room below it instead of
+   flush against the bottom edge.
+
+**Broken/non-persisting custom-uploaded Crew images — a real credential gap, not a code bug**:
+audited the full path (`routes/crews.ts` -> `lib/mediaStorage.ts` -> `IdentityPicker.tsx` ->
+`lib/api.ts`) and found the backend already does exactly the right thing — `saveUpload` refuses
+outright in production when no S3-compatible storage is configured (`MediaStorageUnavailableError`
+-> a real 503 with a clear message), and the frontend already surfaces that error rather than
+silently swallowing it. No `S3_BUCKET`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`/`S3_ENDPOINT`/
+`S3_PUBLIC_URL` are configured on Render (confirmed from the user's own environment-variables
+screenshot) — every real upload attempt has always been refused; the visible "?" placeholder is
+the app's own honest "no image set" state, not a broken upload masquerading as success. Full R2
+setup steps already documented in `docs/DEPLOYMENT.md` — relayed directly to the user rather than
+attempting a code workaround for a genuine missing-credential situation.
+
+**Verified**: 149/149 backend tests (2 new — guaranteedFirstRecommendation.test.ts proves both the
+guarantee and its honest "genuinely nothing" floor; crewCategoryPreferences.test.ts rewritten to
+isolate crew_preference's own effect in a city with zero mock-provider coverage, after an earlier
+version was contaminated by real mock restaurant data matching an unrelated taste swipe),
+`tsc`/`eslint --max-warnings=0` clean on every touched file (both apps), both `next build` and the
+API's own `tsc` production build clean. Every layout/behavior claim in this section was verified
+with real Playwright screenshots against a live dev server, not just code reasoning — the map-fit
+bug two sections up was already a lesson in exactly why that discipline matters here.
