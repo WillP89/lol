@@ -109,6 +109,10 @@ export default function ExplorePage() {
   const router = useRouter();
   const [experiences, setExperiences] = useState<ExploreExperience[] | null>(null);
   const [dataSource, setDataSource] = useState<'live' | 'mock' | null>(null);
+  // Skiddle's own API terms require crediting them "by name and brand logo" wherever their data
+  // is shown — this drives the attribution line below, real signal not a static flag, since it
+  // reflects whether SKIDDLE_API_KEY is actually configured server-side right now.
+  const [hasSkiddleProvider, setHasSkiddleProvider] = useState(false);
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -152,6 +156,7 @@ export default function ExplorePage() {
       .get<{
         experiences: ExploreExperience[];
         dataSource: 'live' | 'mock';
+        hasSkiddleProvider: boolean;
         city: string | null;
         cityLat: number;
         cityLng: number;
@@ -160,6 +165,7 @@ export default function ExplorePage() {
       .then((res) => {
         setExperiences(res.experiences);
         setDataSource(res.dataSource);
+        setHasSkiddleProvider(res.hasSkiddleProvider);
         setCityCenter([res.cityLat, res.cityLng]);
         setPlacesSearched(res.radius?.placesSearched ?? null);
         // Exact-city mode is still the source of truth for `city`/`areaLabel` (the resolved home
@@ -378,11 +384,25 @@ export default function ExplorePage() {
           OpenStreetMap-sourced in every environment that can reach it, independent of whether a
           ticketing provider is configured. */}
       {experiences !== null && experiences.length > 0 && (
-        <div style={{ fontSize: 11, color: 'var(--v2-ink-dim)', marginBottom: 18 }}>
-          Place data{' '}
-          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>
-            © OpenStreetMap contributors
-          </a>
+        <div style={{ fontSize: 11, color: 'var(--v2-ink-dim)', marginBottom: 18, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          <span>
+            Place data{' '}
+            <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>
+              © OpenStreetMap contributors
+            </a>
+          </span>
+          {/* Skiddle's own API terms require crediting them "by name and brand logo" wherever
+              their data might be shown — shown whenever SKIDDLE_API_KEY is configured
+              server-side, the same honest "could be present" standard the OpenStreetMap credit
+              above already uses, rather than trying to detect it per-card. */}
+          {hasSkiddleProvider && (
+            <span>
+              {' • '}Event data via{' '}
+              <a href="https://www.skiddle.com" target="_blank" rel="noreferrer" style={{ color: 'inherit', fontWeight: 600 }}>
+                Skiddle
+              </a>
+            </span>
+          )}
         </div>
       )}
 

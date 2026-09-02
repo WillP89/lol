@@ -4,6 +4,7 @@ import { mockRestaurantProvider } from './mock/restaurantProvider';
 import { mockActivityProvider } from './mock/activityProvider';
 import { ticketmasterProvider } from './live/ticketmaster';
 import { eventbriteProvider } from './live/eventbrite';
+import { skiddleProvider } from './live/skiddle';
 import { openStreetMapProvider } from './live/openStreetMap';
 import { config } from '../lib/config';
 
@@ -17,7 +18,9 @@ void eventbriteProvider; // kept implemented, deliberately not registered — se
  *
  * Each live ticketed-events adapter registers independently as its own key is configured —
  * more than one can run at once, the normal case for "every source possible", not either/or.
- * Eventbrite is implemented but NOT registered: researched and confirmed (September 2026, see
+ * Skiddle (see live/skiddle.ts) is a second, independent ticketed-events source alongside
+ * Ticketmaster — different real inventory (club nights, UK festivals, comedy, smaller venues),
+ * not a duplicate. Eventbrite is implemented but NOT registered: researched and confirmed (September 2026, see
  * its own file's top comment) that Eventbrite cut public event search off for new keys in 2020
  * and ended official API support entirely by 2025 — a real EVENTBRITE_API_KEY would not make
  * this adapter return real inventory, so presenting it as a "live" option the moment a key is
@@ -41,6 +44,7 @@ void eventbriteProvider; // kept implemented, deliberately not registered — se
  */
 const liveTicketedProviders: ProviderAdapter[] = [
   ...(config.TICKETMASTER_API_KEY ? [ticketmasterProvider] : []),
+  ...(config.SKIDDLE_API_KEY ? [skiddleProvider] : []),
 ];
 
 // Same convention already used for media storage (lib/mediaStorage.ts) and email
@@ -68,6 +72,12 @@ export const hasLiveProvider = providerRegistry.some((p) => p.isLive);
 // zero real event coverage and TICKETMASTER_API_KEY still unset. Restaurants/places being real
 // is a genuinely different fact from events being real — see docs/providers/food-and-places.md.
 export const hasLiveTicketedProvider = liveTicketedProviders.length > 0;
+
+// Skiddle's own API terms require crediting them "by name and brand logo" wherever their data
+// is shown — a real, distinct signal from `hasLiveTicketedProvider` (which would stay true from
+// Ticketmaster alone with SKIDDLE_API_KEY unset) so the client can show that credit only when
+// Skiddle inventory can actually be present. See routes/explore.ts and docs/providers/ticketing.md.
+export const hasSkiddleProvider = Boolean(config.SKIDDLE_API_KEY) && !isTestEnv;
 
 export function getProvider(id: string): ProviderAdapter | undefined {
   return providerRegistry.find((p) => p.id === id);

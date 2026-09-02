@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../middleware/auth';
 import { listExploreExperiences, listExploreExperiencesByRadius } from '../services/explore';
-import { hasLiveTicketedProvider } from '../providers/registry';
+import { hasLiveTicketedProvider, hasSkiddleProvider } from '../providers/registry';
 import { prisma } from '../lib/prisma';
 import { UK_FALLBACK_CENTER, UK_PLACES } from '../data/ukPlaces';
 
@@ -32,6 +32,9 @@ export async function exploreRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({
         experiences,
         dataSource: hasLiveTicketedProvider ? 'live' : 'mock',
+        // Skiddle's own API terms require crediting them wherever their data might be shown —
+        // see providers/registry.ts#hasSkiddleProvider and the web client's attribution line.
+        hasSkiddleProvider,
         city: city ?? null,
         cityLat: parsedLat,
         cityLng: parsedLng,
@@ -58,6 +61,7 @@ export async function exploreRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       experiences,
       dataSource: hasLiveTicketedProvider ? 'live' : 'mock',
+      hasSkiddleProvider,
       city: resolvedCity,
       cityLat: cityPlace.lat,
       cityLng: cityPlace.lng,

@@ -2,7 +2,7 @@ import type { ExperienceCategory } from '@prisma/client';
 import type { ProviderAdapter, RawListing, CanonicalListingInput, FetchListingsParams, ProviderHealth } from '../types';
 import { withRetry } from '../../lib/retry';
 import { logger } from '../../lib/logger';
-import { UK_PLACES, UK_FALLBACK_CENTER, type UkPlace } from '../../data/ukPlaces';
+import { UK_FALLBACK_CENTER, resolveCityCenter, type UkPlace } from '../../data/ukPlaces';
 
 /**
  * Real OpenStreetMap adapter (queried via the Overpass API) — the PLOT-CONTENT directive's
@@ -109,11 +109,6 @@ function directImageTag(tags: Record<string, string>): string | null {
   if (!raw) return null;
   if (/\/wiki\//i.test(raw)) return null;
   return /\.(jpe?g|png|webp)(\?.*)?$/i.test(raw) ? raw : null;
-}
-
-function resolveCityCenter(city: string): UkPlace {
-  const exact = UK_PLACES.find((p) => p.name.toLowerCase() === city.trim().toLowerCase());
-  return exact ?? UK_FALLBACK_CENTER;
 }
 
 function buildQuery(center: UkPlace): string {

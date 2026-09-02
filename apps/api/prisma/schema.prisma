@@ -546,6 +546,7 @@ enum ImageSource {
   OPENSTREETMAP
   WIKIPEDIA
   THESPORTSDB
+  SKIDDLE
   MANUAL // POST /admin/experiences/manual — an operator-entered real photo URL
 }
 

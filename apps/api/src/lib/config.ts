@@ -36,6 +36,10 @@ const EnvSchema = z.object({
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   TICKETMASTER_API_KEY: z.string().optional(),
+  // A second, independent live ticketed-events source (club nights, UK festivals, comedy,
+  // smaller venues Ticketmaster doesn't carry) — self-serve, free key at
+  // skiddle.com/api/join.php. See providers/live/skiddle.ts and docs/providers/ticketing.md.
+  SKIDDLE_API_KEY: z.string().optional(),
   DICE_API_KEY: z.string().optional(),
   EVENTBRITE_API_KEY: z.string().optional(),
   OPENTABLE_API_KEY: z.string().optional(),
@@ -127,6 +131,7 @@ export const providerReadiness = {
   appleOAuth: Boolean(config.APPLE_OAUTH_CLIENT_ID && config.APPLE_OAUTH_CLIENT_SECRET),
   stripe: Boolean(config.STRIPE_SECRET_KEY),
   ticketmaster: Boolean(config.TICKETMASTER_API_KEY),
+  skiddle: Boolean(config.SKIDDLE_API_KEY),
   dice: Boolean(config.DICE_API_KEY),
   eventbrite: Boolean(config.EVENTBRITE_API_KEY),
   openTable: Boolean(config.OPENTABLE_API_KEY),

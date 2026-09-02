@@ -94,6 +94,18 @@ export const UK_PLACES: UkPlace[] = [
  * a London-shaped assumption dressed up as a default. */
 export const UK_FALLBACK_CENTER: UkPlace = { name: 'Birmingham', region: 'West Midlands', lat: 52.4862, lng: -1.8904 };
 
+/**
+ * The gazetteer point for a named city — exact match, honestly falling back to
+ * UK_FALLBACK_CENTER (never silently substituting a different real city's coordinates) when the
+ * name isn't one of ours. Shared by every live provider that needs a lat/lng centre to search
+ * around (openStreetMap.ts, skiddle.ts) — was a private duplicate in openStreetMap.ts, pulled
+ * out here so a second adapter needing the exact same lookup doesn't grow its own copy.
+ */
+export function resolveCityCenter(city: string): UkPlace {
+  const exact = UK_PLACES.find((p) => p.name.toLowerCase() === city.trim().toLowerCase());
+  return exact ?? UK_FALLBACK_CENTER;
+}
+
 export function searchUkPlaces(query: string, limit = 8): UkPlace[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
