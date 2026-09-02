@@ -863,16 +863,24 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
 @media (min-width: 1280px) {
   .v2-crew-split {
     display: flex;
-    align-items: flex-start;
+    /* Real, reported bug: `flex-start` let the rail size to its own content (the "Your Crews"
+       card) instead of matching the conversation column beside it — on any Crew with only a
+       handful of Crews listed, that left a large dead void of plain background below the card,
+       reading as "a small floating box" rather than a real sidebar. `stretch` makes both flex
+       children fill the row's own cross-axis height, which `.v2-crew-main`'s explicit height
+       (below) already defines — the rail now genuinely matches it, the way a real sidebar
+       (WhatsApp/Slack/Discord desktop) always does regardless of how few items are in it. */
+    align-items: stretch;
     justify-content: center;
     gap: 28px;
     padding-top: 18px;
   }
   .v2-crew-rail {
-    display: block;
+    display: flex;
+    flex-direction: column;
     width: 280px;
     flex-shrink: 0;
-    max-height: calc(100dvh - 36px);
+    height: calc(100dvh - 36px);
     overflow-y: auto;
   }
   /* Real, reported bug: this element's own inline `height: 100dvh` (correct on mobile, where

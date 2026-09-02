@@ -1322,7 +1322,12 @@ export default function CrewPage() {
             beside it wasn't. This is real navigation, not decoration. */}
         {crewList && crewList.length > 0 && (
           <div className="v2-crew-rail">
-            <div className="v2-card" style={{ padding: '16px 14px' }}>
+            {/* `height: 100%` here is the other half of the .v2-crew-rail fix (globals.css) — the
+                rail's own box now genuinely matches the conversation column's height, but without
+                this the visible white card inside it would still be sized to its content (a
+                short crew list), leaving the rail's own extra height as bare background around
+                it rather than a real full-height panel. */}
+            <div className="v2-card" style={{ padding: '16px 14px', height: '100%' }}>
               <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Your Crews</div>
               {crewList.map((c) => (
                 <Link
