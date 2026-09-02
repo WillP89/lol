@@ -14,7 +14,7 @@ vi.mock('../src/lib/imageDimensions', async () => {
   const actual = await vi.importActual<typeof import('../src/lib/imageDimensions')>('../src/lib/imageDimensions');
   return {
     ...actual,
-    probeImageWidth: vi.fn(async (url: string) => (url.includes('tiny') ? 150 : 1200)),
+    isImageQualityBad: vi.fn(async (url: string) => url.includes('tiny')),
   };
 });
 

@@ -41,19 +41,19 @@ describe('image quality — resolution floor at ingestion', () => {
 
   it('picks the highest-resolution 16:9 candidate over a smaller one, never just the first in the array', () => {
     const result = mapListing([
-      { url: 'https://img.example/wide-786.jpg', width: 786, height: 442, ratio: '16_9' },
-      { url: 'https://img.example/wide-1024.jpg', width: 1024, height: 576, ratio: '16_9' },
+      { url: 'https://img.example/wide-1200.jpg', width: 1200, height: 675, ratio: '16_9' },
+      { url: 'https://img.example/wide-1600.jpg', width: 1600, height: 900, ratio: '16_9' },
     ]);
-    expect(result.imageUrl).toBe('https://img.example/wide-1024.jpg');
+    expect(result.imageUrl).toBe('https://img.example/wide-1600.jpg');
     expect(result.imageSource).toBe('TICKETMASTER');
   });
 
   it('falls back to the best non-16:9 candidate that clears the floor when no wide image does', () => {
     const result = mapListing([
-      { url: 'https://img.example/square-800.jpg', width: 800, height: 800, ratio: '1_1' },
+      { url: 'https://img.example/square-1200.jpg', width: 1200, height: 1200, ratio: '1_1' },
       { url: 'https://img.example/tiny-wide.jpg', width: 200, height: 112, ratio: '16_9' },
     ]);
-    expect(result.imageUrl).toBe('https://img.example/square-800.jpg');
+    expect(result.imageUrl).toBe('https://img.example/square-1200.jpg');
   });
 
   it('returns no image at all when the event has none, rather than throwing', () => {

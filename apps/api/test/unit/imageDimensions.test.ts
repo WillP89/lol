@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readWidthFromHeader, probeImageWidth, MIN_IMAGE_WIDTH } from '../../src/lib/imageDimensions';
+import { readWidthFromHeader, probeImageWidth, isImageQualityBad, MIN_IMAGE_WIDTH } from '../../src/lib/imageDimensions';
 
 /** Builds a minimal-but-real PNG header: signature + IHDR chunk carrying the given width. */
 function pngHeader(width: number, height = 100): Buffer {
@@ -98,6 +98,45 @@ describe('probeImageWidth — fails open on anything unprovable', () => {
   });
 
   it('MIN_IMAGE_WIDTH matches the floor every provider adapter already applies', () => {
-    expect(MIN_IMAGE_WIDTH).toBe(640);
+    expect(MIN_IMAGE_WIDTH).toBe(1000);
+  });
+});
+
+describe('isImageQualityBad — the real, provider-agnostic gate every source goes through now', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubFetchWithImage(buf: Buffer) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 206,
+      arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+    }));
+  }
+
+  it('flags a real photo below the width floor, regardless of a fine aspect ratio', async () => {
+    stubFetchWithImage(jpegHeader(400, 300)); // 4:3, but under MIN_IMAGE_WIDTH
+    expect(await isImageQualityBad('https://img.example/small.jpg')).toBe(true);
+  });
+
+  it('flags a wide-enough image whose aspect ratio is an unnaturally stretched banner crop', async () => {
+    stubFetchWithImage(jpegHeader(1200, 200)); // 6:1 — well past MAX_ASPECT_RATIO
+    expect(await isImageQualityBad('https://img.example/warped-banner.jpg')).toBe(true);
+  });
+
+  it('flags an unnaturally tall/narrow crop too, not just an overly wide one', async () => {
+    stubFetchWithImage(jpegHeader(1200, 4000)); // far past MIN_ASPECT_RATIO
+    expect(await isImageQualityBad('https://img.example/warped-tall.jpg')).toBe(true);
+  });
+
+  it('passes a genuinely high-resolution, normally-proportioned photo', async () => {
+    stubFetchWithImage(jpegHeader(1600, 900)); // 16:9, well above the floor
+    expect(await isImageQualityBad('https://img.example/hd.jpg')).toBe(false);
+  });
+
+  it('never flags anything unprovable (network failure) — fails open, exactly like probeImageWidth', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unreachable')));
+    expect(await isImageQualityBad('https://img.example/unreachable.jpg')).toBe(false);
   });
 });

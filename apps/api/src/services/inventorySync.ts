@@ -7,17 +7,18 @@ import { buildCanonicalKey } from './entityResolution';
 import { computeQualityScore } from './qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { enrichImageFromWikipedia, enrichImageFromTheSportsDb } from '../lib/imageEnrichment';
-import { probeImageWidth, MIN_IMAGE_WIDTH } from '../lib/imageDimensions';
+import { isImageQualityBad } from '../lib/imageDimensions';
 import { config } from '../lib/config';
 
-// Sources whose OWN API never reports image width, so "stretched and distorted" for these can
-// only be caught by reading the real bytes (see lib/imageDimensions.ts) — Ticketmaster's
-// bestImage() and imageEnrichment.ts's Wikipedia fetch already verify a declared width at the
-// point they pick the image, so re-probing them here would just be a redundant network round
-// trip. TheSportsDB team badges are deliberately excluded: a badge/crest is meant to be a small,
-// icon-like image, not a photo — the same 640px "hero photo" floor doesn't apply to that asset
-// class, and forcing it would reject every real result TheSportsDB has.
-const UNVERIFIED_IMAGE_SOURCES = new Set(['SKIDDLE', 'EVENTBRITE', 'OPENSTREETMAP']);
+// EVERY provider's image gets byte-verified now, no exceptions — real, repeated live reports
+// ("distorted and shit quality") kept recurring even after this file first shipped, because that
+// first version only probed sources with no declared width at all and trusted Ticketmaster's/
+// Wikipedia's own self-reported number outright. A provider's own declared width was clearly not
+// a strong enough bar on its own; the real bytes are the only thing actually trusted now. TheSportsDB
+// team badges are the one deliberate exception: a badge/crest is meant to be a small, icon-like
+// image, not a photo — the same "hero photo" floor doesn't apply to that asset class, and forcing
+// it would reject every real result TheSportsDB has.
+const IMAGE_QUALITY_EXEMPT_SOURCES = new Set(['THESPORTSDB', 'MANUAL']);
 
 // Ids of the never-registered-in-production mock adapters — see providers/mock/*.ts. Used only
 // to identify stale rows a real provider has since superseded (retireStaleMockListings below);
@@ -75,13 +76,12 @@ export async function syncProvider(
           canonicalInput.imageSource = sportBadge ? 'THESPORTSDB' : 'WIKIPEDIA';
         }
       }
-      // The real, provider-agnostic quality floor (see lib/imageDimensions.ts's own header
-      // comment) — only for sources whose own API gives no width to trust in the first place.
-      // Best-effort: a probe failure keeps the image exactly as before this existed, it never
-      // turns a working sync into a broken one.
-      if (canonicalInput.imageUrl && canonicalInput.imageSource && UNVERIFIED_IMAGE_SOURCES.has(canonicalInput.imageSource)) {
-        const width = await probeImageWidth(canonicalInput.imageUrl);
-        if (width !== null && width < MIN_IMAGE_WIDTH) {
+      // THE real, provider-agnostic quality floor (see lib/imageDimensions.ts's own header
+      // comment) — every source now, no exemption for a provider that merely declares its own
+      // width. Best-effort: a probe failure keeps the image exactly as before this existed, it
+      // never turns a working sync into a broken one.
+      if (canonicalInput.imageUrl && canonicalInput.imageSource && !IMAGE_QUALITY_EXEMPT_SOURCES.has(canonicalInput.imageSource)) {
+        if (await isImageQualityBad(canonicalInput.imageUrl)) {
           canonicalInput.imageUrl = null;
           canonicalInput.imageSource = null;
         }
@@ -462,7 +462,7 @@ const BACKFILL_CONCURRENCY = 5;
  */
 export async function backfillImageQuality(limit = 300): Promise<ImageQualityBackfillResult> {
   const rows = await prisma.experience.findMany({
-    where: { imageUrl: { not: null }, imageSource: { not: 'MANUAL' } },
+    where: { imageUrl: { not: null }, imageSource: { notIn: ['MANUAL', 'THESPORTSDB'] } },
     select: { id: true, imageUrl: true },
     orderBy: { updatedAt: 'desc' },
     take: limit,
@@ -472,12 +472,9 @@ export async function backfillImageQuality(limit = 300): Promise<ImageQualityBac
   for (let i = 0; i < rows.length; i += BACKFILL_CONCURRENCY) {
     const batch = rows.slice(i, i + BACKFILL_CONCURRENCY);
     const results = await Promise.all(
-      batch.map(async (row) => {
-        const width = await probeImageWidth(row.imageUrl!);
-        return { id: row.id, tooSmall: width !== null && width < MIN_IMAGE_WIDTH };
-      }),
+      batch.map(async (row) => ({ id: row.id, bad: await isImageQualityBad(row.imageUrl!) })),
     );
-    const toClear = results.filter((r) => r.tooSmall).map((r) => r.id);
+    const toClear = results.filter((r) => r.bad).map((r) => r.id);
     if (toClear.length) {
       await prisma.experience.updateMany({ where: { id: { in: toClear } }, data: { imageUrl: null, imageSource: null } });
       cleared += toClear.length;
