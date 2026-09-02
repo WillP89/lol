@@ -28,6 +28,15 @@ const STRENGTH_WEIGHT: Record<'love' | 'like' | 'open' | 'not_for_me', number> =
 };
 export type TasteStrength = keyof typeof STRENGTH_WEIGHT;
 
+// Real bug found via live verification: creating a TasteProfile row here for the first time
+// (someone using "Tune my Plot" before ever completing onboarding's swipe step) with only the
+// schema's bare column defaults (budgetMaxMinor: 0, travelRadiusMeters: 6000) silently read back
+// as "Free" / "Nearby" on Profile — indistinguishable from a real, deliberate choice, when it was
+// actually just "never set". These match Profile's own UI defaults (apps/web/.../profile/page.tsx)
+// so a brand-new row reads the same as what the page was already showing before anyone touched it.
+const DEFAULT_BUDGET_MAX_MINOR = 3000;
+const DEFAULT_TRAVEL_RADIUS_METERS = 16000;
+
 /** Lowercase, strip punctuation to spaces, collapse whitespace — deliberately simple
  *  normalisation so matching stays explainable (grep-able, not a black box), not real NLP. */
 function normalize(s: string): string {
@@ -102,7 +111,7 @@ export async function applyInterestUpdates(
   const profile = await prisma.tasteProfile.upsert({
     where: { userId },
     update: { interestAffinity: next },
-    create: { userId, categoryAffinity: {}, interestAffinity: next },
+    create: { userId, categoryAffinity: {}, interestAffinity: next, budgetMaxMinor: DEFAULT_BUDGET_MAX_MINOR, travelRadiusMeters: DEFAULT_TRAVEL_RADIUS_METERS },
   });
   await track('TasteInterestUpdated', { userId, count: updates.length }, { userId });
   return profile;
@@ -131,7 +140,7 @@ export async function addFreeTextSignal(userId: string, rawText: string): Promis
   const profile = await prisma.tasteProfile.upsert({
     where: { userId },
     update: { freeTextSignals: signals.slice(0, 40) as unknown as object[], interestAffinity: affinity },
-    create: { userId, categoryAffinity: {}, freeTextSignals: signals as unknown as object[], interestAffinity: affinity },
+    create: { userId, categoryAffinity: {}, freeTextSignals: signals as unknown as object[], interestAffinity: affinity, budgetMaxMinor: DEFAULT_BUDGET_MAX_MINOR, travelRadiusMeters: DEFAULT_TRAVEL_RADIUS_METERS },
   });
   await track('TasteFreeTextAdded', { userId, matched: matchedInterestIds.length > 0 }, { userId });
   return profile;
@@ -158,7 +167,7 @@ export async function setCategoryBudget(
   return prisma.tasteProfile.upsert({
     where: { userId },
     update: { categoryBudget: current },
-    create: { userId, categoryAffinity: {}, categoryBudget: current },
+    create: { userId, categoryAffinity: {}, categoryBudget: current, budgetMaxMinor: DEFAULT_BUDGET_MAX_MINOR, travelRadiusMeters: DEFAULT_TRAVEL_RADIUS_METERS },
   });
 }
 

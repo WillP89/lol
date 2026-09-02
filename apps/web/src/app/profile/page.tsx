@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
@@ -11,7 +11,8 @@ import { v2Art } from '@/lib/v2Art';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { MediaUploadButton } from '@/components/MediaUploadButton';
 import { LocationSearch, type UkPlaceResult } from '@/components/LocationSearch';
-import { INTERESTS, interestSlug } from '@/lib/interests';
+import { TuneMyPlotSheet } from '@/components/TuneMyPlotSheet';
+import { interestLabel } from '@plot/shared';
 
 interface ProfileUser {
   id: string;
@@ -21,6 +22,9 @@ interface ProfileUser {
   createdAt: string;
   tasteProfile: {
     categoryAffinity: Record<string, number>;
+    // The personalisation-engine pass's own additions — see TasteProfile's schema comment.
+    interestAffinity: Record<string, number>;
+    freeTextSignals: { text: string; matchedInterestIds: string[]; confidence: 'high' | 'low'; addedAt: string }[];
     budgetMaxMinor: number;
     energyPreference: 'LOW' | 'MEDIUM' | 'HIGH';
     travelRadiusMeters: number;
@@ -137,9 +141,10 @@ export default function ProfilePage() {
   const [travelRadiusMeters, setTravelRadiusMeters] = useState(16000);
   const [energy, setEnergy] = useState<'LOW' | 'MEDIUM' | 'HIGH'>('MEDIUM');
   const [savedFlash, setSavedFlash] = useState(false);
+  const [tuneOpen, setTuneOpen] = useState(false);
 
-  useEffect(() => {
-    api
+  function loadUser() {
+    return api
       .get<{ user: ProfileUser }>('/users/me')
       .then((res) => {
         setUser(res.user);
@@ -158,6 +163,10 @@ export default function ProfilePage() {
         }
         setError(err instanceof ApiError ? err.message : 'Could not load your profile.');
       });
+  }
+
+  useEffect(() => {
+    loadUser();
     api.get<{ crews: CrewSummary[] }>('/crews').then((res) => setCrews(res.crews)).catch(() => setCrews([]));
     api
       .get<{ plans: UpcomingPlan[] }>('/plans/upcoming')
@@ -184,11 +193,6 @@ export default function ProfilePage() {
     }
   }
 
-  function toggleInterest(slug: string) {
-    const next = interests.includes(slug) ? interests.filter((i) => i !== slug) : [...interests, slug];
-    setInterests(next);
-    saveTaste({ interests: next });
-  }
 
   async function saveName() {
     setEditingName(false);
@@ -236,6 +240,22 @@ export default function ProfilePage() {
       setDangerAction(null);
     }
   }
+
+  // The real "what Plot understands" summary — specific interests (never bare categories) plus
+  // any free-text signal, sorted by strength, capped so this reads as a highlight reel, not a
+  // dump of everything ever tapped. Top interests first (a person's strongest, most specific
+  // taste), free text after (the newest, most personal signal).
+  const tasteSummary = useMemo(() => {
+    const tp = user?.tasteProfile;
+    if (!tp) return [];
+    const interestEntries = Object.entries(tp.interestAffinity ?? {})
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([id]) => ({ key: `i:${id}`, label: interestLabel(id), quoted: false }));
+    const freeText = (tp.freeTextSignals ?? []).slice(0, 3).map((s) => ({ key: `f:${s.text}`, label: s.text, quoted: true }));
+    return [...interestEntries, ...freeText].slice(0, 8);
+  }, [user]);
 
   if (!user) {
     return (
@@ -337,38 +357,39 @@ export default function ProfilePage() {
             </div>
           )}
 
-          {/* What Plot knows about you — the actual levers behind discovery, editable directly,
-              not "go re-do the onboarding wizard." Every change here saves immediately. */}
+          {/* YOUR TASTE — the personalisation-engine pass's real surface. Real, reported design
+              constraint: this must feel like "Plot getting to know me", not a settings form — a
+              concise summary in Plot's own specific language (never "music"/"sport" alone),
+              with the actual editor living behind one clear "Tune my Plot" launch, not a wall of
+              chips inline on the page. */}
           <div className="v2-card" style={{ padding: '18px 20px', marginBottom: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-              <div className="v2-eyebrow">Your vibe</div>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--v2-brand)', opacity: savedFlash ? 1 : 0, transition: 'opacity 0.3s ease' }}>Saved</span>
-            </div>
-            <p className="v2-muted" style={{ fontSize: 12.5, margin: '2px 0 12px' }}>What Plot uses to find things for you.</p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {INTERESTS.map((label) => {
-                const slug = interestSlug(label);
-                const selected = interests.includes(slug);
-                return (
-                  <button
-                    key={slug}
-                    type="button"
-                    onClick={() => toggleInterest(slug)}
-                    className="v2-tap-feedback"
-                    style={{
-                      padding: '9px 14px', borderRadius: 100, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
-                      background: selected ? 'var(--v2-brand)' : 'var(--v2-bg-deep)', color: selected ? '#fff' : 'var(--v2-ink-muted)',
-                      transition: 'background 0.15s ease, color 0.15s ease',
-                    }}
+            <div className="v2-eyebrow" style={{ marginBottom: 2 }}>Your taste</div>
+            <p className="v2-muted" style={{ fontSize: 12.5, margin: '2px 0 12px' }}>What Plot actually understands about you.</p>
+            {tasteSummary.length > 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+                {tasteSummary.map(({ key, label, quoted }) => (
+                  <span
+                    key={key}
+                    style={{ padding: '8px 13px', borderRadius: 100, background: 'var(--v2-bg-deep)', fontSize: 12.5, fontWeight: 700, color: 'var(--v2-ink)' }}
                   >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
+                    {quoted ? `"${label}"` : label}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="v2-muted" style={{ fontSize: 13, marginBottom: 14, lineHeight: 1.5 }}>
+                Nothing specific yet — tell Plot what you&rsquo;re actually into, not just the broad category.
+              </p>
+            )}
+            <button type="button" onClick={() => setTuneOpen(true)} className="v2-btn v2-btn-brand v2-tap-feedback" style={{ width: '100%' }}>
+              Tune my Plot
+            </button>
 
             <div style={{ height: 1, background: 'var(--v2-line)', margin: '18px 0 14px' }} />
-            <div className="v2-eyebrow" style={{ marginBottom: 8 }}>Budget</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Budget</div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--v2-brand)', opacity: savedFlash ? 1 : 0, transition: 'opacity 0.3s ease' }}>Saved</span>
+            </div>
             <Segmented options={BUDGET_BANDS.map((b) => ({ label: b.label, value: String(b.maxMinor) }))} value={String(activeBudget.maxMinor)} onChange={(v) => { const n = Number(v); setBudgetMaxMinor(n); saveTaste({ budgetMaxMinor: n }); }} />
 
             <div style={{ height: 1, background: 'var(--v2-line)', margin: '16px 0 14px' }} />
@@ -440,6 +461,16 @@ export default function ProfilePage() {
           </div>
         )}
       </BottomSheet>
+
+      <TuneMyPlotSheet
+        open={tuneOpen}
+        onClose={() => {
+          setTuneOpen(false);
+          loadUser(); // pick up whatever was tapped/typed inside, for the summary pills above
+        }}
+        interestAffinity={user.tasteProfile?.interestAffinity ?? {}}
+        freeTextSignals={user.tasteProfile?.freeTextSignals ?? []}
+      />
 
       <TabBarV2 />
     </div>
