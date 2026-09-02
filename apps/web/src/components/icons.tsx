@@ -120,6 +120,18 @@ export function IconGathering(props: IconProps) {
   );
 }
 
+/** Three filled dots — more options. The Crews list tile's own leave/manage menu, or any other
+    "more, tucked out of the way" affordance that isn't important enough to be its own icon. */
+export function IconMore(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="4.5" cy="10" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="10" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="15.5" cy="10" r="1.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 /** A conversation. Talk step, message-a-crew actions. */
 export function IconChat(props: IconProps) {
   return (

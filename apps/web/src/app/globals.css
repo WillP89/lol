@@ -931,7 +931,15 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
      composer (the last flex child) past the visible edge, reading as "the text box isn't locked
      in place". `!important` is required to win over the inline style at all; scoped to this one
      desktop media query so mobile's own `100dvh` (genuinely correct there) is untouched. */
-  .v2-crew-main { flex-shrink: 0; height: calc(100dvh - 18px) !important; }
+  /* Real, reported feedback: the conversation column staying a genuinely FIXED width (its own
+     `maxWidth: 980` inline, `flex-shrink: 0` here) left a large void of bare page background
+     between it and the right edge of the viewport on any screen wider than nav+rail+980px — the
+     exact opposite of "immersive". `flex: 1 1 auto` lets it grow to actually fill the remaining
+     row width (WhatsApp Web's own conversation pane does this — the canvas/header fill the whole
+     pane, only message bubbles themselves stay capped, via their own `min(76%, 460px)` below);
+     the inline `maxWidth` is raised (see JSX) to a ceiling that only kicks in on genuinely
+     ultra-wide monitors, not an ordinary wide desktop window like this bug was reported on. */
+  .v2-crew-main { flex: 1 1 auto; height: calc(100dvh - 18px) !important; }
 }
 
 /* Static (non-interactive) tag pill — Profile's "Into" list. */
