@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { computeCrewDna } from './crewDna';
 import { track } from './analytics';
 import { displayNameOf } from '../lib/displayName';
+import { getPlotSystemUserId } from './crewRecommendations';
 
 // A Plan in one of these statuses is an open, unresolved decision the Crew is still working
 // out — the thing Home/Crew surfaces should foreground so a member never has to reconstruct
@@ -116,7 +117,10 @@ async function crewSummaryExtras(crewId: string, requestingUserId: string) {
     prisma.plan.findFirst({
       where: { crewId, status: { in: [...ACTIVE_DECISION_STATUSES] } },
       orderBy: { createdAt: 'desc' },
-      include: { votes: true, members: true },
+      // `experience` wasn't fetched here before — Home's own branded "Plot found this" card
+      // (home/page.tsx) needs the real photo/category for a still-undecided Plot recommendation,
+      // not just once it's locked (upcomingPlan, below, already had this).
+      include: { votes: true, members: true, experience: { include: { venue: true } } },
     }),
     prisma.plan.findFirst({
       // LOCKED, not just BOOKED — a manual plan ("Pub Saturday") stays LOCKED forever (nothing
@@ -141,6 +145,25 @@ async function crewSummaryExtras(crewId: string, requestingUserId: string) {
     },
   });
 
+  // Whether a Plan came from Plot's own automatic recommendation engine, not a member sharing
+  // something themselves — the exact same signal the Plan Card page already exposes (GET
+  // /plans/public/:slug's own `recommendation` field), just cheaper here: the recommendation
+  // engine always posts as the Plot system user (crewRecommendations.ts#createRecommendationPlanForCrew),
+  // so comparing `proposedByUserId` avoids a second query per Plan. Home's own branded "Plot
+  // found this" notification card (home/page.tsx) reads this to tell itself apart from an
+  // ordinary vote-needed/locked-plan card a real person proposed.
+  const plotSystemUserId = await getPlotSystemUserId();
+  const plotFoundPlanId =
+    (activePlan?.proposedByUserId === plotSystemUserId && activePlan?.id) ||
+    (upcomingPlan?.proposedByUserId === plotSystemUserId && upcomingPlan?.id) ||
+    null;
+  // The real "why" — the same reasonText the Plan Card page and the in-chat recommendation card
+  // already show (crewRecommendations.ts#explanationFor), fetched only when there's actually a
+  // Plot-found Plan to explain, so this stays a no-op query for the common case.
+  const plotFoundReason = plotFoundPlanId
+    ? (await prisma.crewRecommendation.findUnique({ where: { planId: plotFoundPlanId }, select: { reasonText: true } }))?.reasonText ?? null
+    : null;
+
   return {
     unreadCount,
     latestMessage: latestMessage
@@ -162,6 +185,11 @@ async function crewSummaryExtras(crewId: string, requestingUserId: string) {
           // attention" list (docs/DECISIONS.md#home-surface) is only useful if it's actually
           // scoped to *you*, not "someone in the Crew hasn't voted yet".
           iVoted: activePlan.votes.some((v) => v.userId === requestingUserId),
+          isPlotFound: activePlan.proposedByUserId === plotSystemUserId,
+          plotReasonText: activePlan.proposedByUserId === plotSystemUserId ? plotFoundReason : null,
+          imageUrl: activePlan.experience?.imageUrl ?? null,
+          category: activePlan.experience?.category ?? null,
+          venueName: activePlan.experience?.venue?.name ?? activePlan.manualVenueName ?? null,
         }
       : null,
     upcomingPlan: upcomingPlan
@@ -178,6 +206,8 @@ async function crewSummaryExtras(crewId: string, requestingUserId: string) {
           venueName: upcomingPlan.experience?.venue?.name ?? upcomingPlan.manualVenueName ?? null,
           category: upcomingPlan.experience?.category ?? null,
           imageUrl: upcomingPlan.experience?.imageUrl ?? null,
+          isPlotFound: upcomingPlan.proposedByUserId === plotSystemUserId,
+          plotReasonText: upcomingPlan.proposedByUserId === plotSystemUserId ? plotFoundReason : null,
         }
       : null,
   };

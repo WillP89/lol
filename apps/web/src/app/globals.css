@@ -820,6 +820,15 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
 .v2-ken-burns { animation: v2KenBurns 6s cubic-bezier(.2,.7,.2,1) both; }
 @media (prefers-reduced-motion: reduce) { .v2-ken-burns { animation: none; } }
 
+/* THE PLOT DISCOVERY MOTION — brief's own concept, made literal: SIGNALS gather, CONVERGE, LAND.
+   Plays once on the signature mark (IconGathering's three loose points) the moment a "Plot found
+   this" card arrives on screen — not a loop, not a gimmick, just the one moment a recommendation
+   actually gets delivered getting its own small piece of motion truth. Subtle and fast (450ms),
+   never confetti/sparkle/bounce. */
+@keyframes v2Converge { 0% { opacity: 0; transform: scale(0.55) rotate(-8deg); } 60% { opacity: 1; transform: scale(1.12) rotate(2deg); } 100% { opacity: 1; transform: scale(1) rotate(0deg); } }
+.v2-plotfound-mark { display: inline-flex; animation: v2Converge 0.55s cubic-bezier(.2,.9,.3,1.1) both; animation-delay: 0.15s; }
+@media (prefers-reduced-motion: reduce) { .v2-plotfound-mark { animation: none; } }
+
 @media (min-width: 900px) {
   .v2-home-page { max-width: 720px; padding-top: 12px; }
 }
