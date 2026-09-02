@@ -30,8 +30,18 @@ interface CrewSummary {
   // computed client-side; the server is the only place that knows what's actually been read.
   unreadCount: number;
   latestMessage: { body: string; authorName: string; createdAt: string; authorAvatarUrl?: string | null } | null;
-  activePlan: { id: string; title: string; publicSlug: string; inCount: number; totalMembers: number; iVoted: boolean } | null;
-  upcomingPlan: { id: string; title: string; publicSlug: string; startsAt: string | null; venueName: string | null } | null;
+  activePlan: {
+    id: string; title: string; publicSlug: string; inCount: number; totalMembers: number; iVoted: boolean;
+    // The personalisation-engine pass's own signal — Plot's own automatic recommendation
+    // engine proposed this, not a Crew member. See apps/api/src/services/crew.ts
+    // #crewSummaryExtras (proposedByUserId === the Plot system user).
+    isPlotFound: boolean; plotReasonText: string | null;
+    imageUrl: string | null; category: string | null; venueName: string | null;
+  } | null;
+  upcomingPlan: {
+    id: string; title: string; publicSlug: string; startsAt: string | null; venueName: string | null;
+    isPlotFound: boolean; plotReasonText: string | null;
+  } | null;
 }
 
 interface UpcomingPlan {
@@ -187,15 +197,23 @@ export default function HomePage() {
   // is already the page's own dominant hero above (never say the same thing twice on one screen).
   const heroCrewId = nextPlan?.crew.id ?? heroNeedsAttention?.id ?? null;
   type ActivityItem =
+    | { kind: 'plotfound'; crew: CrewSummary }
     | { kind: 'vote'; crew: CrewSummary }
     | { kind: 'event'; crew: CrewSummary }
     | { kind: 'message'; crew: CrewSummary };
   const activityFeed = useMemo(() => {
     const list = (crews ?? []).filter((c) => c.id !== heroCrewId);
+    // THE SIGNATURE MOMENT (personalisation-engine pass, Phase 14) — a Plan Plot itself found
+    // and delivered, still awaiting your Crew's response, gets its own branded kind, first —
+    // never lumped in with a plan a human happened to share. See PlotFoundCard below.
+    const plotFoundItems: ActivityItem[] = list
+      .filter((c) => c.activePlan && !c.activePlan.iVoted && c.activePlan.isPlotFound)
+      .map((c) => ({ kind: 'plotfound', crew: c }));
+    const plotFoundIds = new Set(plotFoundItems.map((i) => i.crew.id));
     const voteItems: ActivityItem[] = list
-      .filter((c) => c.activePlan && !c.activePlan.iVoted)
+      .filter((c) => c.activePlan && !c.activePlan.iVoted && !plotFoundIds.has(c.id))
       .map((c) => ({ kind: 'vote', crew: c }));
-    const votedIds = new Set(voteItems.map((i) => i.crew.id));
+    const votedIds = new Set([...plotFoundIds, ...voteItems.map((i) => i.crew.id)]);
     const eventItems: ActivityItem[] = list
       .filter((c) => c.upcomingPlan && !votedIds.has(c.id))
       .map((c) => ({ kind: 'event', crew: c }));
@@ -204,7 +222,7 @@ export default function HomePage() {
       .filter((c) => c.latestMessage && !claimedIds.has(c.id))
       .sort((a, b) => new Date(b.latestMessage!.createdAt).getTime() - new Date(a.latestMessage!.createdAt).getTime())
       .map((c) => ({ kind: 'message', crew: c }));
-    return [...voteItems, ...eventItems, ...messageItems].slice(0, 4);
+    return [...plotFoundItems, ...voteItems, ...eventItems, ...messageItems].slice(0, 4);
   }, [crews, heroCrewId]);
 
   const loading = crews === null && !error;
@@ -386,23 +404,40 @@ export default function HomePage() {
               className="fade-up v2-bleed v2-hoverable"
               style={{ display: 'block', position: 'relative', height: 280, overflow: 'hidden', marginBottom: 6 }}
             >
-              <div
-                className="v2-ken-burns"
-                style={{ position: 'absolute', inset: 0, background: identityGradient(heroNeedsAttention.id, 155) }}
-              />
+              {/* THE SIGNATURE MOMENT, at the page's single most prominent slot — real, reported
+                  feedback: this hero used to look identical whether a Plot recommendation or a
+                  friend's own share was still awaiting votes, using the Crew's plain identity
+                  colour either way. A Plot-found Plan now gets its OWN language: the real photo
+                  (never the crew colour standing in for it), the same converging-signal mark and
+                  "why this fits" reasoning as the smaller feed cards, so the biggest thing on
+                  Home is unmistakably a Plot moment when it is one. */}
+              {heroNeedsAttention.activePlan!.isPlotFound ? (
+                <div className="v2-ken-burns" style={{ position: 'absolute', inset: 0, background: v2Art(heroNeedsAttention.activePlan!.imageUrl, heroNeedsAttention.activePlan!.category) }} />
+              ) : (
+                <div className="v2-ken-burns" style={{ position: 'absolute', inset: 0, background: identityGradient(heroNeedsAttention.id, 155) }} />
+              )}
               <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(22,19,15,0) 25%, rgba(22,19,15,0.55) 100%)' }} />
               <div style={{ position: 'absolute', top: 20, left: 20, display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 800, letterSpacing: '-0.01em', color: '#fff', background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(6px)', padding: '7px 14px', borderRadius: 100 }}>
-                <IconGathering size={12} />Still deciding
+                {heroNeedsAttention.activePlan!.isPlotFound ? (
+                  <>
+                    <span className="v2-plotfound-mark"><IconGathering size={12} /></span>
+                    Plot found this for {heroNeedsAttention.name}
+                  </>
+                ) : (
+                  <><IconGathering size={12} />Still deciding</>
+                )}
               </div>
               <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 20px' }}>
                 <div className="v2-display" style={{ fontSize: 26, lineHeight: 1.08, color: '#fff', marginBottom: 8, maxWidth: '92%' }}>
                   {heroNeedsAttention.activePlan!.title}
                 </div>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: 'rgba(255,255,255,0.85)', marginBottom: 14 }}>
-                  {heroNeedsAttention.name} · {heroNeedsAttention.activePlan!.inCount}/{heroNeedsAttention.activePlan!.totalMembers} have voted
+                  {heroNeedsAttention.activePlan!.isPlotFound && heroNeedsAttention.activePlan!.plotReasonText
+                    ? heroNeedsAttention.activePlan!.plotReasonText
+                    : `${heroNeedsAttention.name} · ${heroNeedsAttention.activePlan!.inCount}/${heroNeedsAttention.activePlan!.totalMembers} have voted`}
                 </div>
                 <span style={{ display: 'inline-block', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand-ink)', background: '#fff', padding: '9px 18px', borderRadius: 100 }}>
-                  Cast your vote →
+                  {heroNeedsAttention.activePlan!.isPlotFound ? 'Respond →' : 'Cast your vote →'}
                 </span>
               </div>
             </Link>
@@ -418,6 +453,65 @@ export default function HomePage() {
               <div className="v2-eyebrow" style={{ marginBottom: 8 }}>In the groups</div>
               {activityFeed.map((item, i) => {
                 const c = item.crew;
+                if (item.kind === 'plotfound') {
+                  const plan = c.activePlan!;
+                  return (
+                    <Link
+                      key={`plotfound-${c.id}`}
+                      href={`/plans/${plan.publicSlug}`}
+                      className="v2-reveal v2-plotfound-card"
+                      style={{
+                        ['--reveal-i' as string]: i, textDecoration: 'none', color: 'inherit', display: 'block', position: 'relative',
+                        height: 156, borderRadius: 'var(--v2-r-lg)', overflow: 'hidden', marginBottom: 10,
+                        boxShadow: 'var(--v2-shadow-sm)',
+                      }}
+                    >
+                      <div className="v2-ken-burns" style={{ position: 'absolute', inset: 0, background: v2Art(plan.imageUrl, plan.category) }} />
+                      <div
+                        style={{
+                          position: 'absolute', left: 0, right: 0, bottom: 0, height: '80%',
+                          backdropFilter: 'blur(14px) saturate(115%)', WebkitBackdropFilter: 'blur(14px) saturate(115%)',
+                          maskImage: 'linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.45) 28%, #000 60%)',
+                          WebkitMaskImage: 'linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.45) 28%, #000 60%)',
+                        }}
+                      />
+                      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(17,14,11,0) 22%, rgba(17,14,11,0.5) 55%, rgba(12,10,8,0.92) 100%)' }} />
+                      {/* THE SIGNATURE MARK — the same converging-points shape already established
+                          for "Plot found this" everywhere else in the product (the in-chat
+                          recommendation card's own watermark, "Still deciding"'s tag) — never a
+                          robot/sparkle/AI-assistant motif. A one-shot arrival animation plays the
+                          concept literally: three signals gathering into one delivered thing. */}
+                      <div style={{ position: 'absolute', top: 12, left: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span className="v2-plotfound-mark" style={{ color: '#fff' }}>
+                          <IconGathering size={14} />
+                        </span>
+                        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.92)' }}>
+                          Plot found this for {c.name}
+                        </span>
+                      </div>
+                      <div style={{ position: 'absolute', left: 14, right: 14, bottom: 12 }}>
+                        <div className="v2-display" style={{ fontSize: 18, lineHeight: 1.1, color: '#fff', marginBottom: 4 }}>{plan.title}</div>
+                        {plan.plotReasonText && (
+                          <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.82)', marginBottom: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {plan.plotReasonText}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div className="stack">
+                            {c.members.slice(0, 4).map((m, mi) => (
+                              <div key={m.user.id} style={{ marginLeft: mi === 0 ? 0 : -8, borderRadius: '50%', boxShadow: '0 0 0 2px rgba(12,10,8,0.9)' }}>
+                                <PersonAvatar name={m.user.displayName} email={m.user.email} photoUrl={m.user.avatarUrl} size={24} />
+                              </div>
+                            ))}
+                          </div>
+                          <span style={{ fontSize: 11.5, fontWeight: 800, color: '#fff', background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(4px)', padding: '7px 14px', borderRadius: 100 }}>
+                            Respond →
+                          </span>
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                }
                 if (item.kind === 'vote') {
                   const plan = c.activePlan!;
                   return (

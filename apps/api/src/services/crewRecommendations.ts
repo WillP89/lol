@@ -72,6 +72,8 @@ export interface RecommendationSettingsDTO {
   // The Crew's own explicit picks — see the schema field's own comment (CrewRecommendationSettings
   // .categoryPreferences) for why this blends with, rather than replaces, member-derived taste.
   categoryPreferences: string[];
+  // One level more specific — taxonomy interest ids, see .interestPreferences's own schema comment.
+  interestPreferences: string[];
 }
 
 /** Self-heals a settings row on first read — every Crew gets sane defaults (on, 2/week,
@@ -105,6 +107,7 @@ export async function getOrCreateSettings(crewId: string): Promise<Recommendatio
     maxPerWeek: settings.maxPerWeek,
     travelRadiusMeters: settings.travelRadiusMeters,
     categoryPreferences: settings.categoryPreferences,
+    interestPreferences: settings.interestPreferences,
   };
 }
 
@@ -120,6 +123,7 @@ export async function updateSettings(
       ...(patch.maxPerWeek !== undefined ? { maxPerWeek: patch.maxPerWeek } : {}),
       ...(patch.travelRadiusMeters !== undefined ? { travelRadiusMeters: patch.travelRadiusMeters } : {}),
       ...(patch.categoryPreferences !== undefined ? { categoryPreferences: patch.categoryPreferences } : {}),
+      ...(patch.interestPreferences !== undefined ? { interestPreferences: patch.interestPreferences } : {}),
     },
   });
   return {
@@ -127,33 +131,51 @@ export async function updateSettings(
     maxPerWeek: settings.maxPerWeek,
     travelRadiusMeters: settings.travelRadiusMeters,
     categoryPreferences: settings.categoryPreferences,
+    interestPreferences: settings.interestPreferences,
   };
 }
 
-/** A short, human explanation — never the raw score, never a fabricated "insight". Picks the
- * single most relevant real reason the scorer already produced, in a fixed priority order
- * (taste match first — the brief's own example is "Because your Crew likes comedy"). */
+function lowerFirst(s: string): string {
+  return s.charAt(0).toLowerCase() + s.slice(1);
+}
+
+/** A real, specific, multi-clause explanation — never the raw score, never a fabricated
+ * "insight", every clause traceable to a reason the scorer actually produced (brief §"Why This")
+ * example: not "Because your Crew likes music" (tells you nothing) but "2/3 of you are into UK
+ * garage, and it's 8 miles from your area" — a claim specific enough that the honest reaction is
+ * "yeah, that actually is us." Picks the single strongest, most specific signal available as the
+ * lead clause (a literal free-text match beats a specific-interest match beats a bare category
+ * match — more specific claims are more trustworthy), then one supporting context clause. Never
+ * asserts a code that isn't actually in `option.reasons`. */
 function explanationFor(option: MatchOption): string {
   const byCode = new Map(option.reasons.map((r) => [r.code, r]));
   const categoryLabel = option.experience.category.replace(/_/g, ' ').toLowerCase();
-  // An explicit crew-level pick is an even more direct signal than DNA/affinity inferred from
-  // swipes — worth naming first, since it's literally what the Crew told Plot it wanted.
-  if (byCode.has('crew_preference')) {
-    return `Because your Crew set ${categoryLabel} as a preference`;
+
+  let primary: string | null = null;
+  if (byCode.has('free_text_match')) {
+    primary = byCode.get('free_text_match')!.label; // already `You said "X"` — exact and specific
+  } else if (byCode.has('interest_match')) {
+    primary = byCode.get('interest_match')!.label; // already `N/M of you are into <interest>`
+  } else if (byCode.has('crew_interest_preference')) {
+    primary = byCode.get('crew_interest_preference')!.label;
+  } else if (byCode.has('crew_preference')) {
+    primary = `Your Crew set ${categoryLabel} as a preference`;
+  } else if (byCode.has('crew_dna_match') || byCode.has('category_affinity')) {
+    primary = `Your Crew likes ${categoryLabel}`;
+  } else {
+    primary = `Matched to your Crew's taste`;
   }
-  if (byCode.has('crew_dna_match') || byCode.has('category_affinity')) {
-    return `Because your Crew likes ${categoryLabel}`;
-  }
+
+  let secondary: string | null = null;
   if (byCode.has('nearby')) {
-    return `It's close to your area`;
+    secondary = `it's ${lowerFirst(byCode.get('nearby')!.label)}`;
+  } else if (byCode.has('under_budget')) {
+    secondary = `it's under your Crew's typical spend`;
+  } else if (byCode.has('high_availability')) {
+    secondary = `${byCode.get('high_availability')!.label.toLowerCase()} that night`;
   }
-  if (byCode.has('under_budget')) {
-    return `Fits your Crew's usual budget`;
-  }
-  if (byCode.has('high_availability')) {
-    return `Most of your Crew are free that night`;
-  }
-  return `Matched to your Crew's taste`;
+
+  return secondary ? `${primary}, and ${secondary}.` : `${primary}.`;
 }
 
 async function resolveCrewCityForSweep(crewId: string): Promise<string> {
@@ -236,7 +258,14 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   // "Find us something" can reasonably be shown that; Plot pushing it unprompted, captioned
   // "Because your Crew likes X", cannot — the explanation would be a lie. See docs/DECISIONS.md
   // #crew-auto-recommendations.
-  const hasTasteSignal = (o: MatchOption) => o.reasons.some((r) => r.code === 'category_affinity' || r.code === 'crew_dna_match' || r.code === 'crew_preference');
+  // Real, specific-interest signals (interest_match, free_text_match, crew_interest_preference)
+  // count here too, alongside the original category-level ones — the personalisation-engine
+  // pass's whole point is that these are, if anything, MORE trustworthy grounds to proactively
+  // recommend than a bare category match, not less.
+  const hasTasteSignal = (o: MatchOption) =>
+    o.reasons.some((r) =>
+      ['category_affinity', 'crew_dna_match', 'crew_preference', 'interest_match', 'free_text_match', 'crew_interest_preference'].includes(r.code),
+    );
   const notExcluded = scored.filter((o) => !excluded.has(o.experience.id));
   const inRadius = notExcluded.filter((o) => o.withinRadius !== false);
   const withTaste = inRadius.filter(hasTasteSignal);

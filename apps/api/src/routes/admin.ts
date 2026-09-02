@@ -76,6 +76,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // near-term route to real imagery for RESTAURANT/BAR) had no way to attach it — every
     // manually-curated listing fell back to the editorial mark even when a real photo existed.
     imageUrl: z.string().url().nullable().default(null),
+    // Real gap this closes: every live provider adapter sends subcategory strings (Ticketmaster
+    // genres, Skiddle event codes, OSM cuisine tags — see providers/live/*.ts), which the
+    // personalisation-engine pass now actually matches against Plot's own interest taxonomy
+    // (services/tasteSignals.ts#experienceInterestTags) — but this endpoint hardcoded `[]`
+    // regardless of input, so a manually-curated listing could never carry that signal. An
+    // operator can tag one directly (e.g. `["uk garage"]`); a raw string that doesn't match the
+    // taxonomy is simply never matched by anything, same as an unrecognised provider genre.
+    subcategories: z.array(z.string()).default([]),
   });
   app.post('/experiences/manual', async (request, reply) => {
     const parsed = ManualExperienceSchema.safeParse(request.body);
@@ -99,7 +107,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       name: input.name,
       description: input.description,
       category: input.category,
-      subcategories: [],
+      subcategories: input.subcategories,
       venueName: input.venueName,
       latitude: input.latitude,
       longitude: input.longitude,

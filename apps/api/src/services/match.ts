@@ -8,6 +8,8 @@ import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { haversineMiles } from '../lib/geo';
 import { track } from './analytics';
 import { sendExperienceToCrew } from './plan';
+import { experienceInterestTags, experienceMatchesFreeText, type FreeTextSignal } from './tasteSignals';
+import { interestLabel } from '@plot/shared';
 import type { Experience, TasteProfile, Plan } from '@prisma/client';
 
 export interface MatchReason {
@@ -91,21 +93,34 @@ export async function scoreExperiencesForCrew(
   crewId: string,
   opts: { radiusMetersOverride?: number | null } = {},
 ): Promise<MatchOption[]> {
-  const [members, dna, recommendationSettings] = await Promise.all([
+  const [members, dna, recommendationSettings, pastResponses] = await Promise.all([
     prisma.crewMember.findMany({
       where: { crewId, status: 'ACTIVE' },
       include: { user: { include: { tasteProfile: true, profile: true } } },
     }),
     prisma.crewDNA.findUnique({ where: { crewId } }),
-    // The Crew's own explicit category picks (docs: CrewRecommendationSettings.categoryPreferences)
-    // — fetched here rather than requiring every caller to pass it in, so "Find us something"/
-    // "Suggest something" (which never touch recommendation settings otherwise) also lean into
-    // what the Crew said it's about, not just the automatic-sweep path. A Crew with no settings
-    // row yet (never touched the Recommendation settings UI) simply has no preference — this
-    // reads, never creates, so a brand-new Crew's first score isn't blocked on a settings write.
-    prisma.crewRecommendationSettings.findUnique({ where: { crewId }, select: { categoryPreferences: true } }),
+    // The Crew's own explicit category/interest picks (docs: CrewRecommendationSettings
+    // .categoryPreferences/.interestPreferences) — fetched here rather than requiring every
+    // caller to pass it in, so "Find us something"/"Suggest something" (which never touch
+    // recommendation settings otherwise) also lean into what the Crew said it's about, not just
+    // the automatic-sweep path. A Crew with no settings row yet (never touched the Recommendation
+    // settings UI) simply has no preference — this reads, never creates, so a brand-new Crew's
+    // first score isn't blocked on a settings write.
+    prisma.crewRecommendationSettings.findUnique({ where: { crewId }, select: { categoryPreferences: true, interestPreferences: true } }),
+    // THE LEARNING LOOP (brief §"PASS teaches Plot nothing" — this is the fix). Every past
+    // response this Crew has given a CrewRecommendation, joined to what that Experience actually
+    // was — turned into a per-category/per-interest bias applied to THIS scoring pass only (never
+    // written back into an individual member's own TasteProfile, since a Crew's collective "not
+    // for us" isn't necessarily true of any one person in it). See `buildLearningBias` below for
+    // which response kinds count as taste signal vs. purely situational.
+    prisma.crewRecommendation.findMany({
+      where: { crewId, status: { not: 'SENT' } },
+      select: { status: true, experience: { select: { category: true, subcategories: true, name: true, description: true } } },
+    }),
   ]);
   const crewCategoryPreferences = new Set(recommendationSettings?.categoryPreferences ?? []);
+  const crewInterestPreferences = new Set(recommendationSettings?.interestPreferences ?? []);
+  const learningBias = buildLearningBias(pastResponses);
 
   const userIds = members.map((m) => m.userId);
   const tasteProfiles = members
@@ -137,7 +152,6 @@ export async function scoreExperiencesForCrew(
     take: 50,
   });
 
-  const medianBudget = medianOf(tasteProfiles.map((tp) => (tp.budgetMinMinor + tp.budgetMaxMinor) / 2));
   const dnaTopCategories = new Set((dna?.topCategories as string[] | undefined) ?? []);
   const radiusMeters = opts.radiusMetersOverride
     ?? (medianOf(tasteProfiles.map((tp) => tp.travelRadiusMeters).filter((r) => r > 0)) || DEFAULT_RADIUS_METERS);
@@ -148,12 +162,18 @@ export async function scoreExperiencesForCrew(
     const reasons: MatchReason[] = [];
     let score = 0;
 
-    // Layer 2: preference scoring (0-70)
+    // Layer 2: preference scoring — category (0-30) then specific interest (0-30, see below).
+    // Real learning applied here: `learningBias` nudges the effective affinity this Crew sees
+    // for a category/interest based on how they've actually responded before (respondToRecommendation
+    // -> crewRecommendations.ts), never permanently, never from a single response — see
+    // `buildLearningBias`'s own comment for exactly which responses count and why.
     const affinities = tasteProfiles
       .map((tp) => (tp.categoryAffinity as Record<string, number>)[categoryToTasteKey(experience.category)])
       .filter((v): v is number => typeof v === 'number');
     const avgAffinity = affinities.length ? affinities.reduce((a, b) => a + b, 0) / affinities.length : 0;
-    score += Math.max(0, avgAffinity) * 35;
+    const categoryBias = learningBias.category.get(experience.category) ?? 0;
+    const effectiveCategoryAffinity = avgAffinity + categoryBias;
+    score += Math.max(0, effectiveCategoryAffinity) * 30;
     if (avgAffinity > 0.3) {
       reasons.push({ code: 'category_affinity', label: `${Math.round((affinities.filter((a) => a > 0).length / Math.max(1, affinities.length)) * members.length)}/${members.length} usually go for this` });
     }
@@ -173,12 +193,76 @@ export async function scoreExperiencesForCrew(
       reasons.push({ code: 'crew_preference', label: 'Your Crew set this as a preference' });
     }
 
-    // Layer 3: context (0-35)
-    if (experience.priceMinMinor !== null && medianBudget > 0) {
-      if (experience.priceMinMinor <= medianBudget) {
+    // THE PERSONALISATION-ENGINE LAYER — this is the actual fix for "someone saying 'I like
+    // music' tells Plot almost nothing" (brief's own framing). Real provider data (Experience.
+    // subcategories — Ticketmaster genres, Skiddle event codes, OSM cuisine tags) mapped onto
+    // Plot's own interest taxonomy (@plot/shared/tasteTaxonomy.ts), matched against each
+    // member's own TasteProfile.interestAffinity. Scored roughly level with category affinity,
+    // not additively stacked on top of it without limit — a specific match is a stronger signal
+    // than a broad one, but this is still one Crew's one Experience, not two independent votes.
+    let interestScore = 0;
+    let bestInterestId: string | null = null;
+    let bestInterestMemberCount = 0;
+    const tags = experienceInterestTags(experience);
+    if (tags.length > 0 && tasteProfiles.length > 0) {
+      for (const tag of tags) {
+        const tagBias = learningBias.interest.get(tag) ?? 0;
+        const perMember = tasteProfiles.map((tp) => ((tp.interestAffinity as Record<string, number> | undefined) ?? {})[tag] ?? 0);
+        const positiveCount = perMember.filter((v) => v > 0).length;
+        const avg = (perMember.length ? perMember.reduce((a, b) => a + b, 0) / perMember.length : 0) + tagBias;
+        const contribution = Math.max(0, avg) * 30;
+        if (contribution > interestScore) {
+          interestScore = contribution;
+          bestInterestId = tag;
+          bestInterestMemberCount = positiveCount;
+        }
+      }
+    }
+    if (bestInterestId && interestScore > 6) {
+      score += interestScore;
+      reasons.push({
+        code: 'interest_match',
+        label:
+          bestInterestMemberCount > 0
+            ? `${bestInterestMemberCount}/${members.length} of you are into ${interestLabel(bestInterestId)}`
+            : `Matches ${interestLabel(bestInterestId)}`,
+      });
+    }
+
+    // Crew-level specific-interest picks — one level more precise than crewCategoryPreferences
+    // ("we're specifically a UK garage crew", not just "a music crew").
+    const matchedCrewInterest = tags.find((tag) => crewInterestPreferences.has(tag));
+    if (matchedCrewInterest) {
+      score += 18;
+      reasons.push({ code: 'crew_interest_preference', label: `Your Crew set ${interestLabel(matchedCrewInterest)} as a preference` });
+    }
+
+    // Free-text signals ("Fred again..") — matched LITERALLY against this Experience's own name/
+    // description, quoted back verbatim in the reason, never dressed up as a taxonomy match. See
+    // tasteSignals.ts#experienceMatchesFreeText's own comment on why that's more honest here.
+    for (const tp of tasteProfiles) {
+      const signals = (tp.freeTextSignals as unknown as FreeTextSignal[] | undefined) ?? [];
+      const hit = signals.find((s) => experienceMatchesFreeText(experience, s.text));
+      if (hit) {
+        score += 22;
+        reasons.push({ code: 'free_text_match', label: `You said "${hit.text}"` });
+        break; // one quote is enough to explain it, not one per member who happened to type it
+      }
+    }
+
+    // Layer 3: context — category-specific comfortable spend where a member has set one (brief's
+    // "£15 on comedy, £100 on a concert"), falling back to their one global budget range.
+    const effectiveBudget = medianOf(
+      tasteProfiles.map((tp) => {
+        const perCategory = (tp.categoryBudget as Record<string, { minMinor: number; maxMinor: number }> | undefined)?.[experience.category];
+        return perCategory ? (perCategory.minMinor + perCategory.maxMinor) / 2 : (tp.budgetMinMinor + tp.budgetMaxMinor) / 2;
+      }),
+    );
+    if (experience.priceMinMinor !== null && effectiveBudget > 0) {
+      if (experience.priceMinMinor <= effectiveBudget) {
         score += 15;
         reasons.push({ code: 'under_budget', label: "Under your Crew's typical spend" });
-      } else if (experience.priceMinMinor > medianBudget * 1.5) {
+      } else if (experience.priceMinMinor > effectiveBudget * 1.5) {
         score -= 10; // over budget is a soft penalty, not a hard filter — groups do splurge
       }
     }
@@ -194,18 +278,29 @@ export async function scoreExperiencesForCrew(
     // actually supposed to mean for a group that doesn't all live in the same postcode. Never
     // fabricated for members with no home location set. See docs/DECISIONS.md#crew-auto-
     // recommendations.
+    //
+    // The radius itself now stretches for a genuinely high-affinity match (brief's "worth
+    // travelling for" vs "normal range") — a strong specific-interest or category match earns real
+    // extra travel allowance; a mediocre match never does, so this never becomes a loophole that
+    // quietly widens everyone's radius.
+    const strongAffinity = interestScore >= 24 || Math.max(0, effectiveCategoryAffinity) >= 0.6;
+    const effectiveRadiusMiles = strongAffinity ? radiusMiles * 1.6 : radiusMiles;
     let withinRadius: boolean | null = null;
     if (experience.venue && memberCoords.length > 0) {
       const distances = memberCoords.map((c) => haversineMiles(c.homeLat, c.homeLng, experience.venue!.latitude, experience.venue!.longitude));
       const nearestMiles = Math.min(...distances);
-      withinRadius = nearestMiles <= radiusMiles;
-      if (nearestMiles <= radiusMiles) {
+      withinRadius = nearestMiles <= effectiveRadiusMiles;
+      if (nearestMiles <= effectiveRadiusMiles) {
         // Closer scores higher, capped at 15 — a tiebreaker among in-radius options, not a
         // dominant factor (a great match slightly further is still worth surfacing).
-        score += Math.max(0, 15 - (nearestMiles / radiusMiles) * 15);
+        score += Math.max(0, 15 - (nearestMiles / effectiveRadiusMiles) * 15);
         const roundedMiles = Math.round(nearestMiles);
-        reasons.push({ code: 'nearby', label: roundedMiles <= 1 ? 'Under a mile from your area' : `${roundedMiles} miles from your area` });
-      } else if (nearestMiles <= radiusMiles * 1.5) {
+        const nearbyLabel = roundedMiles <= 1 ? 'Under a mile from your area' : `${roundedMiles} miles from your area`;
+        reasons.push({
+          code: 'nearby',
+          label: strongAffinity && nearestMiles > radiusMiles ? `${nearbyLabel} — worth the trip for this` : nearbyLabel,
+        });
+      } else if (nearestMiles <= effectiveRadiusMiles * 1.5) {
         score -= 5; // a bit over — still shown to a member browsing manually, soft penalty only
       } else {
         score -= 15;
@@ -323,6 +418,50 @@ export async function suggestToCrewChat(crewId: string, requestedByUserId: strin
   }
   await track('SuggestionsSentToChat', { crewId, count: plans.length }, { userId: requestedByUserId, crewId });
   return plans;
+}
+
+interface LearningBias {
+  category: Map<string, number>;
+  interest: Map<string, number>;
+}
+
+/** THE LEARNING LOOP — turns this Crew's actual past responses to recommendations into a bias
+ *  applied to future scoring for that same Crew. Deliberately distinguishes two different kinds
+ *  of PASS (brief §"be careful — one PASS should not permanently blacklist an entire category"):
+ *
+ *   - NOT_FOR_US / WRONG_VIBE are genuine taste signal ("not our thing") — negative bias.
+ *   - TOO_FAR / TOO_EXPENSIVE are situational (wrong date/price/distance, not wrong taste) —
+ *     contribute NOTHING here; match.ts's own distance/budget scoring already handles those
+ *     dimensions directly, so double-counting them as a taste penalty would be exactly the "one
+ *     PASS blacklists a category" failure mode the brief warns against.
+ *   - MORE_LIKE_THIS is the positive counterpart, reinforcing a category/interest that landed well.
+ *
+ *  Each occurrence nudges by a small, capped amount (never unbounded) — a Crew that's said
+ *  NOT_FOR_US to comedy three times ends up meaningfully cooler on comedy, not permanently
+ *  zeroed out, and one MORE_LIKE_THIS can still counteract it. Scoped to THIS Crew's own
+ *  scoring pass only, never written back into an individual member's TasteProfile — a Crew's
+ *  collective "not for us" isn't necessarily true of any one person in it. */
+function buildLearningBias(
+  pastResponses: { status: string; experience: { category: string; subcategories: unknown; name: string; description: string } | null }[],
+): LearningBias {
+  const category = new Map<string, number>();
+  const interest = new Map<string, number>();
+  for (const r of pastResponses) {
+    if (!r.experience) continue;
+    let delta = 0;
+    if (r.status === 'NOT_FOR_US' || r.status === 'WRONG_VIBE') delta = -0.35;
+    else if (r.status === 'MORE_LIKE_THIS') delta = 0.35;
+    if (delta === 0) continue;
+    category.set(r.experience.category, clamp(-1, 1, (category.get(r.experience.category) ?? 0) + delta));
+    for (const tag of experienceInterestTags(r.experience)) {
+      interest.set(tag, clamp(-1, 1, (interest.get(tag) ?? 0) + delta));
+    }
+  }
+  return { category, interest };
+}
+
+function clamp(min: number, max: number, v: number): number {
+  return Math.max(min, Math.min(max, v));
 }
 
 function medianOf(values: number[]): number {

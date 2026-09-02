@@ -128,6 +128,31 @@ model TasteProfile {
   user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// category -> affinity score -1..1, built from onboarding swipes + ongoing signals.
   categoryAffinity   Json
+  /// The personalisation-engine pass's own addition: taxonomy interest id (see
+  /// packages/shared/src/tasteTaxonomy.ts, e.g. "uk_garage", "championship_football") ->
+  /// affinity -1..1. `categoryAffinity` above answers "does this Crew like SPORT"; this answers
+  /// "does this person specifically like Championship football" — the actual granularity the
+  /// brief's whole premise rests on ("someone saying 'I like football' is weak"). Written
+  /// incrementally by services/tasteSignals.ts#applyInterestUpdates (merge, not overwrite —
+  /// unlike categoryAffinity's bulk onboarding write, this gets tuned repeatedly over time), and
+  /// nudged by real behaviour (a repeated NOT_FOR_US/WRONG_VIBE response, a repeated MORE_LIKE_
+  /// THIS) — see services/match.ts's crew-recommendation-history bias for the read side of that
+  /// loop.
+  interestAffinity   Json        @default("{}")
+  /// Free text the user typed that Plot couldn't confidently map onto the fixed taxonomy above
+  /// ("Fred again..", "small indie gigs") — preserved verbatim rather than forced into a
+  /// possibly-wrong tag, per the brief's "do not invent matches" instruction. Array of
+  /// `{ text, matchedInterestIds, confidence, addedAt }` — see services/tasteSignals.ts
+  /// #interpretFreeText for how `matchedInterestIds`/`confidence` get set, and match.ts for how
+  /// a raw, unmatched string can still influence scoring via a direct substring check against an
+  /// Experience's own name/description/subcategories (the one case a literal string match is
+  /// more honest than a fuzzy taxonomy guess).
+  freeTextSignals    Json        @default("[]")
+  /// ExperienceCategory -> { minMinor, maxMinor } — the brief's "£15 on comedy, £100 on a
+  /// concert" requirement. Absent categories fall back to budgetMinMinor/budgetMaxMinor below
+  /// (the original single global range), so this is additive/optional per category, never a
+  /// second required setup step.
+  categoryBudget     Json        @default("{}")
   budgetMinMinor     Int         @default(0)
   budgetMaxMinor     Int         @default(0)
   currency           String      @default("GBP")
@@ -732,6 +757,12 @@ model CrewRecommendationSettings {
   // Crew is still made of the people in it. Empty = no crew-level preference set, the original,
   // fully member-derived behaviour.
   categoryPreferences String[] @default([])
+  /// The same idea one level more specific — taxonomy interest ids (see TasteProfile.
+  /// interestAffinity's comment) the Crew has explicitly said it's about, e.g. a Crew that's
+  /// "our UK garage crew" specifically, not just "our music crew". Blends with member-derived
+  /// interest affinity in services/match.ts exactly like categoryPreferences already does for
+  /// categories.
+  interestPreferences String[] @default([])
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

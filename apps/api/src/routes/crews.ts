@@ -5,6 +5,7 @@ import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getC
 import { sendCrewMessage, listCrewMessages, toggleReaction, createPoll, votePoll, ChatError } from '../services/chat';
 import { track } from '../services/analytics';
 import { getOrCreateSettings, updateSettings, respondToRecommendation, generateRecommendationForCrew, RecommendationError } from '../services/crewRecommendations';
+import { computeCrewTasteSummary } from '../services/crewTaste';
 import { saveUpload, deleteUpload, MediaValidationError, MediaStorageUnavailableError } from '../lib/mediaStorage';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
@@ -300,6 +301,17 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
   // The auto-recommendation system's lightweight Crew-level controls (brief: "on/off,
   // frequency, travel range") — deliberately just these three, not a settings page. See
   // docs/DECISIONS.md#crew-auto-recommendations.
+  // "WHAT ARE WE USUALLY UP FOR?" — the Crew Taste surface (brief §Phase 8/13). Real overlap
+  // across members' own interest affinity, never a naive average — see crewTaste.ts's own
+  // comment for why that distinction matters.
+  app.get('/crews/:id/taste-summary', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+    const summary = await computeCrewTasteSummary(id);
+    return reply.send({ summary });
+  });
+
   app.get('/crews/:id/recommendation-settings', async (request, reply) => {
     if (!requireUser(request, reply)) return;
     const { id } = request.params as { id: string };
@@ -323,6 +335,12 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
       )
       .max(13)
       .optional(),
+    // One level more specific — taxonomy interest ids (see CrewRecommendationSettings
+    // .interestPreferences's own schema comment). Not validated against the taxonomy here
+    // (it's a plain string array, same pragmatic choice categoryPreferences already makes for
+    // its own still-Draft UI state) — an unrecognised id is simply never matched by anything in
+    // match.ts, not a runtime error.
+    interestPreferences: z.array(z.string()).max(40).optional(),
   });
   app.patch('/crews/:id/recommendation-settings', async (request, reply) => {
     if (!requireUser(request, reply)) return;
