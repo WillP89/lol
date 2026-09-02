@@ -1,20 +1,32 @@
 import { logger } from './logger';
 
 /**
- * THE real, provider-agnostic image-quality gate — hardened after repeated live reports that
- * imagery still looked "distorted and shit quality" even after the first pass of this file
- * (which only probed providers that don't self-report a width at all, trusting Ticketmaster's
- * and Wikipedia's own declared width outright). CSS is not the cause — every background-image in
- * this codebase renders via `center/cover` (which crops, never skews an aspect ratio; verified by
- * grepping every `background:`/`backgroundImage` site in apps/web), so a "distorted" report is a
- * property of the SOURCE FILE, not the CSS. Two real, independently-checkable properties of a
- * source file explain that report: it's genuinely low-resolution (gets visibly blown up at
- * hero-card size), or its aspect ratio is so extreme that a `cover` crop leaves an unnaturally
- * tight/warped-looking slice. Both are now checked from the real bytes, for EVERY provider
- * without exception — a provider's own declared width is no longer trusted on its own, because a
- * declared-but-unverified number clearly wasn't a strong enough bar.
+ * THE real, provider-agnostic image-quality gate — hardened repeatedly after live reports that
+ * imagery still looked "distorted and shit quality" kept recurring even after each previous
+ * pass. CSS is not the cause — every background-image in this codebase renders via `center/cover`
+ * (which crops, never skews an aspect ratio; verified by grepping every `background:`/
+ * `backgroundImage` site in apps/web), so a "distorted" report is a property of the SOURCE FILE,
+ * not the CSS. Two real, independently-checkable properties of a source file explain that report:
+ * it's genuinely low-resolution (gets visibly blown up at hero-card size), or its aspect ratio is
+ * so extreme that a `cover` crop leaves an unnaturally tight/warped-looking slice. Both are now
+ * checked from the real bytes, for EVERY provider without exception — a provider's own declared
+ * width is no longer trusted on its own, because a declared-but-unverified number clearly wasn't
+ * a strong enough bar.
+ *
+ * THE FLOOR ITSELF was still wrong even once every provider was byte-verified against it — found
+ * only by measuring the actual on-screen math, not by raising the number again and hoping: Home's
+ * hero (apps/web/src/app/home/page.tsx, `.v2-bleed` inside `.v2-home-page`) is this app's single
+ * largest, most prominent image placement, and renders at up to 720px + 40px of bleed = 760px of
+ * real CSS width on desktop. A perfectly "passing" 1000px-wide source is still, on ANY standard 2x
+ * retina/HiDPI display (the default on every current Mac and iPhone, and most modern Windows/
+ * Android screens) — 760 × 2 = 1520 physical pixels needed to render pixel-for-pixel sharp —
+ * visibly upscaled by ~1.5x at exactly the spot users look at first. That is a real, measurable,
+ * device-pixel-ratio upscale, not a subjective "doesn't feel HD enough" — the previous floor was
+ * simply never high enough to be genuinely crisp in the app's own biggest placement, on the most
+ * common class of screen there is. 1600 clears that math with real margin (760×2=1520) rather than
+ * sitting exactly on the edge of it.
  */
-export const MIN_IMAGE_WIDTH = 1000;
+export const MIN_IMAGE_WIDTH = 1600;
 // A `cover` crop never skews an image, but an extreme source aspect ratio still produces an
 // unnaturally tight/awkward-looking result once cropped to a card's own box — a real, distinct
 // failure mode from low resolution, not covered by the width floor alone.

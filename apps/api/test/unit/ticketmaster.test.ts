@@ -14,7 +14,7 @@ function fakeEvent(overrides: Record<string, unknown> = {}) {
     url: 'https://www.ticketmaster.co.uk/event/tm-123',
     images: [
       { url: 'https://example.com/square.jpg', width: 200, height: 200, ratio: '1_1' },
-      { url: 'https://example.com/wide.jpg', width: 1024, height: 576, ratio: '16_9' },
+      { url: 'https://example.com/wide.jpg', width: 1920, height: 1080, ratio: '16_9' },
     ],
     dates: { start: { dateTime: '2026-09-15T19:30:00Z' }, status: { code: 'onsale' } },
     classifications: [{ segment: { name: 'Music' }, genre: { name: 'Electronic' } }],

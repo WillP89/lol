@@ -98,7 +98,7 @@ describe('probeImageWidth — fails open on anything unprovable', () => {
   });
 
   it('MIN_IMAGE_WIDTH matches the floor every provider adapter already applies', () => {
-    expect(MIN_IMAGE_WIDTH).toBe(1000);
+    expect(MIN_IMAGE_WIDTH).toBe(1600);
   });
 });
 
@@ -121,17 +121,17 @@ describe('isImageQualityBad — the real, provider-agnostic gate every source go
   });
 
   it('flags a wide-enough image whose aspect ratio is an unnaturally stretched banner crop', async () => {
-    stubFetchWithImage(jpegHeader(1200, 200)); // 6:1 — well past MAX_ASPECT_RATIO
+    stubFetchWithImage(jpegHeader(1920, 320)); // clears the width floor; 6:1 — well past MAX_ASPECT_RATIO
     expect(await isImageQualityBad('https://img.example/warped-banner.jpg')).toBe(true);
   });
 
   it('flags an unnaturally tall/narrow crop too, not just an overly wide one', async () => {
-    stubFetchWithImage(jpegHeader(1200, 4000)); // far past MIN_ASPECT_RATIO
+    stubFetchWithImage(jpegHeader(1920, 6400)); // clears the width floor; far past MIN_ASPECT_RATIO
     expect(await isImageQualityBad('https://img.example/warped-tall.jpg')).toBe(true);
   });
 
   it('passes a genuinely high-resolution, normally-proportioned photo', async () => {
-    stubFetchWithImage(jpegHeader(1600, 900)); // 16:9, well above the floor
+    stubFetchWithImage(jpegHeader(1920, 1080)); // 16:9, comfortably above the floor
     expect(await isImageQualityBad('https://img.example/hd.jpg')).toBe(false);
   });
 
