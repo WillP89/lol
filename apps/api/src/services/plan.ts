@@ -297,11 +297,19 @@ export async function lockPlan(planId: string, userId: string): Promise<Plan> {
   return updated;
 }
 
+// `listings` capped to 1, most-recently-refreshed provider first — an Experience can have more
+// than one ProviderListing (Ticketmaster AND Skiddle both matching the same real event), but the
+// Plan Card/booking pages only need ONE real "view it at the source" link, not every provider's
+// own copy of it. `externalUrl` lives on ProviderListing, not Experience itself (a canonical
+// Experience is provider-agnostic by design — see entityResolution.ts) — this is the one place
+// that needs a real link out, so it reaches in for it rather than duplicating the field.
+const EXPERIENCE_INCLUDE = { include: { venue: true, listings: { orderBy: { lastRefreshedAt: 'desc' as const }, take: 1 } } };
+
 export async function getPlanById(planId: string) {
   return prisma.plan.findUnique({
     where: { id: planId },
     include: {
-      experience: { include: { venue: true } },
+      experience: EXPERIENCE_INCLUDE,
       crew: { select: { id: true, name: true } },
       members: { include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true } } } },
       votes: true,
@@ -314,7 +322,7 @@ export async function getPlanBySlug(slug: string) {
   return prisma.plan.findUnique({
     where: { publicSlug: slug },
     include: {
-      experience: { include: { venue: true } },
+      experience: EXPERIENCE_INCLUDE,
       crew: { select: { id: true, name: true } },
       members: { include: { user: { select: { id: true, displayName: true } } } },
       votes: true,

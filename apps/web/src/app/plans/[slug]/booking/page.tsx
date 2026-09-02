@@ -12,7 +12,7 @@ interface PlanDetail {
     title: string;
     status: string;
     crewId: string;
-    experience: { name: string; category: string; priceMinMinor: number | null; currency: string; venue: { name: string } | null } | null;
+    experience: { name: string; category: string; priceMinMinor: number | null; currency: string; venue: { name: string } | null; imageUrl: string | null } | null;
     votes: { userId: string; vote: string }[];
     members: { user: { id: string; displayName: string | null; email: string } }[];
     bookings: { id: string; status: string; externalUrl: string | null }[];
@@ -145,7 +145,9 @@ export default function BookingPage() {
         </Link>
       </div>
       <div className="v2-page" style={{ paddingTop: 12, maxWidth: 480 }}>
-        <div style={{ height: 100, margin: '0 -20px 22px', background: v2Art(null, plan.experience?.category), borderRadius: 0 }} />
+        {/* Same real bug as the Plan Card page (plans/[slug]/page.tsx) — a real photo existed
+            for this experience and simply never reached this screen. */}
+        <div style={{ height: 140, margin: '0 -20px 22px', background: v2Art(plan.experience?.imageUrl ?? null, plan.experience?.category), borderRadius: 0 }} />
 
         <div className="v2-eyebrow">{hasRealTicket && !reallyBooked ? 'Book for the Crew' : 'The plan'}</div>
         <h1 className="v2-display" style={{ fontSize: 24, marginBottom: 8 }}>{plan.title}</h1>
