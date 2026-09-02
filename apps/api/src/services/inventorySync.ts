@@ -203,7 +203,22 @@ export async function syncAllProviders(city = UK_FALLBACK_CENTER.name): Promise<
   for (const adapter of providerRegistry) {
     results.push(await syncProvider(adapter, { city, fromDate, toDate }));
   }
-  await retireSupersededMockListings(city);
+
+  // Real risk this guards against: `retireSupersededMockListings` deletes old mock rows purely
+  // because the registry has moved on from them — it has no idea whether today's real providers
+  // actually delivered a replacement. If every currently-registered provider fails or returns
+  // nothing for this city in this one sync (a live Overpass outage, a network blip on the host,
+  // a provider bug) while the OLD mock data still gets wiped, a city could go from "has content"
+  // to "has nothing at all" in one unlucky sync — worse than the stale-mock problem this was
+  // built to fix. Only retire once at least one registered provider actually produced real rows
+  // this run, so a bad sync leaves the previous (even if imperfect) inventory in place instead
+  // of deleting it out from under a page that's about to read it.
+  const anyRealUpsertsThisRun = results.some((r) => r.upserted > 0);
+  if (anyRealUpsertsThisRun) {
+    await retireSupersededMockListings(city);
+  } else {
+    logger.warn({ city, results }, 'Skipping stale-mock retirement — no registered provider produced any listings this sync');
+  }
   return results;
 }
 
@@ -295,6 +310,44 @@ async function runInventorySyncIfDue(city: string): Promise<void> {
  * every caller genuinely waits for the actual data to be there (see `inFlightSyncs` above),
  * since callers here are about to read what this call is meant to have populated.
  */
+// Real, live-reported bug this closes: EVERY caller of `ensureInventory` (both `explore.ts`'s
+// two list functions AND `crewRecommendations.ts`'s `evaluateCrewEligibility`) awaited it
+// unguarded. Before this file's periodic-resync rewrite, that was safe in practice — the old
+// "sync once, ever" guard meant an already-seeded city almost never actually ran
+// `syncAllProviders` again, so there was little live surface for a sync-time exception to
+// escape through. The periodic due-check changed that: now a normal request can be the one that
+// happens to trigger a real resync, and ANYTHING unexpected during it (a transient DB hiccup, a
+// provider adapter's own bug, anything not already individually caught inside `syncProvider`)
+// propagates straight out of this function — which meant Explore returning a 500 (rendering as
+// "loads with no images", not an error the user would necessarily notice) and, far worse, the
+// "send a recommendation the moment a Crew hits 2 members" trigger (`routes/crews.ts`) silently
+// failing and delivering nothing, exactly the two live symptoms this closes. `ensureInventory`
+// exists specifically to run BEFORE reading data that should already work whether or not a
+// resync happened to be due — a resync failing must never be worse than a resync simply not
+// having run yet. Catches everything at this one boundary rather than requiring every call site
+// to remember to guard itself.
+// Exported (not just used internally) specifically so this exact non-throwing guarantee is
+// directly testable, bypassing the `config.NODE_ENV === 'test'` branch below that the ordinary
+// `ensureInventory` export always takes inside the test suite — the same reason `syncProvider`
+// above is exported rather than kept private. See test/ensureInventoryResilience.test.ts.
+export async function ensureInventoryProduction(city: string): Promise<void> {
+  const existing = inFlightSyncs.get(city);
+  if (existing) {
+    await existing;
+    return;
+  }
+
+  const run = runInventorySyncIfDue(city).catch((err) => {
+    logger.error({ err, city }, 'Inventory sync failed — continuing with whatever inventory already exists rather than failing the request');
+  });
+  inFlightSyncs.set(city, run);
+  try {
+    await run;
+  } finally {
+    inFlightSyncs.delete(city);
+  }
+}
+
 export async function ensureInventory(city: string): Promise<void> {
   if (config.NODE_ENV === 'test') {
     // Real, test-caught regression this branch fixes: the periodic due-check below is correct
@@ -317,21 +370,5 @@ export async function ensureInventory(city: string): Promise<void> {
     return;
   }
 
-  // Deliberately no `await` between this check and the `.set()` below — two calls that arrive
-  // "concurrently" are still just interleaved on one JS thread, and nothing here yields between
-  // them, so whichever call runs first fully registers its promise before a second call's own
-  // synchronous prefix can run. See the comment on `inFlightSyncs` for why this matters.
-  const existing = inFlightSyncs.get(city);
-  if (existing) {
-    await existing;
-    return;
-  }
-
-  const run = runInventorySyncIfDue(city);
-  inFlightSyncs.set(city, run);
-  try {
-    await run;
-  } finally {
-    inFlightSyncs.delete(city);
-  }
+  await ensureInventoryProduction(city);
 }
