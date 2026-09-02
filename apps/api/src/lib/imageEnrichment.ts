@@ -115,13 +115,14 @@ interface WikipediaSummary {
   originalimage?: { source?: string; width?: number; height?: number };
 }
 
-// Same reasoning, same number, as ticketmaster.ts's own MIN_IMAGE_WIDTH — a card renders this
+// Same reasoning, same number, as ticketmaster.ts's own MIN_IMAGE_WIDTH and lib/imageDimensions
+// .ts's own (the real, final authority — this is just a coarse first pass) — a card renders this
 // full-bleed up to a ~900px-wide desktop hero, and a bitmap narrower than that gets visibly
 // blown up past its native resolution ("stretched and distorted", not premium). Wikipedia's
 // REST summary almost always includes `originalimage` (the full-resolution source file)
 // alongside `thumbnail` (a small, fixed-width crop) — this only matters for the rare case where
 // only the thumbnail came back.
-const MIN_IMAGE_WIDTH = 640;
+const MIN_IMAGE_WIDTH = 1000;
 
 async function fetchSummary(name: string): Promise<EnrichedImage | null> {
   const controller = new AbortController();

@@ -19,8 +19,8 @@ vi.mock('../src/lib/imageDimensions', async () => {
     ...actual,
     // Deterministic stand-in for the real byte-probe — this test is about syncProvider's own
     // wiring (which sources get probed, what happens to the row on a miss), not about re-proving
-    // the header parser itself (see test/unit/imageDimensions.test.ts for that).
-    probeImageWidth: vi.fn(async (url: string) => (url.includes('tiny') ? 150 : 1200)),
+    // the quality gate itself (see test/unit/imageDimensions.test.ts for that).
+    isImageQualityBad: vi.fn(async (url: string) => url.includes('tiny')),
   };
 });
 
