@@ -7,7 +7,17 @@ import { buildCanonicalKey } from './entityResolution';
 import { computeQualityScore } from './qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { enrichImageFromWikipedia, enrichImageFromTheSportsDb } from '../lib/imageEnrichment';
+import { probeImageWidth, MIN_IMAGE_WIDTH } from '../lib/imageDimensions';
 import { config } from '../lib/config';
+
+// Sources whose OWN API never reports image width, so "stretched and distorted" for these can
+// only be caught by reading the real bytes (see lib/imageDimensions.ts) — Ticketmaster's
+// bestImage() and imageEnrichment.ts's Wikipedia fetch already verify a declared width at the
+// point they pick the image, so re-probing them here would just be a redundant network round
+// trip. TheSportsDB team badges are deliberately excluded: a badge/crest is meant to be a small,
+// icon-like image, not a photo — the same 640px "hero photo" floor doesn't apply to that asset
+// class, and forcing it would reject every real result TheSportsDB has.
+const UNVERIFIED_IMAGE_SOURCES = new Set(['SKIDDLE', 'EVENTBRITE', 'OPENSTREETMAP']);
 
 // Ids of the never-registered-in-production mock adapters — see providers/mock/*.ts. Used only
 // to identify stale rows a real provider has since superseded (retireStaleMockListings below);
@@ -63,6 +73,17 @@ export async function syncProvider(
         if (enriched) {
           canonicalInput.imageUrl = enriched.url;
           canonicalInput.imageSource = sportBadge ? 'THESPORTSDB' : 'WIKIPEDIA';
+        }
+      }
+      // The real, provider-agnostic quality floor (see lib/imageDimensions.ts's own header
+      // comment) — only for sources whose own API gives no width to trust in the first place.
+      // Best-effort: a probe failure keeps the image exactly as before this existed, it never
+      // turns a working sync into a broken one.
+      if (canonicalInput.imageUrl && canonicalInput.imageSource && UNVERIFIED_IMAGE_SOURCES.has(canonicalInput.imageSource)) {
+        const width = await probeImageWidth(canonicalInput.imageUrl);
+        if (width !== null && width < MIN_IMAGE_WIDTH) {
+          canonicalInput.imageUrl = null;
+          canonicalInput.imageSource = null;
         }
       }
       const canonicalKey = buildCanonicalKey(canonicalInput);

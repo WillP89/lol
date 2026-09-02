@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireUser, SESSION_COOKIE } from '../middleware/auth';
 import { submitTasteSwipes, setLocationPreferences } from '../services/taste';
 import { applyInterestUpdates, addFreeTextSignal, removeFreeTextSignal, setCategoryBudget, TASTE_TAXONOMY } from '../services/tasteSignals';
+import { interpretTasteDescription, AiTasteSetupUnavailableError } from '../services/aiTasteSetup';
 import { track } from '../services/analytics';
 import { prisma } from '../lib/prisma';
 import { revokeAllSessionsForUser } from '../services/auth';
@@ -195,6 +196,36 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
     const tasteProfile = await setCategoryBudget(request.user.id, parsed.data.category, parsed.data.range);
     return reply.send({ tasteProfile });
+  });
+
+  // "Describe yourself and Plot sets up your taste for you" (services/aiTasteSetup.ts) — the
+  // fast path onto exactly the same interestAffinity/freeTextSignals a manual Tune My Plot
+  // session writes (applyInterestUpdates/addFreeTextSignal below), so what the AI picks is
+  // reviewable and editable in that exact same sheet afterwards, never a separate black box.
+  const AiSetupSchema = z.object({ description: z.string().trim().min(1).max(600) });
+  app.post('/users/me/taste/ai-setup', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const parsed = AiSetupSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+
+    let selection;
+    try {
+      selection = await interpretTasteDescription(parsed.data.description);
+    } catch (err) {
+      if (err instanceof AiTasteSetupUnavailableError) return reply.code(503).send({ error: 'ai_unavailable', message: err.message });
+      throw err;
+    }
+
+    if (selection.interestIds.length > 0) {
+      await applyInterestUpdates(request.user.id, selection.interestIds.map((interestId) => ({ interestId, strength: 'like' as const })));
+    }
+    for (const text of selection.freeText) {
+      await addFreeTextSignal(request.user.id, text).catch(() => {}); // best-effort — a dupe/empty entry never fails the whole setup
+    }
+    await track('AiTasteSetupApplied', { userId: request.user.id, interestCount: selection.interestIds.length, freeTextCount: selection.freeText.length }, { userId: request.user.id });
+
+    const tasteProfile = await prisma.tasteProfile.findUnique({ where: { userId: request.user.id } });
+    return reply.send({ tasteProfile, applied: selection });
   });
 
   app.post('/users/me/locations', async (request, reply) => {

@@ -22,6 +22,8 @@ export const AnalyticsEvents = {
   // "Tune My Plot" editor, distinct from TasteCompleted's one-time bulk onboarding write.
   TasteInterestUpdated: 'TasteInterestUpdated',
   TasteFreeTextAdded: 'TasteFreeTextAdded',
+  AiTasteSetupApplied: 'AiTasteSetupApplied',
+  CrewAiTasteSetupApplied: 'CrewAiTasteSetupApplied',
   CalendarPrompted: 'CalendarPrompted',
   CalendarConnected: 'CalendarConnected',
   CalendarSkipped: 'CalendarSkipped',
@@ -95,6 +97,8 @@ export interface AnalyticsEventPayloads {
   TasteCompleted: { userId: string; cardsShown: number; yes: number; maybe: number; no: number };
   TasteInterestUpdated: { userId: string; count: number };
   TasteFreeTextAdded: { userId: string; matched: boolean };
+  AiTasteSetupApplied: { userId: string; interestCount: number; freeTextCount: number };
+  CrewAiTasteSetupApplied: { crewId: string; userId: string; interestCount: number };
   CalendarPrompted: { userId: string };
   CalendarConnected: { userId: string; provider: 'google' | 'apple' | 'microsoft' };
   CalendarSkipped: { userId: string };

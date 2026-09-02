@@ -6,6 +6,7 @@ import { sendCrewMessage, listCrewMessages, toggleReaction, createPoll, votePoll
 import { track } from '../services/analytics';
 import { getOrCreateSettings, updateSettings, respondToRecommendation, generateRecommendationForCrew, RecommendationError } from '../services/crewRecommendations';
 import { computeCrewTasteSummary } from '../services/crewTaste';
+import { interpretTasteDescription, AiTasteSetupUnavailableError } from '../services/aiTasteSetup';
 import { saveUpload, deleteUpload, MediaValidationError, MediaStorageUnavailableError } from '../lib/mediaStorage';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
@@ -350,6 +351,33 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
     const settings = await updateSettings(id, parsed.data);
     return reply.send({ settings });
+  });
+
+  // "Describe your Crew and Plot sets up its preferences for you" (services/aiTasteSetup.ts) —
+  // the Crew-level counterpart to POST /users/me/taste/ai-setup. Adds to (never replaces) the
+  // Crew's existing explicit interestPreferences, and every id it adds is reviewable/removable
+  // afterwards in the exact same CrewTuneSheet a manual pick would land in — never a black box.
+  const AiSetupSchema = z.object({ description: z.string().trim().min(1).max(600) });
+  app.post('/crews/:id/taste/ai-setup', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+    const parsed = AiSetupSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+
+    let selection;
+    try {
+      selection = await interpretTasteDescription(parsed.data.description);
+    } catch (err) {
+      if (err instanceof AiTasteSetupUnavailableError) return reply.code(503).send({ error: 'ai_unavailable', message: err.message });
+      throw err;
+    }
+
+    const current = await getOrCreateSettings(id);
+    const next = [...new Set([...current.interestPreferences, ...selection.interestIds])];
+    const settings = await updateSettings(id, { interestPreferences: next });
+    await track('CrewAiTasteSetupApplied', { crewId: id, userId: request.user.id, interestCount: selection.interestIds.length }, { userId: request.user.id });
+    return reply.send({ settings, applied: selection });
   });
 
   const RespondSchema = z.object({
