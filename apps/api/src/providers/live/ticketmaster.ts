@@ -116,11 +116,26 @@ function mapBookingStatus(statusCode: string | undefined): CanonicalListingInput
   }
 }
 
+// A real, specific floor, not an arbitrary one: cards render this image full-bleed via CSS
+// `background: url(...) center/cover` up to a ~900px-wide desktop hero — `cover` never distorts
+// the aspect ratio (it crops, it doesn't stretch), but a bitmap narrower than this gets visibly
+// blown up past its native resolution and reads as blurry/pixelated, which is exactly what "some
+// of the images look stretched and distorted" was actually describing. Ticketmaster's own image
+// set for a real touring artist/venue reliably includes at least one candidate at or above this,
+// so this is a real quality floor, not a coverage cut — see v2Art.ts's own comment for the
+// fallback this exists to prefer over a blurry photo.
+const MIN_IMAGE_WIDTH = 640;
+
 function bestImage(images: TmImage[] | undefined): string | null {
   if (!images?.length) return null;
-  // Prefer a wide 16:9 image (Ticketmaster's standard promo crop) over square/portrait ones.
-  const wide = images.find((img) => img.ratio === '16_9' && img.width >= 640);
-  return (wide ?? images[0]).url;
+  const usable = images.filter((img) => img.width >= MIN_IMAGE_WIDTH);
+  if (!usable.length) return null; // nothing meets the floor — the editorial fallback beats a blurry photo
+  // Prefer a wide 16:9 image (Ticketmaster's standard promo crop) over square/portrait ones, then
+  // the single highest-resolution candidate available — never just the first one in the array,
+  // which Ticketmaster does not guarantee is the best one.
+  const wide = usable.filter((img) => img.ratio === '16_9');
+  const pool = wide.length ? wide : usable;
+  return pool.reduce((best, img) => (img.width > best.width ? img : best), pool[0]).url;
 }
 
 async function fetchPage(params: FetchListingsParams, page: number, signal: AbortSignal): Promise<TmSearchResponse> {
@@ -197,6 +212,7 @@ export const ticketmasterProvider: ProviderAdapter = {
     const lng = Number(venue?.location?.longitude);
     const priceRange = event.priceRanges?.[0];
     const startsAtIso = event.dates?.start?.dateTime ?? (event.dates?.start?.localDate ? `${event.dates.start.localDate}T${event.dates.start.localTime ?? '20:00:00'}` : null);
+    const image = bestImage(event.images);
 
     return {
       name: event.name,
@@ -213,8 +229,8 @@ export const ticketmasterProvider: ProviderAdapter = {
       priceMaxMinor: priceRange?.max !== undefined ? Math.round(priceRange.max * 100) : null,
       currency: priceRange?.currency ?? 'GBP',
       bookingStatus: mapBookingStatus(event.dates?.status?.code),
-      imageUrl: bestImage(event.images),
-      imageSource: bestImage(event.images) ? 'TICKETMASTER' : null,
+      imageUrl: image,
+      imageSource: image ? 'TICKETMASTER' : null,
       tags: {
         provider: 'ticketmaster',
         genre: event.classifications?.[0]?.genre?.name ?? null,

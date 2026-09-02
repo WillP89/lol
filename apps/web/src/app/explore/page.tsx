@@ -162,10 +162,23 @@ export default function ExplorePage() {
 
   const usingRadius = radiusKm !== null && pickedCenter !== null;
 
+  // "When I change my preferences, the discovery page should IMMEDIATELY change to only show
+  // events within that preference, it should not still show other events that are not
+  // relevant" — the real behavioural change, not just a reorder (see
+  // services/explore.ts#finishExploreList for exactly what counts as relevant, and why an
+  // account with no taste signal yet is never filtered to an empty page). Explore always fetches
+  // fresh on mount, so returning here from tuning taste on Profile already picks up the new
+  // filter with no separate refresh step needed. `tasteFilterOn` is the one explicit escape
+  // hatch — a person can always ask to see everything again without having to un-tune anything.
+  const [tasteFilterOn, setTasteFilterOn] = useState(true);
+  const [filteredToTaste, setFilteredToTaste] = useState(false);
+  const [totalBeforeFilter, setTotalBeforeFilter] = useState(0);
+
   useEffect(() => {
-    const url = usingRadius
+    const base = usingRadius
       ? `/explore/experiences?lat=${pickedCenter!.lat}&lng=${pickedCenter!.lng}&radiusKm=${radiusKm}`
       : `/explore/experiences${city ? `?city=${encodeURIComponent(city)}` : ''}`;
+    const url = `${base}${base.includes('?') ? '&' : '?'}filter=${tasteFilterOn ? 'on' : 'off'}`;
 
     api
       .get<{
@@ -176,6 +189,8 @@ export default function ExplorePage() {
         cityLat: number;
         cityLng: number;
         radius: { centerLat: number; centerLng: number; radiusKm: number; placesSearched: { name: string; distanceKm: number }[] } | null;
+        filteredToTaste: boolean;
+        totalBeforeFilter: number;
       }>(url)
       .then((res) => {
         setExperiences(res.experiences);
@@ -183,6 +198,8 @@ export default function ExplorePage() {
         setHasSkiddleProvider(res.hasSkiddleProvider);
         setCityCenter([res.cityLat, res.cityLng]);
         setPlacesSearched(res.radius?.placesSearched ?? null);
+        setFilteredToTaste(res.filteredToTaste);
+        setTotalBeforeFilter(res.totalBeforeFilter);
         // Exact-city mode is still the source of truth for `city`/`areaLabel` (the resolved home
         // city on first load, in particular) — a radius search's own picked label is set by the
         // action that started it, not by this response, since the server has no single "city"
@@ -199,7 +216,7 @@ export default function ExplorePage() {
       .catch(() => {});
     // `usingRadius` is derived from `radiusKm`/`pickedCenter`, already listed below — including
     // it too would be redundant, not incorrect.
-  }, [city, radiusKm, pickedCenter]);
+  }, [city, radiusKm, pickedCenter, tasteFilterOn]);
 
   const RADIUS_OPTIONS_KM = [10, 25, 50, 100];
 
@@ -313,7 +330,28 @@ export default function ExplorePage() {
           <IconPlace size={13} />Change
         </button>
       </div>
-      <p className="v2-muted" style={{ fontSize: 14.5, marginBottom: 14 }}>Real things happening near you, picked for tonight.</p>
+      <p className="v2-muted" style={{ fontSize: 14.5, marginBottom: 6 }}>Real things happening near you, picked for tonight.</p>
+      {/* The real, visible proof that changing taste preferences actually changes what shows up
+          here — never a silent black-box filter. Only appears once there's something to say:
+          either the filter is actively hiding something right now, or the person has explicitly
+          asked to see everything (so they can always find their way back to "matched"). */}
+      {(filteredToTaste || !tasteFilterOn) && (
+        <button
+          type="button"
+          onClick={() => setTasteFilterOn((v) => !v)}
+          className="v2-tap-feedback"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 14, border: 'none', borderRadius: 100,
+            padding: '7px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            background: tasteFilterOn ? 'var(--v2-brand)' : 'var(--v2-bg-deep)',
+            color: tasteFilterOn ? '#fff' : 'var(--v2-ink-muted)',
+          }}
+        >
+          {tasteFilterOn
+            ? `Matched to your taste${totalBeforeFilter > (experiences?.length ?? 0) ? ` · ${totalBeforeFilter - (experiences?.length ?? 0)} hidden` : ''} · Show everything`
+            : 'Showing everything · Match my taste'}
+        </button>
+      )}
       {pickingCity && (
         <div className="fade-up" style={{ marginBottom: 18 }}>
           <LocationSearch
@@ -429,7 +467,20 @@ export default function ExplorePage() {
       )}
 
       {experiences && searched.length === 0 && (
-        <p className="v2-muted" style={{ textAlign: 'center', padding: '40px 0' }}>Nothing matched that search.</p>
+        <div style={{ textAlign: 'center', padding: '40px 0' }}>
+          <p className="v2-muted" style={{ marginBottom: query.trim() ? 0 : 12 }}>
+            {query.trim()
+              ? 'Nothing matched that search.'
+              : filteredToTaste
+                ? "Nothing here matches your taste yet — tune it further, or see everything nearby."
+                : 'Nothing on right now nearby.'}
+          </p>
+          {!query.trim() && filteredToTaste && (
+            <button type="button" onClick={() => setTasteFilterOn(false)} className="v2-btn v2-btn-dark v2-tap-feedback" style={{ padding: '10px 20px', fontSize: 13 }}>
+              Show everything
+            </button>
+          )}
+        </div>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>

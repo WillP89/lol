@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { MIN_PUBLISHABLE_QUALITY_SCORE } from './qualityScoring';
 import { ensureInventory } from './inventorySync';
 import { categoryToTasteKey } from './match';
+import { experienceInterestTags, experienceMatchesFreeText, type FreeTextSignal } from './tasteSignals';
 import { dedupeNearDuplicates } from './entityResolution';
 import { haversineKm } from '../lib/geo';
 import { placesWithinRadiusKm } from '../data/ukPlaces';
@@ -16,25 +17,87 @@ const EXPLORE_LIMIT = 200;
 // the radius distance check below instead of crashing the request.
 type ExperienceWithVenue = Experience & { venue: Venue | null };
 
+export interface ExplorePersonalisationResult {
+  experiences: ExperienceWithVenue[];
+  /** True only when a real filter was actually applied (the viewer has genuine taste signal AND
+   *  filtering wasn't explicitly turned off) — the client uses this to decide whether "Showing
+   *  only what matches your taste" is an honest thing to say. */
+  filteredToTaste: boolean;
+  /** How many rows existed before the taste filter ran — lets the client say "12 hidden", never
+   *  a black box when someone wants to see everything again. */
+  totalBeforeFilter: number;
+}
+
+/** Real, specific relevance check — never a bare category guess. An Experience counts as
+ *  "within your preference" if ANY of: (1) its own category has positive affinity, (2) at least
+ *  one of the Experience's own real interest tags (see tasteSignals.ts#experienceInterestTags —
+ *  provider subcategories + a scoped keyword scan, never invented) has positive affinity, or (3)
+ *  it textually matches one of the viewer's own free-text signals. The same signals match.ts
+ *  already scores a Crew recommendation against — Explore's "only show what's relevant" now
+ *  means the same thing "relevant" means everywhere else in Plot, not a separate, cruder rule. */
+function isRelevantToTaste(
+  experience: ExperienceWithVenue,
+  categoryAffinity: Record<string, number>,
+  interestAffinity: Record<string, number>,
+  freeTextSignals: FreeTextSignal[],
+): boolean {
+  if ((categoryAffinity[categoryToTasteKey(experience.category)] ?? 0) > 0) return true;
+
+  const tags = experienceInterestTags({
+    category: experience.category,
+    subcategories: experience.subcategories,
+    name: experience.name,
+    description: experience.description ?? '',
+  });
+  if (tags.some((id) => (interestAffinity[id] ?? 0) > 0)) return true;
+
+  if (freeTextSignals.some((s) => experienceMatchesFreeText({ name: experience.name, description: experience.description ?? '' }, s.text))) return true;
+
+  return false;
+}
+
 /** Shared by both the exact-city and the radius search below: quality/booking-status/date-
- * window filtering, near-duplicate suppression, and taste-affinity ordering are the exact same
- * rules regardless of how the candidate set of Experience rows was gathered. */
-async function finishExploreList(rows: ExperienceWithVenue[], userId?: string): Promise<ExperienceWithVenue[]> {
-  const experiences = dedupeNearDuplicates(rows, (e) => ({ name: e.name, category: e.category, startsAt: e.startsAt }));
+ * window filtering, near-duplicate suppression, and taste-based ordering/filtering are the exact
+ * same rules regardless of how the candidate set of Experience rows was gathered.
+ *
+ * Real product change, not just a reorder any more (docs/DECISIONS.md#explore-personalisation
+ * originally chose "reorder, never hide" — superseded by explicit direction: preferences must
+ * make Explore show ONLY what's relevant, immediately, not keep every irrelevant event visible
+ * just reshuffled further down). Filtering only ever engages when the viewer has real taste
+ * signal to filter BY (`hasSignal` below) — a brand-new account with nothing tuned yet still sees
+ * the full, honest chronological list, never an empty page because there was nothing to match
+ * against. `filterToTaste: false` is the explicit escape hatch (the client's "Show everything"
+ * toggle) for anyone who wants to browse unfiltered even once they do have taste signal. */
+async function finishExploreList(rows: ExperienceWithVenue[], userId?: string, opts?: { filterToTaste?: boolean }): Promise<ExplorePersonalisationResult> {
+  const deduped = dedupeNearDuplicates(rows, (e) => ({ name: e.name, category: e.category, startsAt: e.startsAt }));
 
-  if (!userId) return experiences;
-  const tasteProfile = await prisma.tasteProfile.findUnique({ where: { userId }, select: { categoryAffinity: true } });
-  if (!tasteProfile) return experiences; // no taste signal yet — chronological stays the honest default
+  if (!userId) return { experiences: deduped, filteredToTaste: false, totalBeforeFilter: deduped.length };
+  const tasteProfile = await prisma.tasteProfile.findUnique({
+    where: { userId },
+    select: { categoryAffinity: true, interestAffinity: true, freeTextSignals: true },
+  });
+  if (!tasteProfile) return { experiences: deduped, filteredToTaste: false, totalBeforeFilter: deduped.length }; // no taste signal yet — chronological stays the honest default
 
-  const affinity = tasteProfile.categoryAffinity as Record<string, number>;
+  const categoryAffinity = (tasteProfile.categoryAffinity as Record<string, number>) ?? {};
+  const interestAffinity = (tasteProfile.interestAffinity as Record<string, number>) ?? {};
+  const freeTextSignals = ((tasteProfile.freeTextSignals as unknown as FreeTextSignal[]) ?? []);
+  const hasSignal =
+    Object.values(categoryAffinity).some((v) => v > 0) || Object.values(interestAffinity).some((v) => v > 0) || freeTextSignals.length > 0;
+
   // A stable sort: JS's Array#sort is guaranteed stable, so ties (same affinity, including the
   // common "no signal for this category" 0 case) keep their original chronological order rather
-  // than being shuffled — the personalisation is a reordering by relevance, not a randomisation.
-  return [...experiences].sort((a, b) => {
-    const scoreA = affinity[categoryToTasteKey(a.category)] ?? 0;
-    const scoreB = affinity[categoryToTasteKey(b.category)] ?? 0;
+  // than being shuffled — still a relevance reorder underneath the filter, not a randomisation.
+  const ordered = [...deduped].sort((a, b) => {
+    const scoreA = categoryAffinity[categoryToTasteKey(a.category)] ?? 0;
+    const scoreB = categoryAffinity[categoryToTasteKey(b.category)] ?? 0;
     return scoreB - scoreA;
   });
+
+  const shouldFilter = hasSignal && opts?.filterToTaste !== false;
+  if (!shouldFilter) return { experiences: ordered, filteredToTaste: false, totalBeforeFilter: ordered.length };
+
+  const relevant = ordered.filter((e) => isRelevantToTaste(e, categoryAffinity, interestAffinity, freeTextSignals));
+  return { experiences: relevant, filteredToTaste: true, totalBeforeFilter: ordered.length };
 }
 
 /**
@@ -52,7 +115,7 @@ async function finishExploreList(rows: ExperienceWithVenue[], userId?: string): 
  * still surfaces rather than a total taste-only reshuffle. See docs/DECISIONS.md#explore-
  * personalisation.
  */
-export async function listExploreExperiences(city: string, userId?: string): Promise<ExperienceWithVenue[]> {
+export async function listExploreExperiences(city: string, userId?: string, opts?: { filterToTaste?: boolean }): Promise<ExplorePersonalisationResult> {
   await ensureInventory(city);
 
   const windowStart = new Date();
@@ -70,7 +133,7 @@ export async function listExploreExperiences(city: string, userId?: string): Pro
     orderBy: { startsAt: 'asc' },
     take: EXPLORE_LIMIT,
   });
-  return finishExploreList(rows, userId);
+  return finishExploreList(rows, userId, opts);
 }
 
 export interface RadiusSearchMeta {
@@ -96,7 +159,8 @@ export async function listExploreExperiencesByRadius(
   center: { lat: number; lng: number },
   radiusKm: number,
   userId?: string,
-): Promise<{ experiences: ExperienceWithVenue[]; meta: RadiusSearchMeta }> {
+  opts?: { filterToTaste?: boolean },
+): Promise<{ experiences: ExperienceWithVenue[]; meta: RadiusSearchMeta; filteredToTaste: boolean; totalBeforeFilter: number }> {
   const places = placesWithinRadiusKm(center.lat, center.lng, radiusKm);
   await Promise.all(places.map((p) => ensureInventory(p.name)));
 
@@ -125,12 +189,12 @@ export async function listExploreExperiencesByRadius(
   // excluded rather than assumed in-range.
   const withinRadius = rows.filter((r) => r.venue && haversineKm(center.lat, center.lng, r.venue.latitude, r.venue.longitude) <= radiusKm);
 
-  const experiences = await finishExploreList(withinRadius.slice(0, EXPLORE_LIMIT * 2), userId);
+  const result = await finishExploreList(withinRadius.slice(0, EXPLORE_LIMIT * 2), userId, opts);
   const meta: RadiusSearchMeta = {
     centerLat: center.lat,
     centerLng: center.lng,
     radiusKm,
     placesSearched: places.map((p) => ({ name: p.name, distanceKm: Math.round(haversineKm(center.lat, center.lng, p.lat, p.lng)) })),
   };
-  return { experiences: experiences.slice(0, EXPLORE_LIMIT), meta };
+  return { experiences: result.experiences.slice(0, EXPLORE_LIMIT), meta, filteredToTaste: result.filteredToTaste, totalBeforeFilter: result.totalBeforeFilter };
 }

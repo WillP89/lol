@@ -17,7 +17,13 @@ const MAX_RADIUS_KM = 120;
 export async function exploreRoutes(app: FastifyInstance): Promise<void> {
   app.get('/explore/experiences', async (request, reply) => {
     if (!requireUser(request, reply)) return;
-    const { city, lat, lng, radiusKm } = request.query as { city?: string; lat?: string; lng?: string; radiusKm?: string };
+    const { city, lat, lng, radiusKm, filter } = request.query as { city?: string; lat?: string; lng?: string; radiusKm?: string; filter?: string };
+    // The one explicit escape hatch (docs/DECISIONS.md#explore-personalisation): `?filter=off`
+    // always returns the full, unfiltered, taste-ordered list even when the viewer has real
+    // taste signal — everything else defaults to filtering Explore down to only what's actually
+    // relevant to their taste the moment they have any (see services/explore.ts#finishExploreList
+    // for exactly what "relevant" means and why a signal-less account is never filtered to zero).
+    const filterToTaste = filter !== 'off';
 
     // Radius mode: an explicit centre point (a postcode search, or "extend the radius" from the
     // current city) — real distance filtering across every real gazetteer place within range,
@@ -28,7 +34,12 @@ export async function exploreRoutes(app: FastifyInstance): Promise<void> {
       const requestedRadius = radiusKm !== undefined ? Number(radiusKm) : NaN;
       const resolvedRadius = Number.isFinite(requestedRadius) ? Math.min(Math.max(requestedRadius, MIN_RADIUS_KM), MAX_RADIUS_KM) : 15;
 
-      const { experiences, meta } = await listExploreExperiencesByRadius({ lat: parsedLat, lng: parsedLng }, resolvedRadius, request.user.id);
+      const { experiences, meta, filteredToTaste, totalBeforeFilter } = await listExploreExperiencesByRadius(
+        { lat: parsedLat, lng: parsedLng },
+        resolvedRadius,
+        request.user.id,
+        { filterToTaste },
+      );
       return reply.send({
         experiences,
         dataSource: hasLiveTicketedProvider ? 'live' : 'mock',
@@ -39,6 +50,8 @@ export async function exploreRoutes(app: FastifyInstance): Promise<void> {
         cityLat: parsedLat,
         cityLng: parsedLng,
         radius: meta,
+        filteredToTaste,
+        totalBeforeFilter,
       });
     }
 
@@ -51,7 +64,7 @@ export async function exploreRoutes(app: FastifyInstance): Promise<void> {
       resolvedCity = profile?.homeCity ?? UK_FALLBACK_CENTER.name;
     }
 
-    const experiences = await listExploreExperiences(resolvedCity, request.user.id);
+    const { experiences, filteredToTaste, totalBeforeFilter } = await listExploreExperiences(resolvedCity, request.user.id, { filterToTaste });
     // The map needs *somewhere* to centre on even with zero results for this city — its own
     // coordinates from the gazetteer, not a hardcoded London point. See
     // docs/DECISIONS.md#uk-wide-location.
@@ -66,6 +79,8 @@ export async function exploreRoutes(app: FastifyInstance): Promise<void> {
       cityLat: cityPlace.lat,
       cityLng: cityPlace.lng,
       radius: null,
+      filteredToTaste,
+      totalBeforeFilter,
     });
   });
 }

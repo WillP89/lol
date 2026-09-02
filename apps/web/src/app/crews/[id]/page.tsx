@@ -13,6 +13,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { TabBarV2 } from '@/components/TabBarV2';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { MediaUploadButton } from '@/components/MediaUploadButton';
+import { CrewTuneSheet } from '@/components/CrewTuneSheet';
 import { IconSpark, IconPlace, IconPoll, IconCalendar, IconFlag, IconLock, IconGathering, IconAddPerson } from '@/components/icons';
 import { identityPair } from '@/lib/identity';
 
@@ -174,12 +175,17 @@ const LOCKABLE_STATUSES = new Set(['SHARED', 'GATHERING_INTEREST', 'LIKELY', 'RE
 
 // The auto-recommendation system's travel-range chips (brief: "Nearby/25mi/50mi/Worth
 // travelling", not a slider) — metres, since that's what the API stores; miles is a UK-
-// convention display detail only. See docs/DECISIONS.md#crew-auto-recommendations.
+// convention display detail only. Deliberately the SAME bands Profile's own "How far you'll
+// travel" picker uses (apps/web/src/app/profile/page.tsx#TRAVEL_BANDS) — a real gap found
+// auditing "crew settings should be as flexible as personal plot settings": this used to be a
+// narrower, differently-labelled 4-band set, so a Crew's radius couldn't even land on the same
+// values a person's own could. One shared scale now. See docs/DECISIONS.md#crew-auto-recommendations.
 const RADIUS_CHIPS: { label: string; meters: number }[] = [
-  { label: 'Nearby', meters: 8047 }, // ~5 miles
-  { label: 'Within 25mi', meters: 40225 },
-  { label: 'Within 50mi', meters: 80450 },
-  { label: 'Worth travelling', meters: 160934 }, // ~100 miles
+  { label: 'Nearby', meters: 4800 },
+  { label: 'Up to 10mi', meters: 16000 },
+  { label: 'Up to 25mi', meters: 40000 },
+  { label: 'Up to 50mi', meters: 80000 },
+  { label: 'Worth travelling', meters: 160000 },
 ];
 
 // Every real ExperienceCategory (see apps/api/prisma/schema.prisma) a Crew can explicitly say
@@ -724,8 +730,16 @@ export default function CrewPage() {
   const [responding, setResponding] = useState(false);
   // The auto-recommendation system's Crew-level controls (on/off, frequency, travel range) -
   // fetched lazily the first time the Crew info sheet opens.
-  const [recSettings, setRecSettings] = useState<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null; categoryPreferences: string[] } | null>(null);
+  const [recSettings, setRecSettings] = useState<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null; categoryPreferences: string[]; interestPreferences: string[] } | null>(null);
   const [savingRecSettings, setSavingRecSettings] = useState(false);
+  // Real gap this fixes: a failed PATCH used to revert silently with zero feedback — from the
+  // user's side that reads as "I tapped a setting and nothing happened" (or worse, "it happened
+  // then un-happened"), never a legible error. See docs/DECISIONS.md#crew-settings-error-surfacing.
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  // The Crew Taste surface (computeCrewTasteSummary) — real, already-built backend that had no
+  // UI consumer until this pass. Lazily loaded alongside recSettings.
+  const [crewTaste, setCrewTaste] = useState<{ topInterests: { interestId: string; label: string; overlapCount: number; totalMembers: number; hasConflict: boolean }[] } | null>(null);
+  const [tuneCrewOpen, setTuneCrewOpen] = useState(false);
 
   // Real gap found via live multi-user testing: `crew` (and therefore `activePlan`/
   // `upcomingPlan`, the header's own member list/image, and the top-of-page context strip's
@@ -1182,22 +1196,42 @@ export default function CrewPage() {
   async function loadRecSettings() {
     if (recSettings) return;
     try {
-      const res = await api.get<{ settings: { enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null; categoryPreferences: string[] } }>(`/crews/${crewId}/recommendation-settings`);
+      const res = await api.get<{ settings: { enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null; categoryPreferences: string[]; interestPreferences: string[] } }>(`/crews/${crewId}/recommendation-settings`);
       setRecSettings(res.settings);
-    } catch {
-      // Non-critical - the sheet just won't show this section if it fails.
+      setSettingsError(null);
+    } catch (err) {
+      // Real gap this fixes: this used to fail silently and the whole section just never
+      // appeared, with nothing on screen to say why. Now it says so, and offers a retry.
+      setSettingsError(err instanceof ApiError ? err.message : 'Could not load Plot recommendation settings.');
     }
   }
-  async function patchRecSettings(patch: Partial<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null; categoryPreferences: string[] }>) {
+  /** Crew Taste (computeCrewTasteSummary) — lazily loaded the same way recSettings is, and
+   *  allowed to fail quietly on its own: it's a highlight, not core settings functionality, so a
+   *  failed load here shouldn't block or blank out the rest of the sheet. */
+  async function loadCrewTaste() {
+    if (crewTaste) return;
+    try {
+      const res = await api.get<{ summary: { topInterests: { interestId: string; label: string; overlapCount: number; totalMembers: number; hasConflict: boolean }[] } }>(`/crews/${crewId}/taste-summary`);
+      setCrewTaste(res.summary);
+    } catch {
+      // Non-critical — see comment above.
+    }
+  }
+  async function patchRecSettings(patch: Partial<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null; categoryPreferences: string[]; interestPreferences: string[] }>) {
     if (!recSettings) return;
     const prev = recSettings;
     setRecSettings({ ...prev, ...patch });
     setSavingRecSettings(true);
+    setSettingsError(null);
     try {
       const res = await api.patch<{ settings: typeof prev }>(`/crews/${crewId}/recommendation-settings`, patch);
       setRecSettings(res.settings);
-    } catch {
+    } catch (err) {
       setRecSettings(prev); // revert
+      // The exact bug report this exists to fix: a failed request used to just silently undo
+      // itself. Now the sheet says exactly what happened, with the real server message when
+      // there is one (e.g. a 403 if membership lapsed mid-session) rather than a generic string.
+      setSettingsError(err instanceof ApiError ? err.message : 'Could not save that — check your connection and try again.');
     } finally {
       setSavingRecSettings(false);
     }
@@ -1209,6 +1243,14 @@ export default function CrewPage() {
     const current = recSettings.categoryPreferences;
     const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
     patchRecSettings({ categoryPreferences: next });
+  }
+  /** The interest-level counterpart — same add-or-remove-from-array pattern, one level more
+   *  specific (see CrewTuneSheet). */
+  function toggleInterestPreference(interestId: string) {
+    if (!recSettings) return;
+    const current = recSettings.interestPreferences;
+    const next = current.includes(interestId) ? current.filter((v) => v !== interestId) : [...current, interestId];
+    patchRecSettings({ interestPreferences: next });
   }
   async function copyInvite() {
     if (!inviteUrl) return;
@@ -1949,6 +1991,22 @@ export default function CrewPage() {
           </div>
         )}
 
+        {/* Real bug this fixes: a failed load or save used to just disappear this whole section
+            with zero explanation, or silently revert a tap. Shown regardless of whether
+            recSettings ever loaded, with a real retry action, not just an apology. */}
+        {settingsError && (
+          <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 12, background: 'rgba(200,60,50,0.1)', color: 'var(--v2-error)', fontSize: 12.5, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <span>{settingsError}</span>
+            <button
+              onClick={() => { setSettingsError(null); loadRecSettings(); }}
+              className="v2-tap-feedback"
+              style={{ border: 'none', background: 'none', color: 'inherit', fontWeight: 800, fontSize: 12, cursor: 'pointer', flexShrink: 0, textDecoration: 'underline' }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {recSettings && (
           <div style={{ marginBottom: 20 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -1969,7 +2027,7 @@ export default function CrewPage() {
               <>
                 <div className="v2-dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>How often</div>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-                  {[1, 2, 3].map((n) => (
+                  {[1, 2, 3, 4].map((n) => (
                     <button
                       key={n}
                       onClick={() => patchRecSettings({ maxPerWeek: n })}
@@ -2016,11 +2074,53 @@ export default function CrewPage() {
                     );
                   })}
                 </div>
+
+                {/* GET SPECIFIC — the real fix for "crew settings are super limited, it needs to
+                    be as flexible as the personal plot settings". Same "specific interests, not
+                    just broad categories" upgrade Profile already got (TuneMyPlotSheet), applied
+                    here: a real, already-built taste-summary read (crewTaste, previously wired to
+                    no UI at all) plus a launcher into the full territory/interest picker. */}
+                <div className="v2-dim" style={{ fontSize: 11, fontWeight: 700, marginTop: 18, marginBottom: 6 }}>Get specific</div>
+                {crewTaste && crewTaste.topInterests.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                    {crewTaste.topInterests.slice(0, 6).map((i) => (
+                      <span
+                        key={i.interestId}
+                        title={i.hasConflict ? 'Mixed feelings in this Crew' : `${i.overlapCount}/${i.totalMembers} of you are into this`}
+                        style={{ padding: '7px 12px', borderRadius: 100, background: 'var(--v2-bg-deep)', fontSize: 11.5, fontWeight: 700, color: 'var(--v2-ink)' }}
+                      >
+                        {i.label} · {i.overlapCount}/{i.totalMembers}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="v2-muted" style={{ fontSize: 11.5, marginBottom: 8, lineHeight: 1.5 }}>
+                  {recSettings.interestPreferences.length > 0
+                    ? `${recSettings.interestPreferences.length} specific ${recSettings.interestPreferences.length === 1 ? 'interest' : 'interests'} picked for this Crew.`
+                    : 'Go one level more specific than the categories above — UK garage, not just "music".'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setTuneCrewOpen(true)}
+                  className="v2-btn v2-btn-brand v2-tap-feedback"
+                  style={{ width: '100%' }}
+                >
+                  Tune this Crew&rsquo;s Plot
+                </button>
               </>
             )}
           </div>
         )}
       </BottomSheet>
+
+      <CrewTuneSheet
+        open={tuneCrewOpen}
+        onClose={() => setTuneCrewOpen(false)}
+        interestPreferences={recSettings?.interestPreferences ?? []}
+        onToggle={toggleInterestPreference}
+        crewTasteInterestIds={crewTaste?.topInterests.map((i) => i.interestId) ?? []}
+        saving={savingRecSettings}
+      />
 
       {/* The real member-management surface — reachable directly from tapping the Crew header's
           avatar cluster (see the header button above), not buried in the settings sheet above.
@@ -2103,7 +2203,7 @@ export default function CrewPage() {
         )}
 
         <button
-          onClick={() => { setMembersOpen(false); setInfoOpen(true); loadRecSettings(); }}
+          onClick={() => { setMembersOpen(false); setInfoOpen(true); loadRecSettings(); loadCrewTaste(); }}
           className="v2-tap-feedback"
           style={{ width: '100%', border: 'none', background: 'none', color: 'var(--v2-ink-muted)', fontSize: 12.5, fontWeight: 600, padding: '10px 0 0', cursor: 'pointer' }}
         >

@@ -112,8 +112,16 @@ interface WikipediaSummary {
   type?: string; // 'standard' | 'disambiguation' | 'no-extract' | …
   title?: string;
   thumbnail?: { source?: string; width?: number; height?: number };
-  originalimage?: { source?: string };
+  originalimage?: { source?: string; width?: number; height?: number };
 }
+
+// Same reasoning, same number, as ticketmaster.ts's own MIN_IMAGE_WIDTH — a card renders this
+// full-bleed up to a ~900px-wide desktop hero, and a bitmap narrower than that gets visibly
+// blown up past its native resolution ("stretched and distorted", not premium). Wikipedia's
+// REST summary almost always includes `originalimage` (the full-resolution source file)
+// alongside `thumbnail` (a small, fixed-width crop) — this only matters for the rare case where
+// only the thumbnail came back.
+const MIN_IMAGE_WIDTH = 640;
 
 async function fetchSummary(name: string): Promise<EnrichedImage | null> {
   const controller = new AbortController();
@@ -136,7 +144,11 @@ async function fetchSummary(name: string): Promise<EnrichedImage | null> {
     // a confident match — better to show no image than the wrong person/venue's photo.
     if (body.type && body.type !== 'standard') return null;
 
-    const url = body.originalimage?.source ?? body.thumbnail?.source;
+    // originalimage is the full-resolution source file — trusted at whatever size it reports,
+    // since it's never a fixed-width crop the way thumbnail is. A bare thumbnail is only used
+    // when it clears the same resolution floor every other provider adapter applies; a small one
+    // is worse than no photo (v2Art's editorial fallback), not better.
+    const url = body.originalimage?.source ?? (body.thumbnail && (body.thumbnail.width ?? 0) >= MIN_IMAGE_WIDTH ? body.thumbnail.source : undefined);
     if (!url) return null;
     return { url, sourcePage: body.title ?? name };
   } finally {
