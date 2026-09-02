@@ -1,7 +1,7 @@
 import { buildApp } from './app';
 import { config } from './lib/config';
 import { runSweepIfDue, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from './services/crewRecommendations';
-import { backfillImageQuality } from './services/inventorySync';
+import { runImageQualityBackfillIfDue } from './services/inventorySync';
 
 const app = buildApp();
 
@@ -60,15 +60,25 @@ if (config.NODE_ENV !== 'test') {
 }
 
 // The retroactive half of the image-quality floor (services/inventorySync.ts#backfillImageQuality's
-// own comment has the full reasoning) — a row synced before that gate existed doesn't self-heal
-// until its city's next resync, which on a pilot-scale app with sparse traffic can be a real,
-// user-visible delay. Runs once per boot, staggered after the sweep check so it isn't competing
-// with server startup, and is cheap/idempotent to repeat on every restart (an already-clean row
-// just gets re-confirmed). Also triggerable on demand via POST /admin/image-quality-backfill.
+// own comment has the full reasoning, including the real "same bad image kept coming back" gap a
+// one-shot capped run had). Same due/check split as the recommendation sweep above, and for the
+// exact same reason: a one-shot boot-only call can never be trusted as the only thing standing
+// between a stale row and a user, on hosting that can sleep/restart/scale — this now genuinely
+// re-runs, on a real cadence, database-confirmed, not just once at process start. Staggered 10s
+// after the sweep check so the two don't compete for the same startup window; also triggerable on
+// demand via POST /admin/image-quality-backfill (bypasses the due-check, like the sweep's `force`).
+const IMAGE_QUALITY_BACKFILL_DUE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours — same cadence as the recommendation sweep
+const IMAGE_QUALITY_BACKFILL_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+const checkImageQualityBackfill = () => {
+  runImageQualityBackfillIfDue(IMAGE_QUALITY_BACKFILL_DUE_INTERVAL_MS)
+    .then((outcome) => {
+      if (outcome.ran) app.log.info(outcome.result, 'Image quality backfill ran (database confirmed it was due)');
+    })
+    .catch((err) => app.log.error({ err }, 'Image quality backfill check failed'));
+};
 if (config.NODE_ENV !== 'test') {
-  setTimeout(() => {
-    backfillImageQuality().catch((err) => app.log.error({ err }, 'Image quality backfill failed'));
-  }, 20_000);
+  setTimeout(checkImageQualityBackfill, 20_000);
+  setInterval(checkImageQualityBackfill, IMAGE_QUALITY_BACKFILL_CHECK_INTERVAL_MS);
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
