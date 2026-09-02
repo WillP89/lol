@@ -872,7 +872,13 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
        (WhatsApp/Slack/Discord desktop) always does regardless of how few items are in it. */
     align-items: stretch;
     justify-content: center;
-    gap: 28px;
+    /* Real, reported feedback: a 28px gap plus the rail's own floating-card styling (rounded on
+       all four corners, its own drop shadow) read as two separate panels side by side, not one
+       immersive surface — exactly the opposite of how WhatsApp/Slack/Discord desktop actually
+       look (sidebar and conversation touching, a single hairline between them, not a gap). Gap
+       dropped to 0; the rail itself (below) now sits flush against the conversation column, with
+       only a 1px divider line doing the separating a real app would use, not empty space. */
+    gap: 0;
     padding-top: 18px;
   }
   .v2-crew-rail {
@@ -882,6 +888,17 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
     flex-shrink: 0;
     height: calc(100dvh - 36px);
     overflow-y: auto;
+  }
+  /* Un-does `.v2-card`'s own floating-card look (border-radius on all corners, a drop shadow)
+     specifically where it's flush against the conversation column — rounded only on the outer
+     (left) corners so it still reads as one continuous rounded surface with the page edge, a
+     single hairline (`--v2-line`, the same divider colour used elsewhere) standing in for the
+     shadow as the one thing separating it from the chat, immersive rather than two cards with a
+     gap between them. */
+  .v2-crew-rail .v2-card {
+    border-radius: var(--v2-r-lg) 0 0 var(--v2-r-lg);
+    box-shadow: none;
+    border-right: 1px solid var(--v2-line);
   }
   /* Real, reported bug: this element's own inline `height: 100dvh` (correct on mobile, where
      `.v2-crew-split` is a plain block with no height of its own) re-measured against the FULL
