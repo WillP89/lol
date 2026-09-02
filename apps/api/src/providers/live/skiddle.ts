@@ -45,6 +45,23 @@ const PAGE_SIZE = 50;
 // polite delay between the several per-category requests one sync makes, not a hard requirement
 // this code can otherwise verify.
 const REQUEST_SPACING_MS = 350;
+// Real production bug this closes: fetchOneCategory used withRetry's DEFAULT budget (3 attempts
+// x 8s timeout each ≈ 24s worst case) per category, and this adapter makes up to 7 sequential
+// category requests — so a slow/unresponsive Skiddle endpoint could add 170+ seconds to a
+// single `ensureInventory` call, which the whole request-serving path awaits synchronously
+// (see inventorySync.ts#ensureInventoryProduction and services/explore.ts). That's exactly what
+// broke Discover the moment SKIDDLE_API_KEY was first configured live. Fail fast per category —
+// one attempt, a short timeout — rather than patiently retrying a source that has 6 more
+// categories still waiting behind it.
+const PER_CATEGORY_RETRY = { attempts: 1, timeoutMs: 6000 };
+// Hard ceiling on this adapter's OWN total contribution to one sync, regardless of how many
+// categories are slow/unresponsive — a second, independent backstop on top of
+// PER_CATEGORY_RETRY's fast-fail budget, so a change to EVENT_CODES or a genuinely broken
+// endpoint can never again silently reintroduce an unbounded synchronous stall in the read path.
+// checked before each category request, not just once at the top, so an early slow category
+// still lets healthy ones after it get skipped cleanly rather than starting one more request
+// that's certain to blow the budget anyway.
+const OVERALL_BUDGET_MS = 15_000;
 
 interface SkiddleVenue {
   id?: number;
@@ -168,10 +185,18 @@ export const skiddleProvider: ProviderAdapter = {
   async fetchListings(params: FetchListingsParams): Promise<RawListing[]> {
     if (!config.SKIDDLE_API_KEY) return [];
 
+    const startedAt = Date.now();
     const events: SkiddleEvent[] = [];
     for (const eventcode of EVENT_CODES) {
+      if (Date.now() - startedAt > OVERALL_BUDGET_MS) {
+        logger.warn(
+          { city: params.city, remainingCategories: EVENT_CODES.slice(EVENT_CODES.indexOf(eventcode)) },
+          'Skiddle fetch hit its overall time budget — returning what was gathered rather than risk stalling the request that triggered this sync',
+        );
+        break;
+      }
       try {
-        const pageEvents = await withRetry((signal) => fetchOneCategory(eventcode, params, signal));
+        const pageEvents = await withRetry((signal) => fetchOneCategory(eventcode, params, signal), PER_CATEGORY_RETRY);
         events.push(...pageEvents);
       } catch (err) {
         // One category failing (a transient error, an eventcode Skiddle rejects) must not take
