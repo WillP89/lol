@@ -310,6 +310,15 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     // Explicit null clears the override (back to per-member-average); undefined leaves it
     // untouched — the schema can't express "clear vs. don't touch" with .optional() alone.
     travelRadiusMeters: z.number().int().positive().nullable().optional(),
+    // The Crew's own explicit picks — see CrewRecommendationSettings.categoryPreferences's own
+    // schema comment. Sending [] explicitly clears it back to fully member-derived; undefined
+    // leaves whatever's already set untouched.
+    categoryPreferences: z
+      .array(
+        z.enum(['LIVE_MUSIC', 'CLUBBING', 'RESTAURANT', 'BAR', 'COMEDY', 'THEATRE', 'CINEMA', 'ART_CULTURE', 'SPORT', 'FITNESS', 'FESTIVAL', 'DAY_ACTIVITY', 'COMMUNITY']),
+      )
+      .max(13)
+      .optional(),
   });
   app.patch('/crews/:id/recommendation-settings', async (request, reply) => {
     if (!requireUser(request, reply)) return;

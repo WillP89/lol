@@ -69,6 +69,9 @@ export interface RecommendationSettingsDTO {
   enabled: boolean;
   maxPerWeek: number;
   travelRadiusMeters: number | null;
+  // The Crew's own explicit picks — see the schema field's own comment (CrewRecommendationSettings
+  // .categoryPreferences) for why this blends with, rather than replaces, member-derived taste.
+  categoryPreferences: string[];
 }
 
 /** Self-heals a settings row on first read — every Crew gets sane defaults (on, 2/week,
@@ -97,7 +100,12 @@ export async function getOrCreateSettings(crewId: string): Promise<Recommendatio
       throw err;
     }
   }
-  return { enabled: settings.enabled, maxPerWeek: settings.maxPerWeek, travelRadiusMeters: settings.travelRadiusMeters };
+  return {
+    enabled: settings.enabled,
+    maxPerWeek: settings.maxPerWeek,
+    travelRadiusMeters: settings.travelRadiusMeters,
+    categoryPreferences: settings.categoryPreferences,
+  };
 }
 
 export async function updateSettings(
@@ -111,9 +119,15 @@ export async function updateSettings(
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
       ...(patch.maxPerWeek !== undefined ? { maxPerWeek: patch.maxPerWeek } : {}),
       ...(patch.travelRadiusMeters !== undefined ? { travelRadiusMeters: patch.travelRadiusMeters } : {}),
+      ...(patch.categoryPreferences !== undefined ? { categoryPreferences: patch.categoryPreferences } : {}),
     },
   });
-  return { enabled: settings.enabled, maxPerWeek: settings.maxPerWeek, travelRadiusMeters: settings.travelRadiusMeters };
+  return {
+    enabled: settings.enabled,
+    maxPerWeek: settings.maxPerWeek,
+    travelRadiusMeters: settings.travelRadiusMeters,
+    categoryPreferences: settings.categoryPreferences,
+  };
 }
 
 /** A short, human explanation — never the raw score, never a fabricated "insight". Picks the
@@ -122,6 +136,11 @@ export async function updateSettings(
 function explanationFor(option: MatchOption): string {
   const byCode = new Map(option.reasons.map((r) => [r.code, r]));
   const categoryLabel = option.experience.category.replace(/_/g, ' ').toLowerCase();
+  // An explicit crew-level pick is an even more direct signal than DNA/affinity inferred from
+  // swipes — worth naming first, since it's literally what the Crew told Plot it wanted.
+  if (byCode.has('crew_preference')) {
+    return `Because your Crew set ${categoryLabel} as a preference`;
+  }
   if (byCode.has('crew_dna_match') || byCode.has('category_affinity')) {
     return `Because your Crew likes ${categoryLabel}`;
   }
@@ -217,7 +236,7 @@ async function evaluateCrewEligibility(crewId: string): Promise<CrewEligibilityR
   // "Find us something" can reasonably be shown that; Plot pushing it unprompted, captioned
   // "Because your Crew likes X", cannot — the explanation would be a lie. See docs/DECISIONS.md
   // #crew-auto-recommendations.
-  const hasTasteSignal = (o: MatchOption) => o.reasons.some((r) => r.code === 'category_affinity' || r.code === 'crew_dna_match');
+  const hasTasteSignal = (o: MatchOption) => o.reasons.some((r) => r.code === 'category_affinity' || r.code === 'crew_dna_match' || r.code === 'crew_preference');
   const notExcluded = scored.filter((o) => !excluded.has(o.experience.id));
   const inRadius = notExcluded.filter((o) => o.withinRadius !== false);
   const withTaste = inRadius.filter(hasTasteSignal);

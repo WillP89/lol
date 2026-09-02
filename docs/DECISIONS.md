@@ -1956,3 +1956,56 @@ call (confirmed in the API's own logs) that fails gracefully with this sandbox's
 egress restriction (403, same as every other live provider touched this session) rather than
 crashing — the exact same "write against the documented real contract, verify on Render" posture
 already applied to Ticketmaster/Wikipedia/Overpass/TheSportsDB.
+
+## #crew-preferences-map-fit-festival-fix
+
+Three items from the same live follow-up, after the hotfix above shipped.
+
+**Explore's radius map appeared "not functional"**: widening the radius genuinely changed the
+result set (confirmed server-side, confirmed in the "Also searching…" line), but the LIVE map
+never visibly moved. Root cause: `react-leaflet`'s `MapContainer` `center`/`zoom` props are
+consumed once, at the map instance's creation — react-leaflet deliberately does not re-apply
+them on a later prop change (documented behaviour, not a library bug). Nothing was driving the
+live map view on any change other than picking a specific card (`FlyToSelected`, keyed on
+`selectedId`). Added `FitToResults` (`ExploreMapV2.tsx`), keyed on the actual `experiences`
+array: fits the map to a real bounding box of every result's venue coordinates whenever the
+result set changes for any reason (city switch, radius change, text search) — genuinely zooming
+out for a wider radius, not just re-centring at the same zoom. Verified with real before/after
+screenshots (a transform-string read was tried first and was misleading — mid-transition/multi-
+pane artifacts; screenshots are the ground-truth verification here), not just code reasoning.
+
+**Ticketmaster key confirmed present on Render** (`TICKETMASTER_API_KEY`), contradicting this
+session's earlier assumption that it had never been configured — the actual explanation for
+persistent fallback art is that the previous "sync once ever" bug (already fixed) meant
+already-seeded cities never picked up a key that may have existed for a while. Combined with the
+resilience hotfix, already-seeded cities should now pick up real Ticketmaster inventory on their
+next periodic resync. Audited `providers/live/ticketmaster.ts` line-by-line for a code bug given
+this can't be tested live from this sandbox (same egress restriction as every other live
+provider) — found and fixed one real gap: `mapCategory` never once returned `FESTIVAL`, the
+direct cause of "where are the food festivals?" — a festival is a genre/subGenre value in
+Ticketmaster's data (e.g. "Festival", "Food & Drink Festival"), not a distinct segment, and
+wasn't checked at all. Now checked first, across every segment, so a festival is never
+mis-mapped to LIVE_MUSIC or COMMUNITY by which segment Ticketmaster happened to file it under.
+
+**Crew-level preferences** ("you should really be able to set preferences at the crew level too,
+so it becomes tailored to the crew"): new `CrewRecommendationSettings.categoryPreferences`
+(`String[]`, migration `20260902071259_add_crew_category_preferences`) — the Crew's own explicit
+category picks, editable via the existing `PATCH /crews/:id/recommendation-settings` route.
+Deliberately blends WITH, never replaces, member-derived taste (`services/match.ts#
+scoreExperiencesForCrew` now fetches it alongside DNA/affinity and adds a +20 boost + a
+`crew_preference` reason when an experience's category is one of the Crew's picks) — a Crew is
+still made of the people in it, this is the group additionally saying "we're specifically into
+this" on top. Counts as a genuine taste signal in its own right for the automatic-delivery
+eligibility gate (`crewRecommendations.ts`'s `hasTasteSignal`), directly strengthening "it should
+immediately send an event to a crew that lines up with the preferences set" — a Crew whose
+members haven't swiped enough yet for real affinity/DNA signal can still get an immediate,
+confident recommendation once the Crew itself has stated a preference.
+
+**Verified**: 147/147 backend tests (7 new — a full end-to-end proof that a crew-level
+preference alone, with member taste pointed at unrelated categories, correctly delivers a
+previously-ineligible event with a `crew_preference` reason; the Ticketmaster festival-mapping
+fix; the settings-race tests updated for the new field), `tsc`/`eslint --max-warnings=0` clean on
+every touched file (both apps), both `next build` and the API's own `tsc` production build
+clean. The map fix was verified with real Playwright screenshots against a live dev server, not
+just code reasoning — see this section's own note on why a transform-string check alone was
+insufficient and had to be replaced with actual visual comparison.

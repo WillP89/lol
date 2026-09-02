@@ -55,6 +55,20 @@ describe('ticketmasterProvider.mapToCanonical', () => {
     expect(result.bookingStatus).toBe('SOLD_OUT');
   });
 
+  test('a festival genre maps to FESTIVAL regardless of which segment it sits under — the real gap behind "where are the food festivals?"', () => {
+    const musicFestival = ticketmasterProvider.mapToCanonical({
+      externalId: 'tm-fest-1',
+      raw: fakeEvent({ classifications: [{ segment: { name: 'Music' }, genre: { name: 'Festival' } }] }),
+    });
+    expect(musicFestival.category).toBe('FESTIVAL');
+
+    const foodFestival = ticketmasterProvider.mapToCanonical({
+      externalId: 'tm-fest-2',
+      raw: fakeEvent({ classifications: [{ segment: { name: 'Miscellaneous' }, genre: { name: 'Food & Drink' }, subGenre: { name: 'Food & Drink Festival' } }] }),
+    });
+    expect(foodFestival.category).toBe('FESTIVAL');
+  });
+
   test('falls back to COMMUNITY for an unrecognised segment rather than dropping the event', () => {
     const result = ticketmasterProvider.mapToCanonical({
       externalId: 'tm-999',

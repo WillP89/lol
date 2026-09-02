@@ -63,15 +63,25 @@ interface TmSearchResponse {
 }
 
 /**
- * Ticketmaster's classification taxonomy (segment/genre) doesn't line up 1:1 with Plot's
- * ExperienceCategory — this is a best-effort mapping, not a lossless one. Unrecognised
+ * Ticketmaster's classification taxonomy (segment/genre/subGenre) doesn't line up 1:1 with
+ * Plot's ExperienceCategory — this is a best-effort mapping, not a lossless one. Unrecognised
  * segments fall back to COMMUNITY rather than being dropped, since an unmapped category still
  * beats losing a real event entirely.
+ *
+ * Real gap this closes: FESTIVAL was never once returned by this function — a genuine event
+ * ("where are the food festivals?") is exactly what that category exists for. Ticketmaster's
+ * own data doesn't have a dedicated "Festival" segment; a festival is a genre/subGenre value
+ * (e.g. "Festival", or a specific one like "Food & Drink Festival") most commonly nested under
+ * the Music or Miscellaneous segment, not something the segment-first checks below would ever
+ * reach. Checked first, across every segment, so a festival is never mis-mapped to LIVE_MUSIC
+ * (or COMMUNITY) just because of which segment Ticketmaster happened to file it under.
  */
 function mapCategory(classifications: TmClassification[] | undefined): ExperienceCategory {
   const segment = classifications?.[0]?.segment?.name?.toLowerCase() ?? '';
   const genre = classifications?.[0]?.genre?.name?.toLowerCase() ?? '';
+  const subGenre = classifications?.[0]?.subGenre?.name?.toLowerCase() ?? '';
 
+  if (genre.includes('festival') || subGenre.includes('festival')) return 'FESTIVAL';
   if (segment === 'music') return 'LIVE_MUSIC';
   if (segment === 'sports') return 'SPORT';
   if (segment === 'film') return 'CINEMA';

@@ -723,6 +723,14 @@ model CrewRecommendationSettings {
   // Null = derive from the average of members' own TasteProfile.travelRadiusMeters, rather
   // than forcing every Crew to configure a number before recommendations work at all.
   travelRadiusMeters Int?
+  // The Crew's own explicit picks (ExperienceCategory values, stored as strings rather than the
+  // enum type so a member's still-Draft selection in the UI never has to round-trip a full enum
+  // validation) — e.g. a Crew that's explicitly "our comedy/food group" regardless of what any
+  // one member's individual TasteProfile swipes say. Blends with (boosts on top of) member-
+  // derived taste in services/match.ts#scoreExperiencesForCrew rather than replacing it — a
+  // Crew is still made of the people in it. Empty = no crew-level preference set, the original,
+  // fully member-derived behaviour.
+  categoryPreferences String[] @default([])
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

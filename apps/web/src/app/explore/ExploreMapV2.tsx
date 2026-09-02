@@ -44,6 +44,38 @@ function FlyToSelected({ experiences, selectedId }: { experiences: ExploreExperi
   return null;
 }
 
+// Real, live-reported bug this fixes: `MapContainer`'s own `center`/`zoom` props (below) are
+// react-leaflet's INITIAL view only — they create the underlying Leaflet map instance once, and
+// react-leaflet deliberately does not re-apply them on a later prop change (this is documented
+// react-leaflet behaviour, not a bug in the library). Nothing was moving the live map when the
+// result set changed for any reason OTHER than picking a card (`FlyToSelected` above only
+// reacts to `selectedId`) — switching Explore's city, and especially widening/narrowing the new
+// radius search, updated the results list and the requested `center` prop but the map itself
+// visibly "just stayed the same", exactly the live complaint. This re-fits the view to the
+// ACTUAL spread of results whenever the result set changes — not just re-centring at the same
+// zoom, but genuinely zooming out to show a wider radius's wider spread, which is the whole
+// point of "extend the map radius" being visibly functional.
+function FitToResults({ experiences, center }: { experiences: ExploreExperience[]; center: [number, number] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (experiences.length === 0) {
+      map.setView(center, 12);
+      return;
+    }
+    if (experiences.length === 1) {
+      map.setView([experiences[0].venue.latitude, experiences[0].venue.longitude], 14);
+      return;
+    }
+    const bounds = L.latLngBounds(experiences.map((e) => [e.venue.latitude, e.venue.longitude] as [number, number]));
+    map.fitBounds(bounds, { padding: [48, 48], maxZoom: 15 });
+    // Deliberately keyed on the actual result set only (not `center`, which the empty-results
+    // branch above already reads fresh on each run without needing it as a dependency) — a
+    // genuinely new set of experiences, whether from a city switch, a radius change, or a text
+    // search, is what should move the map.
+  }, [experiences]);
+  return null;
+}
+
 export default function ExploreMapV2({
   experiences,
   center,
@@ -65,6 +97,7 @@ export default function ExploreMapV2({
         subdomains="abc"
         maxZoom={19}
       />
+      <FitToResults experiences={experiences} center={center} />
       <FlyToSelected experiences={experiences} selectedId={selectedId} />
       {experiences.map((exp) => (
         <Marker

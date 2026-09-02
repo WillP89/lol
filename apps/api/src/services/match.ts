@@ -91,13 +91,21 @@ export async function scoreExperiencesForCrew(
   crewId: string,
   opts: { radiusMetersOverride?: number | null } = {},
 ): Promise<MatchOption[]> {
-  const [members, dna] = await Promise.all([
+  const [members, dna, recommendationSettings] = await Promise.all([
     prisma.crewMember.findMany({
       where: { crewId, status: 'ACTIVE' },
       include: { user: { include: { tasteProfile: true, profile: true } } },
     }),
     prisma.crewDNA.findUnique({ where: { crewId } }),
+    // The Crew's own explicit category picks (docs: CrewRecommendationSettings.categoryPreferences)
+    // — fetched here rather than requiring every caller to pass it in, so "Find us something"/
+    // "Suggest something" (which never touch recommendation settings otherwise) also lean into
+    // what the Crew said it's about, not just the automatic-sweep path. A Crew with no settings
+    // row yet (never touched the Recommendation settings UI) simply has no preference — this
+    // reads, never creates, so a brand-new Crew's first score isn't blocked on a settings write.
+    prisma.crewRecommendationSettings.findUnique({ where: { crewId }, select: { categoryPreferences: true } }),
   ]);
+  const crewCategoryPreferences = new Set(recommendationSettings?.categoryPreferences ?? []);
 
   const userIds = members.map((m) => m.userId);
   const tasteProfiles = members
@@ -140,7 +148,7 @@ export async function scoreExperiencesForCrew(
     const reasons: MatchReason[] = [];
     let score = 0;
 
-    // Layer 2: preference scoring (0-50)
+    // Layer 2: preference scoring (0-70)
     const affinities = tasteProfiles
       .map((tp) => (tp.categoryAffinity as Record<string, number>)[categoryToTasteKey(experience.category)])
       .filter((v): v is number => typeof v === 'number');
@@ -153,6 +161,16 @@ export async function scoreExperiencesForCrew(
     if (dnaTopCategories.has(experience.category)) {
       score += 15;
       reasons.push({ code: 'crew_dna_match', label: "Matches this Crew's usual taste" });
+    }
+
+    // A Crew's own explicit pick blends WITH (never replaces) member-derived taste — the two
+    // reasons above already reflect who's actually in the Crew; this is the group deliberately
+    // saying "we're specifically into this", which counts as a taste signal in its own right
+    // (see hasTasteSignal in crewRecommendations.ts) even for a Crew whose members haven't swiped
+    // enough yet to generate real affinity/DNA signal on their own.
+    if (crewCategoryPreferences.has(experience.category)) {
+      score += 20;
+      reasons.push({ code: 'crew_preference', label: 'Your Crew set this as a preference' });
     }
 
     // Layer 3: context (0-35)
