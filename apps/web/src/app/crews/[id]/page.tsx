@@ -121,6 +121,10 @@ interface Plan {
   votes: { vote: string }[];
   members: unknown[];
   experience: { category: string; startsAt: string; venue: { name: string } | null } | null;
+  // A Plan proposed by hand ("Pub Saturday") has no Experience at all — see plans/[slug]/page.tsx's
+  // own comment on the same shape — so the CURRENT CONTEXT card's date/venue fall back to these.
+  manualVenueName: string | null;
+  manualStartsAt: string | null;
 }
 
 interface CrewDetail {
@@ -1394,24 +1398,68 @@ export default function CrewPage() {
           </div>
         </div>
 
-        {/* CURRENT CONTEXT — one slim, colourful strip, never a card competing with chat. */}
+        {/* CURRENT CONTEXT — real, reported feedback: a single slim pill tinted two different
+            colours read as "the same thing, slightly recoloured", not two genuinely different
+            situations. A locked event is a real calendar commitment now (a ticket-stub date
+            block, its own venue line); a vote still needing you is a live, pulsing ask with an
+            actual progress bar of who's said yes — different shapes, not just different colours,
+            so "a message is waiting" never reads the same as "an event needs your RSVP". */}
         {context && (
           <Link
             href={`/plans/${context.publicSlug}`}
             className="fade-up"
             style={{
-              display: 'flex', alignItems: 'center', gap: 10, margin: '0 20px 8px', padding: '11px 16px', borderRadius: 100,
-              background: upcomingPlan ? 'rgba(27,122,77,0.1)' : 'rgba(185,131,42,0.16)',
+              display: 'flex', alignItems: 'center', gap: 12, margin: '0 20px 10px',
+              padding: upcomingPlan ? '10px 16px 10px 10px' : '12px 16px', borderRadius: 18,
+              background: upcomingPlan
+                ? 'linear-gradient(135deg, rgba(27,122,77,0.14), rgba(27,122,77,0.04))'
+                : 'linear-gradient(135deg, rgba(185,131,42,0.16), rgba(185,131,42,0.04))',
+              border: `1px solid ${upcomingPlan ? 'rgba(27,122,77,0.22)' : 'rgba(185,131,42,0.25)'}`,
             }}
           >
-            <span style={{ color: upcomingPlan ? '#1b7a4d' : '#8a5f1f', flexShrink: 0 }}>
-              {upcomingPlan ? <IconCalendar size={15} /> : <IconPoll size={15} />}
-            </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontSize: 13.5, fontWeight: 700 }}>{context.title}</span>
-              {activePlan === context && <span className="v2-muted" style={{ fontSize: 12 }}> · {context.votes.filter((v) => v.vote === 'IN').length}/{context.members.length} in</span>}
-            </div>
-            <span style={{ fontSize: 12, fontWeight: 800, color: upcomingPlan ? 'var(--v2-green)' : '#8a5f1f', flexShrink: 0 }}>{upcomingPlan ? 'View' : 'Vote'} →</span>
+            {upcomingPlan ? (() => {
+                const when = context.experience?.startsAt ?? context.manualStartsAt;
+                const venueName = context.experience?.venue?.name ?? context.manualVenueName;
+                return (
+              <>
+                <div style={{ flexShrink: 0, width: 40, textAlign: 'center', background: 'var(--v2-surface)', borderRadius: 10, padding: '5px 0', boxShadow: 'var(--v2-shadow-sm)' }}>
+                  {when ? (
+                    <>
+                      <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#1b7a4d' }}>
+                        {new Date(when).toLocaleDateString('en-GB', { month: 'short' })}
+                      </div>
+                      <div className="v2-display" style={{ fontSize: 16, lineHeight: 1.1 }}>{new Date(when).getDate()}</div>
+                    </>
+                  ) : (
+                    <IconCalendar size={16} style={{ color: '#1b7a4d' }} />
+                  )}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#1b7a4d', marginBottom: 2 }}>Locked in</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{context.title}</div>
+                  {venueName && <div className="v2-muted" style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{venueName}</div>}
+                </div>
+                <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 800, color: '#fff', background: 'var(--v2-green)', padding: '7px 14px', borderRadius: 100 }}>View →</span>
+              </>
+                );
+              })() : (
+              <>
+                <div style={{ position: 'relative', flexShrink: 0 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(185,131,42,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a5f1f' }}>
+                    <IconPoll size={14} />
+                  </div>
+                  <div className="v2-live-dot" style={{ position: 'absolute', top: -1, right: -1, width: 10, height: 10, borderRadius: '50%', background: '#b9832a', boxShadow: '0 0 0 2px var(--v2-bg)', ['--dot-glow' as string]: 'rgba(185,131,42,0.5)' }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#8a5f1f', marginBottom: 2 }}>Vote needed</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{context.title}</div>
+                  <div style={{ height: 4, borderRadius: 2, background: 'rgba(185,131,42,0.18)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', borderRadius: 2, background: '#b9832a', width: `${Math.round((context.votes.filter((v) => v.vote === 'IN').length / Math.max(context.members.length, 1)) * 100)}%` }} />
+                  </div>
+                </div>
+                <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 800, color: '#fff', background: '#b9832a', padding: '7px 14px', borderRadius: 100 }}>Vote →</span>
+              </>
+            )}
           </Link>
         )}
       </div>

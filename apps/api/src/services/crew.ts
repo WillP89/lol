@@ -169,8 +169,13 @@ async function crewSummaryExtras(crewId: string, requestingUserId: string) {
           id: upcomingPlan.id,
           title: upcomingPlan.title,
           publicSlug: upcomingPlan.publicSlug,
-          startsAt: upcomingPlan.experience?.startsAt ?? null,
-          venueName: upcomingPlan.experience?.venue?.name ?? null,
+          // Real gap this closes: a manually-proposed locked Plan ("Pub Saturday", no Experience
+          // at all — see plans/[slug]/page.tsx's own comment on the same shape) fell through to
+          // null here even though it has its own manualStartsAt/manualVenueName, same as the
+          // /plans/upcoming list a few lines below already falls back to. Home's own "Locked in"
+          // notification card (home/page.tsx) reads straight off this field.
+          startsAt: upcomingPlan.experience?.startsAt ?? upcomingPlan.manualStartsAt ?? null,
+          venueName: upcomingPlan.experience?.venue?.name ?? upcomingPlan.manualVenueName ?? null,
           category: upcomingPlan.experience?.category ?? null,
           imageUrl: upcomingPlan.experience?.imageUrl ?? null,
         }

@@ -8,7 +8,7 @@ import { v2Art } from '@/lib/v2Art';
 import { formatPriceFrom } from '@/lib/formatPrice';
 import { displayNameOf } from '@/lib/displayName';
 import { messagePreview } from '@/lib/messagePreview';
-import { IconGathering, IconLock } from '@/components/icons';
+import { IconGathering, IconLock, IconCalendar, IconPoll } from '@/components/icons';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { identityGradient } from '@/lib/identity';
 import { useScrollReveal } from '@/lib/useScrollReveal';
@@ -180,14 +180,32 @@ export default function HomePage() {
   // that, this is the truest "what's happening" signal Home has.
   const heroNeedsAttention = !nextPlan ? needsAttention[0] ?? null : null;
 
-  const recentActivity = useMemo(
-    () =>
-      (crews ?? [])
-        .filter((c) => c.latestMessage)
-        .sort((a, b) => new Date(b.latestMessage!.createdAt).getTime() - new Date(a.latestMessage!.createdAt).getTime())
-        .slice(0, 3),
-    [crews],
-  );
+  // Real, reported feedback: "so fucking basic", and it never differentiated a Crew genuinely
+  // waiting on your vote from an event now locked in from a plain chat message — three very
+  // different kinds of "something's happening" all rendered as one identical grey row. This now
+  // pulls all three into one live feed with a distinct kind per entry, excluding whichever Crew
+  // is already the page's own dominant hero above (never say the same thing twice on one screen).
+  const heroCrewId = nextPlan?.crew.id ?? heroNeedsAttention?.id ?? null;
+  type ActivityItem =
+    | { kind: 'vote'; crew: CrewSummary }
+    | { kind: 'event'; crew: CrewSummary }
+    | { kind: 'message'; crew: CrewSummary };
+  const activityFeed = useMemo(() => {
+    const list = (crews ?? []).filter((c) => c.id !== heroCrewId);
+    const voteItems: ActivityItem[] = list
+      .filter((c) => c.activePlan && !c.activePlan.iVoted)
+      .map((c) => ({ kind: 'vote', crew: c }));
+    const votedIds = new Set(voteItems.map((i) => i.crew.id));
+    const eventItems: ActivityItem[] = list
+      .filter((c) => c.upcomingPlan && !votedIds.has(c.id))
+      .map((c) => ({ kind: 'event', crew: c }));
+    const claimedIds = new Set([...votedIds, ...eventItems.map((i) => i.crew.id)]);
+    const messageItems: ActivityItem[] = list
+      .filter((c) => c.latestMessage && !claimedIds.has(c.id))
+      .sort((a, b) => new Date(b.latestMessage!.createdAt).getTime() - new Date(a.latestMessage!.createdAt).getTime())
+      .map((c) => ({ kind: 'message', crew: c }));
+    return [...voteItems, ...eventItems, ...messageItems].slice(0, 4);
+  }, [crews, heroCrewId]);
 
   const loading = crews === null && !error;
   const firstName = me ? displayNameOf(me.displayName, me.email).split(' ')[0] : '';
@@ -390,39 +408,95 @@ export default function HomePage() {
             </Link>
           )}
 
-          {/* IN THE GROUPS — a plain editorial list (large face, real quote), no card chrome, no
-              repeated white rectangle. */}
-          {recentActivity.length > 0 && (
+          {/* IN THE GROUPS — a real, differentiated live feed now, not one grey row shape reused
+              for three unrelated situations. A vote genuinely needing you, an event now locked
+              in, and a plain message each get their own icon, colour and copy — the same amber/
+              green language the Crew chat page's own context strip uses, so it reads as one
+              consistent signal system across the app, not three invented separately. */}
+          {activityFeed.length > 0 && (
             <div style={{ marginTop: 26, marginBottom: 8 }}>
-              <div className="v2-eyebrow" style={{ marginBottom: 2 }}>In the groups</div>
-              {recentActivity.map((c, i) => (
-                <Link
-                  key={c.id}
-                  href={`/crews/${c.id}`}
-                  className={`v2-editorial-row v2-reveal${c.unreadCount > 0 ? ' unread' : ''}`}
-                  style={{ ['--reveal-i' as string]: i, textDecoration: 'none', color: 'inherit' }}
-                >
-                  <div style={{ position: 'relative', flexShrink: 0 }}>
-                    <PersonAvatar name={c.latestMessage!.authorName} email={c.latestMessage!.authorName} photoUrl={c.latestMessage!.authorAvatarUrl} size={44} />
+              <div className="v2-eyebrow" style={{ marginBottom: 8 }}>In the groups</div>
+              {activityFeed.map((item, i) => {
+                const c = item.crew;
+                if (item.kind === 'vote') {
+                  const plan = c.activePlan!;
+                  return (
+                    <Link
+                      key={`vote-${c.id}`}
+                      href={`/plans/${plan.publicSlug}`}
+                      className="v2-notify-row tone-vote v2-reveal"
+                      style={{ ['--reveal-i' as string]: i, textDecoration: 'none', color: 'inherit' }}
+                    >
+                      <div style={{ position: 'relative', flexShrink: 0 }}>
+                        <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(185,131,42,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a5f1f' }}>
+                          <IconPoll size={19} />
+                        </div>
+                        <div className="v2-live-dot" style={{ position: 'absolute', top: -1, right: -1, width: 12, height: 12, borderRadius: '50%', background: '#b9832a', boxShadow: '0 0 0 2.5px var(--v2-bg)', ['--dot-glow' as string]: 'rgba(185,131,42,0.5)' }} />
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#8a5f1f', marginBottom: 3 }}>Vote needed</div>
+                        <div className="v2-display" style={{ fontSize: 15.5, lineHeight: 1.25, marginBottom: 2, fontWeight: 700 }}>{plan.title}</div>
+                        <div className="v2-muted" style={{ fontSize: 12 }}>{c.name} · {plan.inCount}/{plan.totalMembers} voted</div>
+                      </div>
+                      <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 800, color: '#fff', background: '#b9832a', padding: '8px 14px', borderRadius: 100 }}>Vote →</span>
+                    </Link>
+                  );
+                }
+                if (item.kind === 'event') {
+                  const plan = c.upcomingPlan!;
+                  return (
+                    <Link
+                      key={`event-${c.id}`}
+                      href={`/plans/${plan.publicSlug}`}
+                      className="v2-notify-row tone-event v2-reveal"
+                      style={{ ['--reveal-i' as string]: i, textDecoration: 'none', color: 'inherit' }}
+                    >
+                      <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(27,122,77,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1b7a4d', flexShrink: 0 }}>
+                        <IconCalendar size={19} />
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#1b7a4d', marginBottom: 3 }}>Locked in</div>
+                        <div className="v2-display" style={{ fontSize: 15.5, lineHeight: 1.25, marginBottom: 2, fontWeight: 700 }}>{plan.title}</div>
+                        <div className="v2-muted" style={{ fontSize: 12 }}>
+                          {c.name}
+                          {plan.startsAt && ` · ${new Date(plan.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}`}
+                          {plan.venueName && ` · ${plan.venueName}`}
+                        </div>
+                      </div>
+                      <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 800, color: '#fff', background: 'var(--v2-green)', padding: '8px 14px', borderRadius: 100 }}>View →</span>
+                    </Link>
+                  );
+                }
+                const justArrived = Date.now() - new Date(c.latestMessage!.createdAt).getTime() < 5 * 60_000;
+                return (
+                  <Link
+                    key={`message-${c.id}`}
+                    href={`/crews/${c.id}`}
+                    className={`v2-notify-row tone-message v2-reveal${c.unreadCount > 0 ? ' unread' : ''}`}
+                    style={{ ['--reveal-i' as string]: i, textDecoration: 'none', color: 'inherit' }}
+                  >
+                    <div style={{ position: 'relative', flexShrink: 0 }}>
+                      <PersonAvatar name={c.latestMessage!.authorName} email={c.latestMessage!.authorName} photoUrl={c.latestMessage!.authorAvatarUrl} size={44} />
+                      {(c.unreadCount > 0 || justArrived) && (
+                        <div className={`v2-pop-in${justArrived ? ' v2-live-dot' : ''}`} style={{ position: 'absolute', bottom: -1, right: -1, width: 12, height: 12, borderRadius: '50%', background: 'var(--v2-pop)', boxShadow: '0 0 0 2.5px var(--v2-bg)', ['--dot-glow' as string]: 'rgba(255,47,126,0.5)' }} />
+                      )}
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div className="v2-display" style={{ fontSize: 15.5, lineHeight: 1.3, marginBottom: 2, fontWeight: c.unreadCount > 0 ? 700 : undefined }}>
+                        &ldquo;{messagePreview(c.latestMessage!.body)}&rdquo;
+                      </div>
+                      <div className="v2-muted" style={{ fontSize: 12 }}>
+                        <strong style={{ color: 'var(--v2-ink)' }}>{c.latestMessage!.authorName}</strong> in {c.name} · {justArrived ? 'just now' : timeAgo(c.latestMessage!.createdAt)}
+                      </div>
+                    </div>
                     {c.unreadCount > 0 && (
-                      <div className="v2-pop-in" style={{ position: 'absolute', bottom: -1, right: -1, width: 12, height: 12, borderRadius: '50%', background: 'var(--v2-pop)', boxShadow: '0 0 0 2.5px var(--v2-bg)' }} />
+                      <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: 10.5, fontWeight: 800, color: '#fff', background: 'var(--v2-pop)', borderRadius: 100, minWidth: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>
+                        {c.unreadCount > 9 ? '9+' : c.unreadCount}
+                      </span>
                     )}
-                  </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="v2-display" style={{ fontSize: 16, lineHeight: 1.3, marginBottom: 2, fontWeight: c.unreadCount > 0 ? 700 : undefined }}>
-                      &ldquo;{messagePreview(c.latestMessage!.body)}&rdquo;
-                    </div>
-                    <div className="v2-muted" style={{ fontSize: 12.5 }}>
-                      <strong style={{ color: 'var(--v2-ink)' }}>{c.latestMessage!.authorName}</strong> in {c.name} · {timeAgo(c.latestMessage!.createdAt)}
-                    </div>
-                  </div>
-                  {c.unreadCount > 0 && (
-                    <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: 10.5, fontWeight: 800, color: '#fff', background: 'var(--v2-pop)', borderRadius: 100, minWidth: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>
-                      {c.unreadCount > 9 ? '9+' : c.unreadCount}
-                    </span>
-                  )}
-                </Link>
-              ))}
+                  </Link>
+                );
+              })}
             </div>
           )}
 
