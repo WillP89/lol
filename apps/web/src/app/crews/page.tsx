@@ -9,6 +9,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { messagePreview } from '@/lib/messagePreview';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { MediaUploadButton } from '@/components/MediaUploadButton';
+import { CrewTuneContent } from '@/components/CrewTuneSheet';
 import { identityGradient } from '@/lib/identity';
 import { isCrewArtUrl } from '@/lib/crewArt';
 import { IconMore } from '@/components/icons';
@@ -46,7 +47,7 @@ function crewActivityText(crew: CrewSummary): { text: string; tone: 'plan' | 'de
   return { text: 'Someone has to start it — say hi', tone: 'quiet' };
 }
 
-type CreateStep = 'name' | 'look' | 'invite';
+type CreateStep = 'name' | 'look' | 'taste' | 'invite';
 
 /**
  * Crews — HARD RESET (see docs/DECISIONS.md#plot-design-reset-3), not a restyle. The previous
@@ -72,6 +73,17 @@ export default function CrewsPage() {
   const [newCrewImageUrl, setNewCrewImageUrl] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // "Before creating a crew, one person must fill out the crew's specific preferences... set it
+  // at the crew level by the person who created it... no events or things should be done on
+  // crew until preference set" — a mandatory step in the creation flow itself (AI setup or the
+  // manual picker, either satisfies it), not something to configure later in settings. The API
+  // enforces this for real (see services/crewPreferencesGate.ts + evaluateCrewEligibility's own
+  // preferences_not_set gate) — this step is what makes satisfying that gate the obvious next
+  // thing to do, not a hidden requirement discovered later when a "Find us something" tap fails.
+  const [crewInterestPreferences, setCrewInterestPreferences] = useState<string[]>([]);
+  const [tasteSaving, setTasteSaving] = useState(false);
+  const [tasteError, setTasteError] = useState<string | null>(null);
 
   // Real, reported gap: leaving a Crew only existed buried inside that Crew's own chat (avatar
   // cluster -> members sheet -> scroll to the bottom) — nowhere on the list of Crews itself,
@@ -116,7 +128,33 @@ export default function CrewsPage() {
     setNewCrewId(null);
     setNewCrewImageUrl(null);
     setInviteUrl(null);
+    setCrewInterestPreferences([]);
+    setTasteError(null);
     setShowCreate(true);
+  }
+
+  /** Same add-or-remove-from-array pattern as crews/[id]/page.tsx#toggleInterestPreference —
+   *  persists to the Crew's real CrewRecommendationSettings row immediately (this step's Crew
+   *  already exists by the time it's shown), so preferencesSetAt gets stamped, and the
+   *  guaranteed-first-recommendation trigger fires, the moment the first one lands — not only
+   *  once "Continue" is tapped. */
+  async function toggleTasteInterest(interestId: string) {
+    if (!newCrewId) return;
+    const next = crewInterestPreferences.includes(interestId)
+      ? crewInterestPreferences.filter((v) => v !== interestId)
+      : [...crewInterestPreferences, interestId];
+    const prev = crewInterestPreferences;
+    setCrewInterestPreferences(next);
+    setTasteSaving(true);
+    setTasteError(null);
+    try {
+      await api.patch(`/crews/${newCrewId}/recommendation-settings`, { interestPreferences: next });
+    } catch (err) {
+      setCrewInterestPreferences(prev); // revert
+      setTasteError(err instanceof ApiError ? err.message : 'Could not save that — check your connection and try again.');
+    } finally {
+      setTasteSaving(false);
+    }
   }
 
   async function createCrew(e: React.FormEvent) {
@@ -358,8 +396,35 @@ export default function CrewsPage() {
                 </MediaUploadButton>
               )}
             </div>
-            <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={() => setStep('invite')}>
+            <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={() => setStep('taste')}>
               Continue
+            </button>
+          </div>
+        ) : step === 'taste' ? (
+          <div>
+            <div className="v2-eyebrow" style={{ marginBottom: 4 }}>{name}</div>
+            <h2 className="v2-display" style={{ fontSize: 20, marginBottom: 6 }}>What&rsquo;s {name} actually into?</h2>
+            <p className="v2-muted" style={{ marginBottom: 16, fontSize: 13.5, lineHeight: 1.5 }}>
+              Set this once, as the Crew&rsquo;s own taste — Plot won&rsquo;t find or suggest anything until it&rsquo;s set. Pick at
+              least one, either way; you can tailor it any time after.
+            </p>
+            {tasteError && <p style={{ color: 'var(--v2-error)', fontSize: 12.5, marginBottom: 10 }}>{tasteError}</p>}
+            {newCrewId && (
+              <CrewTuneContent
+                crewId={newCrewId}
+                interestPreferences={crewInterestPreferences}
+                onToggle={toggleTasteInterest}
+                onAiApplied={setCrewInterestPreferences}
+                saving={tasteSaving}
+              />
+            )}
+            <button
+              className="v2-btn v2-btn-brand"
+              style={{ width: '100%', marginTop: 18 }}
+              disabled={crewInterestPreferences.length === 0 || tasteSaving}
+              onClick={() => setStep('invite')}
+            >
+              {crewInterestPreferences.length === 0 ? 'Pick at least one to continue' : 'Continue'}
             </button>
           </div>
         ) : (

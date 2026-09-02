@@ -9,6 +9,7 @@ import { haversineMiles } from '../lib/geo';
 import { track } from './analytics';
 import { sendExperienceToCrew } from './plan';
 import { experienceInterestTags, experienceMatchesFreeText, type FreeTextSignal } from './tasteSignals';
+import { assertCrewPreferencesSet } from './crewPreferencesGate';
 import { interestLabel } from '@plot/shared';
 import type { Experience, TasteProfile, Plan } from '@prisma/client';
 
@@ -351,6 +352,10 @@ export async function findUsSomething(
   crewId: string,
   requestedByUserId: string,
 ): Promise<{ recommendationId: string; options: MatchOption[] }> {
+  // "no events or things should be done on crew until preference set" — covers suggestToCrewChat
+  // too, since it calls straight through this function. See crewPreferencesGate.ts's own comment.
+  await assertCrewPreferencesSet(crewId);
+
   const city = await resolveCrewCity(crewId, requestedByUserId);
   // Self-heals an unseeded city on first use — see ensureInventory's own comment.
   await ensureInventory(city);

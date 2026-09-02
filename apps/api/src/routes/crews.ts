@@ -113,26 +113,18 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     if (!result) return reply.code(404).send({ error: 'not_found', message: 'Invalid invite code.' });
     await track('InviteAccepted', { crewId: result.crew.id, userId: request.user.id }, { userId: request.user.id, crewId: result.crew.id });
 
-    // Real product gap found operating this live: the periodic sweep (every 6 hours) is the
-    // right cadence for ONGOING proactive discovery, but it's the wrong model for the single
-    // most important first moment — a brand-new Crew's SECOND member joining, which is exactly
-    // when a Crew first has anyone to recommend something TO at all
-    // (generateRecommendationForCrew's own memberCount<2 gate). Making that person wait up to 6
-    // hours for the "Plot found this for you" moment undermines the entire premise the product
-    // exists to prove.
-    //
-    // Deliberately scoped to ONLY that first 1->2 transition, not every join thereafter: firing
-    // on every join (member 3, 4, 5...) surprised unrelated flows with an unprompted Plan
-    // appearing mid-test/mid-journey, and isn't the moment that actually needs to feel instant —
-    // an already-active Crew is already well served by the periodic sweep. Fired here, not
-    // awaited — scoring does real work (provider inventory sync, distance/taste scoring) that
-    // shouldn't hold up the join response.
+    // The primary "never come up empty" first-recommendation trigger now fires from
+    // services/crewRecommendations.ts#updateSettings, the moment the Crew's creator first sets
+    // its preferences (per the "no events or things should be done on crew until preference
+    // set" requirement — a brand-new Crew normally has that done before anyone else even joins).
+    // This is a defensive fallback only, for the edge case where a second member joins a Crew
+    // whose preferences somehow got set before it had two members to recommend anything TO
+    // (generateRecommendationForCrew's own memberCount<2 gate) — evaluateCrewEligibility's own
+    // preferences_not_set gate makes this a safe no-op in the (now-common) case where preferences
+    // aren't set yet. Fired here, not awaited — scoring does real work (provider inventory sync,
+    // distance/taste scoring) that shouldn't hold up the join response.
     const activeMemberCount = await prisma.crewMember.count({ where: { crewId: result.crew.id, status: 'ACTIVE' } });
     if (activeMemberCount === 2) {
-      // guaranteeFirst: true — real, live product requirement: this exact moment must not come
-      // up empty just because two brand-new members haven't swiped enough yet for real taste
-      // signal. See generateRecommendationForCrew's own comment on what this relaxes (never the
-      // candidate pool itself — always real, in-radius, quality-checked).
       generateRecommendationForCrew(result.crew.id, { guaranteeFirst: true }).catch((err) => {
         logger.error({ err, crewId: result.crew.id }, 'Immediate post-join recommendation attempt failed');
       });

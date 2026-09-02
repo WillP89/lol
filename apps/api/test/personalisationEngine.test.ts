@@ -51,6 +51,17 @@ async function setUpMember(email: string, interestIds: string[]): Promise<{ user
 async function createCrewWith(owner: { cookie: string }, mate: { cookie: string }, name: string): Promise<string> {
   const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name, defaultCity: STAFFORD.city } });
   const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
+  // "no events or things should be done on crew until preference set" — required before
+  // find-us-something will do anything (services/crewPreferencesGate.ts). BAR is deliberately
+  // unrelated to every category this suite's shared inventory pool uses (LIVE_MUSIC/SPORT/
+  // RESTAURANT), so it satisfies the gate without adding a crew_preference boost that would
+  // confound what these tests are actually proving (member-derived specific-interest matching).
+  await app.inject({
+    method: 'PATCH',
+    url: `/crews/${crew.id}/recommendation-settings`,
+    headers: { cookie: owner.cookie },
+    payload: { categoryPreferences: ['BAR'] },
+  });
   await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
   return crew.id;
 }

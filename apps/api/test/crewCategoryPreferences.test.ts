@@ -128,12 +128,17 @@ describe('crew-level category preferences: tailoring a Crew beyond member-derive
       payload: { categoryPreferences: ['DAY_ACTIVITY'] },
     });
     expect(patchRes.statusCode).toBe(200);
-    const { settings } = patchRes.json() as { settings: { categoryPreferences: string[] } };
+    const { settings } = patchRes.json() as { settings: { categoryPreferences: string[]; preferencesSetAt: string | null } };
     expect(settings.categoryPreferences).toEqual(['DAY_ACTIVITY']);
+    expect(settings.preferencesSetAt).not.toBeNull();
 
-    const sweepRes = await app.inject({ method: 'POST', url: '/admin/recommendations/sweep', headers: { 'x-admin-key': ADMIN_KEY }, payload: { crewId } });
-    expect(sweepRes.statusCode).toBe(200);
-    expect((sweepRes.json() as { delivered: number }).delivered).toBe(1);
+    // Setting a Crew's preferences for the very first time now IS the guaranteed-first-
+    // recommendation moment (services/crewRecommendations.ts#updateSettings — moved here from
+    // the 1->2-member join, since preferences, not membership, are the real gate now). Fired
+    // fire-and-forget from the PATCH handler, same settle pattern as the join trigger elsewhere
+    // in this suite — so a manual sweep immediately after would race it and isn't what this test
+    // is proving; it's proving the PATCH itself is what delivers.
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crewId}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };

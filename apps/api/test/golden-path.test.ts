@@ -90,6 +90,17 @@ describe('golden path: signup through Rewind', () => {
     crewId = crew.id;
     inviteCode = crew.inviteCode;
 
+    // "no events or things should be done on crew until preference set" — Alex, as the creator,
+    // sets the Crew's own preferences before anyone acts on it, same as the New Crew flow's
+    // mandatory 'taste' step now requires (see services/crewPreferencesGate.ts).
+    const prefRes = await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crewId}/recommendation-settings`,
+      headers: { cookie: sessions.alex.cookie },
+      payload: { categoryPreferences: ['BAR'] },
+    });
+    expect(prefRes.statusCode).toBe(200);
+
     for (const member of members.filter((m) => m.name !== 'alex')) {
       const joinRes = await app.inject({
         method: 'POST',
@@ -563,6 +574,14 @@ describe('suggest-to-chat: the core loop puts suggestions straight into the conv
       payload: { name: 'Suggest Test Crew', defaultCity: 'London' },
     });
     const { crew } = createRes.json() as { crew: { id: string } };
+    // "no events or things should be done on crew until preference set" — required before
+    // suggest-to-chat (which calls straight through find-us-something) will do anything.
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crew.id}/recommendation-settings`,
+      headers: { cookie: owner.cookie },
+      payload: { categoryPreferences: ['BAR'] },
+    });
 
     const res = await app.inject({ method: 'POST', url: `/crews/${crew.id}/suggest-to-chat`, headers: { cookie: owner.cookie } });
     expect(res.statusCode).toBe(200);

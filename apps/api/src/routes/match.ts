@@ -6,6 +6,7 @@ import { findUsSomething, suggestToCrewChat } from '../services/match';
 import { getCrewAvailabilityByDay } from '../services/availability';
 import { track } from '../services/analytics';
 import { hasLiveTicketedProvider } from '../providers/registry';
+import { CrewPreferencesNotSetError } from '../services/crewPreferencesGate';
 
 export async function matchRoutes(app: FastifyInstance): Promise<void> {
   app.post('/crews/:crewId/find-us-something', async (request, reply) => {
@@ -18,10 +19,17 @@ export async function matchRoutes(app: FastifyInstance): Promise<void> {
 
     await track('FindUsSomethingOpened', { crewId, userId: request.user.id }, { userId: request.user.id, crewId });
 
-    const result = await findUsSomething(crewId, request.user.id);
-    // See docs/DECISIONS.md#real-events — the client shows a "sample events" banner rather
-    // than presenting mock data as real listings.
-    return reply.send({ ...result, dataSource: hasLiveTicketedProvider ? 'live' : 'mock' });
+    try {
+      const result = await findUsSomething(crewId, request.user.id);
+      // See docs/DECISIONS.md#real-events — the client shows a "sample events" banner rather
+      // than presenting mock data as real listings.
+      return reply.send({ ...result, dataSource: hasLiveTicketedProvider ? 'live' : 'mock' });
+    } catch (err) {
+      if (err instanceof CrewPreferencesNotSetError) {
+        return reply.code(400).send({ error: 'preferences_not_set', message: err.message });
+      }
+      throw err;
+    }
   });
 
   // The core loop: find the best options AND put them straight into the Crew's conversation
@@ -36,8 +44,15 @@ export async function matchRoutes(app: FastifyInstance): Promise<void> {
 
     await track('FindUsSomethingOpened', { crewId, userId: request.user.id }, { userId: request.user.id, crewId });
 
-    const plans = await suggestToCrewChat(crewId, request.user.id);
-    return reply.send({ plans, dataSource: hasLiveTicketedProvider ? 'live' : 'mock' });
+    try {
+      const plans = await suggestToCrewChat(crewId, request.user.id);
+      return reply.send({ plans, dataSource: hasLiveTicketedProvider ? 'live' : 'mock' });
+    } catch (err) {
+      if (err instanceof CrewPreferencesNotSetError) {
+        return reply.code(400).send({ error: 'preferences_not_set', message: err.message });
+      }
+      throw err;
+    }
   });
 
   app.get('/crews/:crewId/availability', async (request, reply) => {

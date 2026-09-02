@@ -56,6 +56,16 @@ describe('geographically dispersed Crews are not silently excluded from every re
     const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
     crewId = crew.id;
     await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: londonerCookie }, payload: { inviteCode: crew.inviteCode } });
+
+    // "no events or things should be done on crew until preference set" — required before
+    // find-us-something will do anything at all (services/crewPreferencesGate.ts). Not what this
+    // test is actually about (that's the radius fix above), so just satisfy the gate directly.
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crewId}/recommendation-settings`,
+      headers: { cookie: ownerCookie },
+      payload: { categoryPreferences: ['LIVE_MUSIC'] },
+    });
   });
 
   test('at least one real candidate is recognised as within radius, not zero', async () => {

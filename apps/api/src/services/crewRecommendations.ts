@@ -18,6 +18,7 @@ import type { CrewRecommendation, CrewRecommendationStatus } from '@prisma/clien
  */
 type RecommendationOutcome =
   | 'disabled'
+  | 'preferences_not_set'
   | 'weekly_cap_reached'
   | 'too_few_members'
   | 'no_eligible_candidate'
@@ -74,6 +75,10 @@ export interface RecommendationSettingsDTO {
   categoryPreferences: string[];
   // One level more specific — taxonomy interest ids, see .interestPreferences's own schema comment.
   interestPreferences: string[];
+  // Null = the Crew's creator hasn't set the Crew's own preferences yet — see
+  // .preferencesSetAt's own schema comment. This is the absolute gate checked first in
+  // evaluateCrewEligibility and by services/crewPreferencesGate.ts for the manual flows.
+  preferencesSetAt: Date | null;
 }
 
 /** Self-heals a settings row on first read — every Crew gets sane defaults (on, 2/week,
@@ -108,14 +113,33 @@ export async function getOrCreateSettings(crewId: string): Promise<Recommendatio
     travelRadiusMeters: settings.travelRadiusMeters,
     categoryPreferences: settings.categoryPreferences,
     interestPreferences: settings.interestPreferences,
+    preferencesSetAt: settings.preferencesSetAt,
   };
 }
 
+/**
+ * Real, live product requirement: "one person must fill out the crew's specific preferences...
+ * this then defines the group's preferences... no events or things should be done on crew until
+ * preference set... yes you can tailor it after and change" — so `preferencesSetAt` is stamped
+ * automatically, exactly once, the moment either preference array first goes from empty to
+ * non-empty, and never touched again after that (a later edit that empties both arrays back out,
+ * however unlikely, still doesn't un-stamp it — re-tuning is explicitly allowed to stay
+ * unblocked). The moment it gets stamped is also this Crew's real "first event" moment — the
+ * same guarantee that used to fire on the 1->2-member join now fires here instead, since
+ * preferences (not membership) are the actual gate on Plot doing anything at all.
+ */
 export async function updateSettings(
   crewId: string,
   patch: Partial<RecommendationSettingsDTO>,
 ): Promise<RecommendationSettingsDTO> {
-  await getOrCreateSettings(crewId); // ensure the row exists before the update
+  const current = await getOrCreateSettings(crewId); // ensure the row exists, and read prior state for the auto-stamp below
+
+  const nextCategoryPreferences = patch.categoryPreferences ?? current.categoryPreferences;
+  const nextInterestPreferences = patch.interestPreferences ?? current.interestPreferences;
+  const hadNoPreferencesYet = current.categoryPreferences.length === 0 && current.interestPreferences.length === 0;
+  const hasPreferencesNow = nextCategoryPreferences.length > 0 || nextInterestPreferences.length > 0;
+  const justSetPreferencesForFirstTime = current.preferencesSetAt === null && hadNoPreferencesYet && hasPreferencesNow;
+
   const settings = await prisma.crewRecommendationSettings.update({
     where: { crewId },
     data: {
@@ -124,14 +148,27 @@ export async function updateSettings(
       ...(patch.travelRadiusMeters !== undefined ? { travelRadiusMeters: patch.travelRadiusMeters } : {}),
       ...(patch.categoryPreferences !== undefined ? { categoryPreferences: patch.categoryPreferences } : {}),
       ...(patch.interestPreferences !== undefined ? { interestPreferences: patch.interestPreferences } : {}),
+      ...(justSetPreferencesForFirstTime ? { preferencesSetAt: new Date() } : {}),
     },
   });
+
+  if (justSetPreferencesForFirstTime) {
+    // guaranteeFirst: true — see generateRecommendationForCrew's own comment on what this
+    // relaxes (never the candidate pool itself). Fired here, not awaited — scoring does real
+    // work (provider inventory sync, distance/taste scoring) that shouldn't hold up the settings
+    // response the crew creator is waiting on.
+    generateRecommendationForCrew(crewId, { guaranteeFirst: true }).catch((err) => {
+      logger.error({ err, crewId }, 'Guaranteed first recommendation failed right after crew preferences were first set');
+    });
+  }
+
   return {
     enabled: settings.enabled,
     maxPerWeek: settings.maxPerWeek,
     travelRadiusMeters: settings.travelRadiusMeters,
     categoryPreferences: settings.categoryPreferences,
     interestPreferences: settings.interestPreferences,
+    preferencesSetAt: settings.preferencesSetAt,
   };
 }
 
@@ -206,6 +243,12 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   const settings = await getOrCreateSettings(crewId);
   if (!settings.enabled) {
     return { outcome: 'disabled', details: {} };
+  }
+  if (!settings.preferencesSetAt) {
+    // The absolute gate — see .preferencesSetAt's own schema comment and updateSettings's. Checked
+    // before the weekly cap and member count deliberately: "no events or things should be done on
+    // crew until preference set" is unconditional, not just a floor on top of the other checks.
+    return { outcome: 'preferences_not_set', details: {} };
   }
 
   const since = new Date(Date.now() - LOOKBACK_DAYS_FOR_WEEKLY_CAP * 24 * 60 * 60 * 1000);
