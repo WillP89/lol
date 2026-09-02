@@ -199,10 +199,29 @@ export async function syncAllProviders(city = UK_FALLBACK_CENTER.name): Promise<
   const toDate = new Date();
   toDate.setDate(toDate.getDate() + 60);
 
-  const results: Awaited<ReturnType<typeof syncProvider>>[] = [];
-  for (const adapter of providerRegistry) {
-    results.push(await syncProvider(adapter, { city, fromDate, toDate }));
-  }
+  // Real live bug this closes: providers used to run one after another, so one sync's total
+  // latency was the SUM of every registered provider's own worst case — Ticketmaster's page
+  // retries plus Skiddle's category retries plus OpenStreetMap's query retry, all added
+  // together, inside the same synchronous call a live page load awaits (ensureInventory). That
+  // sum is exactly what hung Discover the moment a second live provider (Skiddle) was added.
+  // Each adapter already isolates its OWN failures (syncProvider's try/catch marks a provider
+  // DOWN without touching the others) and each now bounds its OWN worst-case latency (see
+  // PER_CATEGORY_RETRY/PAGE_RETRY/FETCH_RETRY in the adapters themselves) — running them
+  // concurrently turns total sync latency into the MAX of those bounds instead of their sum.
+  //
+  // Known, pre-existing, and unchanged trade-off: syncProvider's own venue lookup
+  // (`findFirst` then `create` — see its own comment on why, and docs/DECISIONS.md#venue-identity)
+  // has no unique constraint to make it atomic, so two providers racing to create the same
+  // brand-new venue (same name+city) concurrently can create a harmless duplicate Venue row
+  // rather than throwing. This was already possible before this change (two separate requests
+  // for the same never-synced city landing close together), just less likely with everything
+  // sequential — running providers concurrently doesn't introduce a new failure mode, only
+  // makes an already-accepted one somewhat more likely. Not a crash, not data loss — some
+  // experiences would just split across two Venue rows for the same real place until the next
+  // dedup pass. A real fix needs a DB-level unique constraint plus a data cleanup migration,
+  // deliberately out of scope here without being able to inspect production's existing venue
+  // data first.
+  const results = await Promise.all(providerRegistry.map((adapter) => syncProvider(adapter, { city, fromDate, toDate })));
 
   // Real risk this guards against: `retireSupersededMockListings` deletes old mock rows purely
   // because the registry has moved on from them — it has no idea whether today's real providers
@@ -331,20 +350,38 @@ async function runInventorySyncIfDue(city: string): Promise<void> {
 // `ensureInventory` export always takes inside the test suite — the same reason `syncProvider`
 // above is exported rather than kept private. See test/ensureInventoryResilience.test.ts.
 export async function ensureInventoryProduction(city: string): Promise<void> {
-  const existing = inFlightSyncs.get(city);
-  if (existing) {
-    await existing;
-    return;
+  // Real live bug this closes: every caller — including ones reading a city that already has a
+  // full catalogue — used to BLOCK on the due-sync completing, even though there was already
+  // something real to show. That's what made Discover feel "stuck loading" the moment a due
+  // resync happened to land on someone's request: three providers' worth of network latency
+  // (now individually bounded, and now run concurrently — see syncAllProviders) still isn't
+  // "instant". A city that already has content doesn't need to wait for a fresher one — the
+  // due sync still runs, just in the background, and the NEXT request picks up its results
+  // (a standard stale-while-revalidate trade-off: briefly-stale-but-real data now, not a
+  // multi-second wait for marginally fresher data). A genuinely empty city (nothing to show at
+  // all yet) is the one case that still has to wait — there's no "instant" version of showing
+  // real content that doesn't exist yet.
+  const hasExistingContent = (await prisma.experience.count({ where: { venue: { city } } })) > 0;
+
+  let run = inFlightSyncs.get(city);
+  if (!run) {
+    run = runInventorySyncIfDue(city).catch((err) => {
+      logger.error({ err, city }, 'Inventory sync failed — continuing with whatever inventory already exists rather than failing the request');
+    });
+    inFlightSyncs.set(city, run);
+    // Not `finally` on an awaited call — this promise may run to completion long after THIS
+    // caller has already returned (the whole point, for an already-seeded city) — so cleanup is
+    // attached directly to the background promise itself, guarded so a newer sync that already
+    // replaced this map entry (a fresh due-check some time later) isn't clobbered by a late
+    // cleanup from this older one.
+    const settled = run;
+    void settled.finally(() => {
+      if (inFlightSyncs.get(city) === settled) inFlightSyncs.delete(city);
+    });
   }
 
-  const run = runInventorySyncIfDue(city).catch((err) => {
-    logger.error({ err, city }, 'Inventory sync failed — continuing with whatever inventory already exists rather than failing the request');
-  });
-  inFlightSyncs.set(city, run);
-  try {
+  if (!hasExistingContent) {
     await run;
-  } finally {
-    inFlightSyncs.delete(city);
   }
 }
 

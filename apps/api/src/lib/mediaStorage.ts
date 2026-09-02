@@ -43,6 +43,17 @@ const s3Client = s3Configured
       region: config.S3_REGION,
       endpoint: config.S3_ENDPOINT,
       credentials: { accessKeyId: config.S3_ACCESS_KEY_ID!, secretAccessKey: config.S3_SECRET_ACCESS_KEY! },
+      // Real, live-reported bug this fixes: without this, the SDK defaults to VIRTUAL-hosted
+      // addressing (`<bucket>.<account-id>.r2.cloudflarestorage.com`) — a real request that
+      // works against actual AWS S3, but against R2 specifically puts the bucket name two
+      // subdomain levels below r2.cloudflarestorage.com, deeper than R2's own wildcard TLS
+      // certificate covers. The practical symptom isn't a clean error: the TLS handshake stalls
+      // rather than failing fast, which is exactly "gets stuck on saving" — not a quick failure
+      // a user could retry past. `forcePathStyle` addresses the bucket in the URL PATH instead
+      // (`<endpoint>/<bucket>/<key>`), which is Cloudflare's own documented way to use the AWS
+      // SDK against R2 (developers.cloudflare.com/r2/examples/aws/aws-sdk-js-v3/) — not an
+      // optional tweak, the supported configuration.
+      forcePathStyle: true,
     })
   : null;
 
@@ -50,6 +61,27 @@ export class MediaValidationError extends Error {}
 /** Distinct from MediaValidationError (a bad file) — this means storage itself isn't set up,
  * which a route handler should report as a 503 ("uploads aren't available yet"), not a 400. */
 export class MediaStorageUnavailableError extends Error {}
+
+// Real, live-reported bug this bounds: "gets stuck on saving" forever, with nothing to retry
+// against — the AWS SDK's own default timeouts are generous enough (and R2's own stalled-TLS-
+// handshake failure mode, see forcePathStyle's comment above, slow enough) that a genuinely
+// broken upload could leave a user staring at a spinner well past what anyone would wait out.
+// A bounded timeout turns "hangs indefinitely" into "fails clearly, fast enough to just retry" —
+// the same discipline this session already applied to every provider adapter's own network
+// calls (see providers/live/skiddle.ts's OVERALL_BUDGET_MS).
+const UPLOAD_TIMEOUT_MS = 20_000;
+
+async function withUploadTimeout<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new MediaStorageUnavailableError('Upload timed out — please try again.')), UPLOAD_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
 
 export async function saveUpload(params: { buffer: Buffer; mimeType: string; kind: 'avatar' | 'crew' }): Promise<string> {
   if (!ALLOWED_MIME.has(params.mimeType)) {
@@ -62,14 +94,16 @@ export async function saveUpload(params: { buffer: Buffer; mimeType: string; kin
   const filename = `${params.kind}-${randomUUID()}.${ext}`;
 
   if (s3Client) {
-    await s3Client.send(
-      new PutObjectCommand({
-        Bucket: config.S3_BUCKET,
-        Key: filename,
-        Body: params.buffer,
-        ContentType: params.mimeType,
-        CacheControl: 'public, max-age=31536000, immutable', // filenames are random UUIDs — never reused, safe to cache forever
-      }),
+    await withUploadTimeout(
+      s3Client.send(
+        new PutObjectCommand({
+          Bucket: config.S3_BUCKET,
+          Key: filename,
+          Body: params.buffer,
+          ContentType: params.mimeType,
+          CacheControl: 'public, max-age=31536000, immutable', // filenames are random UUIDs — never reused, safe to cache forever
+        }),
+      ),
     );
     return `${config.S3_PUBLIC_URL}/${filename}`;
   }

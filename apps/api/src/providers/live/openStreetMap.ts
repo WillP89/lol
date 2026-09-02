@@ -35,7 +35,15 @@ import { UK_FALLBACK_CENTER, resolveCityCenter, type UkPlace } from '../../data/
  * kind of public instance is known to return under load. A dedicated Overpass instance (or a
  * self-hosted one) would be the right upgrade once sync volume grows — see docs/providers/
  * food-and-places.md.
+ *
+ * Real live bug this section's own FETCH_RETRY also closes — same shape as Skiddle's
+ * PER_CATEGORY_RETRY and Ticketmaster's PAGE_RETRY: fetchListings previously used withRetry's
+ * DEFAULT budget (3 attempts x 15s timeout override) — ~45s worst case for this ONE query — on
+ * top of Ticketmaster's and Skiddle's own worst cases, all three run sequentially inside the
+ * same synchronous ensureInventory call a live page load awaits. See services/inventorySync.ts's
+ * syncAllProviders, now parallelized so these three run concurrently rather than summed.
  */
+const FETCH_RETRY = { attempts: 2, timeoutMs: 8_000 };
 
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 const SEARCH_RADIUS_METERS = 6000; // dining/nightlife — a real "worth the trip" catchment, not a whole county
@@ -157,7 +165,7 @@ export const openStreetMapProvider: ProviderAdapter = {
     const center = resolveCityCenter(params.city);
     let elements: OsmElement[];
     try {
-      elements = await withRetry((signal) => runQuery(center, signal), { timeoutMs: 15_000 });
+      elements = await withRetry((signal) => runQuery(center, signal), FETCH_RETRY);
     } catch (err) {
       logger.warn({ err, city: params.city }, 'Overpass query failed — no OpenStreetMap inventory this sync');
       return [];

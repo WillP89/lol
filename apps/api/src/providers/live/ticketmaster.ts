@@ -22,6 +22,14 @@ const PAGE_SIZE = 100;
 // handles a stray 429; this cap keeps a single sync from blowing through the daily quota by
 // itself if a city genuinely has more than a few hundred events in the window.
 const MAX_PAGES = 3;
+// Same class of live bug as Skiddle's own PER_CATEGORY_RETRY (see skiddle.ts's comment) —
+// fetchListings pages up to MAX_PAGES times, each using withRetry's DEFAULT budget (3 attempts
+// x 8s timeout) would be ~24s worst case PER PAGE, so a slow/unresponsive Ticketmaster response
+// could add ~75s to one sync — inside the same synchronous ensureInventory read path a live
+// page load awaits. Only 3 pages here (vs Skiddle's 7 categories), so unlike Skiddle this keeps
+// one retry rather than failing after a single attempt — still bounds the worst case to ~37.5s
+// total instead of ~75s, while giving a single transient blip one real chance to recover.
+const PAGE_RETRY = { attempts: 2, timeoutMs: 6000 };
 
 interface TmImage {
   url: string;
@@ -159,7 +167,7 @@ export const ticketmasterProvider: ProviderAdapter = {
 
     const events: TmEvent[] = [];
     for (let page = 0; page < MAX_PAGES; page++) {
-      const data = await withRetry((signal) => fetchPage(params, page, signal));
+      const data = await withRetry((signal) => fetchPage(params, page, signal), PAGE_RETRY);
       const pageEvents = data._embedded?.events ?? [];
       events.push(...pageEvents);
       const totalPages = data.page?.totalPages ?? 1;

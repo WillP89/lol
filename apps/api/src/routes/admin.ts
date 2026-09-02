@@ -217,13 +217,21 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
    * should take. See docs/DECISIONS.md#crew-auto-recommendations.
    */
   app.post('/recommendations/sweep', async (request, reply) => {
-    const BodySchema = z.object({ crewId: z.string().optional(), force: z.boolean().optional() });
+    const BodySchema = z.object({ crewId: z.string().optional(), force: z.boolean().optional(), guaranteeFirst: z.boolean().optional() });
     const parsed = BodySchema.safeParse(request.body ?? {});
     const crewId = parsed.success ? parsed.data.crewId : undefined;
     const force = parsed.success ? Boolean(parsed.data.force) : false;
+    // Manual remediation for a Crew whose real "first event" moment (the 1->2-member join
+    // trigger in routes/crews.ts, fired with a bare `.catch()`) silently failed or timed out —
+    // e.g. during the live window `ensureInventory` could take 90+ seconds per city before
+    // today's provider-latency fixes. That trigger is one-shot: a Crew it failed for never gets
+    // retried by the periodic sweep, which deliberately never uses this relaxation (see
+    // evaluateCrewEligibility's own comment). This lets an operator manually re-run it with the
+    // exact same guarantee, for one named Crew, without waiting for new code to ship.
+    const guaranteeFirst = parsed.success ? Boolean(parsed.data.guaranteeFirst) : false;
 
     if (crewId) {
-      const recommendation = await generateRecommendationForCrew(crewId);
+      const recommendation = await generateRecommendationForCrew(crewId, { guaranteeFirst });
       return reply.send({ crewsEvaluated: 1, delivered: recommendation ? 1 : 0, errors: 0, recommendation });
     }
     if (force) {
