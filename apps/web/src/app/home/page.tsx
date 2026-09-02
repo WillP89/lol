@@ -314,9 +314,28 @@ export default function HomePage() {
               // clearing the fold on real hardware, not just a taller desktop-emulated viewport.
               style={{ display: 'block', position: 'relative', height: 340, overflow: 'hidden', marginBottom: 6 }}
             >
+              {/* Real, reported feedback: this is the single biggest, most prominent element on
+                  the whole page, and v2Art's generic per-category gradient+icon (the same
+                  treatment every Crew's every plan in that category shares, an icon trying and
+                  failing to read as a photo) carried too much visual weight at this size to get
+                  away with looking generic — "boring stock". When there's a real photo it still
+                  wins outright (same as everywhere else). When there isn't, this doesn't try to
+                  fake one any more: a confident, honest colour surface instead — the Crew's OWN
+                  identity colour (the one their mark is already drawn from everywhere else, so
+                  it's a colour the user already associates with them, not a shared category
+                  palette) with a fine grain texture for depth (a flat CSS gradient alone reads as
+                  a vector graphic, not a considered surface), no icon pretending to be content.
+                  The bold title typography already here is the actual visual — leaning into that
+                  on purpose, the way a confident editorial "no photo yet" treatment should,
+                  rather than dressing up a gradient as a substitute photo. */}
               <div
                 className="v2-ken-burns"
-                style={{ position: 'absolute', inset: 0, background: v2Art(nextPlan.imageUrl, nextPlan.category) }}
+                style={{
+                  position: 'absolute', inset: 0,
+                  background: nextPlan.imageUrl
+                    ? `url("${nextPlan.imageUrl}") center / cover no-repeat`
+                    : `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="140" height="140"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="140" height="140" filter="url(%23n)" opacity="0.22"/></svg>')}") repeat, ${identityGradient(nextPlan.crew.name, 155)}`,
+                }}
               />
               <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(200deg, rgba(22,19,15,0) 25%, rgba(22,19,15,0.6) 72%, rgba(22,19,15,0.9) 100%)' }} />
               <div style={{ position: 'absolute', top: 20, left: 20 }}>

@@ -871,7 +871,15 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
        (below) already defines — the rail now genuinely matches it, the way a real sidebar
        (WhatsApp/Slack/Discord desktop) always does regardless of how few items are in it. */
     align-items: stretch;
-    justify-content: center;
+    /* Real, reported bug, the other half of "not immersive": `center` centred the whole
+       rail+conversation row within the space to the right of the fixed icon nav, leaving a
+       visible gap between the nav bar and the rail's own left edge (plus a matching gap on the
+       right) — instead of the rail sitting flush against the nav the way a real sidebar
+       (Slack/Discord's own app-icon rail + channel list, touching, no gap) always does.
+       `flex-start` sits the whole row at the left edge of the available space, right after the
+       nav's own 84px clearance (.v2-shell-desktop's margin-left) — any leftover width just sits
+       on the right, which is normal, not a gap isolating navigation from content. */
+    justify-content: flex-start;
     /* Real, reported feedback: a 28px gap plus the rail's own floating-card styling (rounded on
        all four corners, its own drop shadow) read as two separate panels side by side, not one
        immersive surface — exactly the opposite of how WhatsApp/Slack/Discord desktop actually

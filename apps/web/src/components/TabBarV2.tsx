@@ -94,7 +94,22 @@ export function TabBarV2({ hideMobile = false }: { hideMobile?: boolean } = {}) 
         })}
       </nav>
       <nav className="v2-nav-rail">
-        <div className="v2-rail-mark">P</div>
+        {/* Real, reported feedback: this was a plain letter in a box, reading as an unfinished
+            app-icon placeholder, not a logo. Replaced with an actual mark — the same
+            three-rays-converging-to-a-point geometry as IconLock (components/icons.tsx), Plot's
+            own established "committed" mark, reused here at a larger scale as the wordmark
+            itself: a Crew's scattered options resolving into one point IS what Plot does, so the
+            logo is that idea, not a letterform. Rendered in --v2-pop (the one accent colour
+            already used for emphasis elsewhere — "Will" in Home's greeting, notification badges)
+            so it reads as a deliberate brand mark, not another neutral icon. */}
+        <div className="v2-rail-mark" aria-label="Plot">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="var(--v2-pop)" strokeWidth="2" strokeLinecap="round">
+            <circle cx="10" cy="10.5" r="2.6" fill="var(--v2-pop)" stroke="none" />
+            <path d="M10 6.3V3.2" />
+            <path d="M13.6 12.6 16.3 14.15" />
+            <path d="M6.4 12.6 3.7 14.15" />
+          </svg>
+        </div>
         {TABS.map((tab) => {
           const active = pathname.startsWith(tab.href);
           return (
