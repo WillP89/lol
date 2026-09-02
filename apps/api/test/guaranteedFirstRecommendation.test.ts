@@ -74,6 +74,16 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
     const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name: 'Guarantee Test Crew', defaultCity: STAFFORD.city } });
     const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
 
+    // Real, live product requirement: "no events or things should be done on crew until
+    // preference set" — the creator sets the Crew's own preferences before the second member
+    // joins, same as the New Crew flow's mandatory 'taste' step now requires. Without this, the
+    // guarantee below wouldn't fire at all (evaluateCrewEligibility's preferences_not_set gate).
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crew.id}/recommendation-settings`,
+      headers: { cookie: owner.cookie },
+      payload: { categoryPreferences: ['COMEDY'] },
+    });
     await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
     await new Promise((resolve) => setTimeout(resolve, 500)); // let the fire-and-forget immediate trigger settle
 
@@ -95,6 +105,14 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
     const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name: 'Guarantee Empty Crew', defaultCity: 'Truro' } });
     const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
 
+    // Preferences set, same as the other test — isolating what this test actually checks (a
+    // genuinely empty candidate pool), not the separate preferences_not_set gate.
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crew.id}/recommendation-settings`,
+      headers: { cookie: owner.cookie },
+      payload: { categoryPreferences: ['COMEDY'] },
+    });
     await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
     await new Promise((resolve) => setTimeout(resolve, 500));
 

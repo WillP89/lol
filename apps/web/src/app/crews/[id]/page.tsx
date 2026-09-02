@@ -695,7 +695,7 @@ export default function CrewPage() {
   // blind auto-post of several full cards into permanent chat history. Tap one, it's shared,
   // the picker closes — the rest are just not sent, same as browsing "Share a place" and
   // picking one. See docs/DECISIONS.md.
-  const [suggestOptions, setSuggestOptions] = useState<ExploreExperienceLite[] | 'loading' | 'error' | null>(null);
+  const [suggestOptions, setSuggestOptions] = useState<ExploreExperienceLite[] | 'loading' | 'error' | 'preferences_not_set' | null>(null);
   // Real UX bug this fixes: tapping a suggested tile used to send it to the Crew immediately —
   // no preview, no chance to actually look at what you're about to share. Now a tap opens this
   // instead; only the explicit "Share with Crew" button on the preview actually sends.
@@ -986,7 +986,7 @@ export default function CrewPage() {
       api
         .post<{ options: { experience: ExploreExperienceLite }[] }>(`/crews/${crewId}/find-us-something`)
         .then((res) => setSuggestOptions(res.options.slice(0, 3).map((o) => o.experience)))
-        .catch(() => setSuggestOptions('error'));
+        .catch((err) => setSuggestOptions(err instanceof ApiError && err.code === 'preferences_not_set' ? 'preferences_not_set' : 'error'));
     }
     if (view === 'availability') {
       // A ready-made "when works?" poll — the brief's own words: "do not make users open
@@ -1854,6 +1854,25 @@ export default function CrewPage() {
             <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Plot&rsquo;s picks for this Crew</div>
             {suggestOptions === 'loading' && <p className="v2-muted">Finding something…</p>}
             {suggestOptions === 'error' && <p className="v2-muted">Couldn&rsquo;t find anything right now — try again shortly.</p>}
+            {/* "no events or things should be done on crew until preference set" — the real
+                gate is server-side (evaluateCrewEligibility's preferences_not_set outcome,
+                services/crewPreferencesGate.ts for this manual flow); this is just the clear,
+                actionable version of that instead of a generic error. */}
+            {suggestOptions === 'preferences_not_set' && (
+              <div style={{ textAlign: 'center', padding: '10px 4px 4px' }}>
+                <p className="v2-muted" style={{ marginBottom: 14, lineHeight: 1.6, fontSize: 13.5 }}>
+                  Set this Crew&rsquo;s own preferences first — Plot won&rsquo;t find or suggest anything until they&rsquo;re set.
+                  Only takes a moment, and you can tailor it any time after.
+                </p>
+                <button
+                  onClick={() => { closeActionSheet(); setTuneCrewOpen(true); }}
+                  className="v2-btn v2-btn-brand v2-tap-feedback"
+                  style={{ width: '100%' }}
+                >
+                  Set the Crew&rsquo;s preferences
+                </button>
+              </div>
+            )}
             {Array.isArray(suggestOptions) && suggestOptions.length === 0 && <p className="v2-muted">Nothing matches yet — try &ldquo;Share a place&rdquo; to browse everything.</p>}
             {Array.isArray(suggestOptions) && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -2115,7 +2134,12 @@ export default function CrewPage() {
 
       <CrewTuneSheet
         open={tuneCrewOpen}
-        onClose={() => setTuneCrewOpen(false)}
+        onClose={() => {
+          setTuneCrewOpen(false);
+          // Clears the cached 'preferences_not_set' result so the next "Find us something" tap
+          // actually re-fetches instead of showing a now-stale gate message forever this session.
+          setSuggestOptions((prev) => (prev === 'preferences_not_set' ? null : prev));
+        }}
         crewId={crewId}
         interestPreferences={recSettings?.interestPreferences ?? []}
         onToggle={toggleInterestPreference}

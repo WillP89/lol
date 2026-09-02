@@ -102,6 +102,17 @@ describe('automatic Crew recommendations: real personalisation, not a fake carou
     });
     const { crew: comedyCrew } = comedyCrewRes.json() as { crew: { id: string; inviteCode: string } };
     comedyCrewId = comedyCrew.id;
+    // Real, live product requirement: "no events or things should be done on crew until
+    // preference set" — the creator sets the Crew's own preferences before anyone else joins,
+    // exactly as the New Crew flow now requires (apps/web/src/app/crews/page.tsx's mandatory
+    // 'taste' step). Without this, the immediate post-join trigger below would hit
+    // evaluateCrewEligibility's preferences_not_set gate and deliver nothing.
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${comedyCrewId}/recommendation-settings`,
+      headers: { cookie: comedyOwner.cookie },
+      payload: { categoryPreferences: ['COMEDY'] },
+    });
     await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: comedyMate.cookie }, payload: { inviteCode: comedyCrew.inviteCode } });
 
     // Crew B: sport/day-out taste — a genuinely different profile, same city.
@@ -115,6 +126,12 @@ describe('automatic Crew recommendations: real personalisation, not a fake carou
     });
     const { crew: sportCrew } = sportCrewRes.json() as { crew: { id: string; inviteCode: string } };
     sportCrewId = sportCrew.id;
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${sportCrewId}/recommendation-settings`,
+      headers: { cookie: sportOwner.cookie },
+      payload: { categoryPreferences: ['SPORT'] },
+    });
     await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: sportMate.cookie }, payload: { inviteCode: sportCrew.inviteCode } });
 
     // The immediate post-join trigger above is fire-and-forget (routes/crews.ts deliberately

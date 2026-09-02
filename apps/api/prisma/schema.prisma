@@ -763,6 +763,16 @@ model CrewRecommendationSettings {
   /// interest affinity in services/match.ts exactly like categoryPreferences already does for
   /// categories.
   interestPreferences String[] @default([])
+  /// Real, live product requirement: "no events or things should be done on crew until
+  /// preference set" — the creator must set THIS Crew's own explicit preferences (via the AI
+  /// setup or the manual picker, either writes categoryPreferences/interestPreferences above)
+  /// before Plot will do anything with it — no automatic sweep delivery, no guaranteed-first-
+  /// event, no manual "Find us something"/"Suggest to chat" either. Null = not set yet. Stamped
+  /// automatically (services/crewRecommendations.ts#updateSettings) the first time either array
+  /// above goes from empty to non-empty; never cleared once set, since re-tuning afterwards is
+  /// explicitly allowed ("you can tailor it after and change") — this only ever gates the FIRST
+  /// time, not every subsequent edit.
+  preferencesSetAt   DateTime?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

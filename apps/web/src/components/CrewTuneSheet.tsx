@@ -16,29 +16,7 @@ interface TasteTerritory {
   interests: TasteInterest[];
 }
 
-/**
- * "TUNE THIS CREW'S PLOT" — the Crew-level counterpart to TuneMyPlotSheet (see that file's own
- * header comment for the full personalisation-engine context; same taxonomy, same territory
- * browse pattern). Genuinely different data shape underneath, though: a Crew's
- * `interestPreferences` is a flat set of explicit picks ("this Crew is specifically about UK
- * garage"), not a per-person strength scale — so a tap here is a plain on/off toggle, never a
- * like/love cycle. No free-text capture either: CrewRecommendationSettings has no free-text
- * field (that's a per-person taste signal — see TasteProfile.freeTextSignals — not a Crew-level
- * one), so the search box here is a pure filter over the same ~150 interests, not an "add
- * anything" escape hatch the way Profile's is.
- */
-export function CrewTuneSheet({
-  open,
-  onClose,
-  crewId,
-  interestPreferences,
-  onToggle,
-  onAiApplied,
-  crewTasteInterestIds = [],
-  saving = false,
-}: {
-  open: boolean;
-  onClose: () => void;
+export interface CrewTuneContentProps {
   crewId: string;
   interestPreferences: string[];
   onToggle: (interestId: string) => void;
@@ -51,7 +29,24 @@ export function CrewTuneSheet({
    *  already, genuinely into is easy to spot. A hint only; never gates what can be picked. */
   crewTasteInterestIds?: string[];
   saving?: boolean;
-}) {
+}
+
+/**
+ * The actual picker — AI-setup fast path, search, and territory browse — extracted from the
+ * BottomSheet wrapper below it so it can also be mounted directly inside a step of the New Crew
+ * flow (apps/web/src/app/crews/page.tsx), which needs this exact interaction without a second,
+ * nested sheet — see that flow's own 'taste' step for why (the real, live product requirement:
+ * "no events or things should be done on crew until preference set", set once at CREATION time
+ * by the person creating it, not derived from members).
+ */
+export function CrewTuneContent({
+  crewId,
+  interestPreferences,
+  onToggle,
+  onAiApplied,
+  crewTasteInterestIds = [],
+  saving = false,
+}: CrewTuneContentProps) {
   const [territories, setTerritories] = useState<TasteTerritory[] | null>(null);
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -65,16 +60,12 @@ export function CrewTuneSheet({
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiAppliedCount, setAiAppliedCount] = useState<number | null>(null);
 
+  // No `open` gate here — the caller controls freshness by mounting/unmounting this (a
+  // BottomSheet keeps its children mounted across open/close, so CrewTuneSheet below mounts this
+  // conditionally itself; the New Crew flow's step naturally mounts/unmounts with the step).
   useEffect(() => {
-    if (!open) return;
     api.get<{ territories: TasteTerritory[] }>('/taste/taxonomy').then((res) => setTerritories(res.territories)).catch(() => setTerritories([]));
-    setAiOpen(false);
-    setAiText('');
-    setAiError(null);
-    setAiAppliedCount(null);
-    setQuery('');
-    setExpanded(null);
-  }, [open]);
+  }, []);
 
   const allInterests = useMemo(() => (territories ?? []).flatMap((t) => t.interests.map((i) => ({ ...i, territoryId: t.id }))), [territories]);
   const overlapSet = useMemo(() => new Set(crewTasteInterestIds), [crewTasteInterestIds]);
@@ -129,15 +120,8 @@ export function CrewTuneSheet({
   }
 
   return (
-    <BottomSheet open={open} onClose={onClose} zIndex={65}>
-      <div style={{ paddingTop: 6 }}>
-        <div className="v2-display" style={{ fontSize: 20, marginBottom: 4 }}>Tune this Crew&rsquo;s Plot</div>
-        <p className="v2-muted" style={{ fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>
-          Pick anything this Crew is specifically into — boosts those on top of everyone&rsquo;s own taste, it doesn&rsquo;t
-          replace it. Interests outlined in colour are ones your Crew already leans towards.
-        </p>
-
-        {/* THE FAST PATH — "describe this Crew and Plot sets this up for you" (services/
+    <>
+      {/* THE FAST PATH — "describe this Crew and Plot sets this up for you" (services/
             aiTasteSetup.ts). Collapsed by default; whatever it selects lands in the exact same
             interestPreferences state a manual tap would, reviewable/removable immediately after. */}
         <div style={{ marginBottom: 16 }}>
@@ -264,7 +248,41 @@ export function CrewTuneSheet({
             })}
           </div>
         )}
+    </>
+  );
+}
 
+/**
+ * "TUNE THIS CREW'S PLOT" — the Crew-level counterpart to TuneMyPlotSheet (see that file's own
+ * header comment for the full personalisation-engine context; same taxonomy, same territory
+ * browse pattern). Genuinely different data shape underneath, though: a Crew's
+ * `interestPreferences` is a flat set of explicit picks ("this Crew is specifically about UK
+ * garage"), not a per-person strength scale — so a tap here is a plain on/off toggle, never a
+ * like/love cycle. No free-text capture either: CrewRecommendationSettings has no free-text
+ * field (that's a per-person taste signal — see TasteProfile.freeTextSignals — not a Crew-level
+ * one), so the search box here is a pure filter over the same ~150 interests, not an "add
+ * anything" escape hatch the way Profile's is.
+ *
+ * Just the BottomSheet + copy + "Done" wrapper around CrewTuneContent above, for the one place
+ * (crew settings) this genuinely is a dismissable sheet, not a mandatory setup step.
+ */
+export function CrewTuneSheet({
+  open,
+  onClose,
+  ...contentProps
+}: CrewTuneContentProps & { open: boolean; onClose: () => void }) {
+  return (
+    <BottomSheet open={open} onClose={onClose} zIndex={65}>
+      <div style={{ paddingTop: 6 }}>
+        <div className="v2-display" style={{ fontSize: 20, marginBottom: 4 }}>Tune this Crew&rsquo;s Plot</div>
+        <p className="v2-muted" style={{ fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>
+          Pick anything this Crew is specifically into — boosts those on top of everyone&rsquo;s own taste, it doesn&rsquo;t
+          replace it. Interests outlined in colour are ones your Crew already leans towards.
+        </p>
+        {/* Mounted only while actually open, not just visually hidden — a fresh mount is what
+            resets its internal search/expanded/AI-box state each time the sheet reopens, same
+            behaviour the old single-component version got from its own `open`-gated effect. */}
+        {open && <CrewTuneContent {...contentProps} />}
         <button onClick={onClose} className="v2-btn v2-btn-brand" style={{ width: '100%', marginTop: 18 }}>
           Done
         </button>

@@ -80,6 +80,14 @@ describe('event deduplication: the actual "Jorja Smith DJ Set" duplicate, end to
       payload: { name: 'Dedup Test Crew', defaultCity: STAFFORD.city },
     });
     crewId = (crewRes.json() as { crew: { id: string } }).crew.id;
+    // "no events or things should be done on crew until preference set" — required before
+    // find-us-something will do anything.
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crewId}/recommendation-settings`,
+      headers: { cookie: member.cookie },
+      payload: { categoryPreferences: ['BAR'] },
+    });
 
     // The exact bug: same fictional artist, same venue name, genuinely different Experience
     // rows (different day, so a different canonicalKey — this does NOT collide on the DB
