@@ -18,6 +18,10 @@ export const AnalyticsEvents = {
   SignupCompleted: 'SignupCompleted',
   TasteStarted: 'TasteStarted',
   TasteCompleted: 'TasteCompleted',
+  // The personalisation-engine pass — specific-interest taps and free-text signals in the
+  // "Tune My Plot" editor, distinct from TasteCompleted's one-time bulk onboarding write.
+  TasteInterestUpdated: 'TasteInterestUpdated',
+  TasteFreeTextAdded: 'TasteFreeTextAdded',
   CalendarPrompted: 'CalendarPrompted',
   CalendarConnected: 'CalendarConnected',
   CalendarSkipped: 'CalendarSkipped',
@@ -89,6 +93,8 @@ export interface AnalyticsEventPayloads {
   SignupCompleted: { userId: string; method: 'email' | 'apple' | 'google' };
   TasteStarted: { userId: string };
   TasteCompleted: { userId: string; cardsShown: number; yes: number; maybe: number; no: number };
+  TasteInterestUpdated: { userId: string; count: number };
+  TasteFreeTextAdded: { userId: string; matched: boolean };
   CalendarPrompted: { userId: string };
   CalendarConnected: { userId: string; provider: 'google' | 'apple' | 'microsoft' };
   CalendarSkipped: { userId: string };

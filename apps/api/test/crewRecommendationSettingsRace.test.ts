@@ -42,7 +42,7 @@ describe('getOrCreateSettings: concurrent first-read race on a brand-new Crew', 
     // that reproduced the crash. Fire two calls at the exact same instant.
     const [a, b] = await Promise.all([getOrCreateSettings(crew.id), getOrCreateSettings(crew.id)]);
 
-    expect(a).toEqual({ enabled: true, maxPerWeek: 2, travelRadiusMeters: null, categoryPreferences: [] });
+    expect(a).toEqual({ enabled: true, maxPerWeek: 2, travelRadiusMeters: null, categoryPreferences: [], interestPreferences: [] });
     expect(b).toEqual(a);
   });
 
@@ -57,6 +57,6 @@ describe('getOrCreateSettings: concurrent first-read race on a brand-new Crew', 
     const { crew } = crewRes.json() as { crew: { id: string } };
 
     const results = await Promise.all(Array.from({ length: 5 }, () => getOrCreateSettings(crew.id)));
-    for (const r of results) expect(r).toEqual({ enabled: true, maxPerWeek: 2, travelRadiusMeters: null, categoryPreferences: [] });
+    for (const r of results) expect(r).toEqual({ enabled: true, maxPerWeek: 2, travelRadiusMeters: null, categoryPreferences: [], interestPreferences: [] });
   });
 });

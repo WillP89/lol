@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser, SESSION_COOKIE } from '../middleware/auth';
 import { submitTasteSwipes, setLocationPreferences } from '../services/taste';
+import { applyInterestUpdates, addFreeTextSignal, removeFreeTextSignal, setCategoryBudget, TASTE_TAXONOMY } from '../services/tasteSignals';
 import { track } from '../services/analytics';
 import { prisma } from '../lib/prisma';
 import { revokeAllSessionsForUser } from '../services/auth';
@@ -139,6 +140,60 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       parsed.data.energyPreference,
     );
     const tasteProfile = await prisma.tasteProfile.findUnique({ where: { userId: request.user.id } });
+    return reply.send({ tasteProfile });
+  });
+
+  // Public, no auth — the fixed taxonomy structure the "Tune My Plot" editor renders (territory
+  // -> interest). Not user data, just the shape the picker is built from; served from the API
+  // (rather than duplicated as a static import in the web app) so both stay on exactly the same
+  // ids the scoring engine actually keys off (see @plot/shared/tasteTaxonomy.ts).
+  app.get('/taste/taxonomy', async (_request, reply) => {
+    return reply.send({ territories: TASTE_TAXONOMY });
+  });
+
+  const InterestUpdateSchema = z.object({
+    updates: z
+      .array(z.object({ interestId: z.string(), strength: z.enum(['love', 'like', 'open', 'not_for_me']) }))
+      .min(1)
+      .max(50),
+  });
+  // The granular editor's own write path — additive/merging (see tasteSignals.ts#applyInterestUpdates's
+  // own comment), unlike the bulk onboarding swipe endpoint above.
+  app.post('/users/me/taste/interests', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const parsed = InterestUpdateSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+    const tasteProfile = await applyInterestUpdates(request.user.id, parsed.data.updates);
+    return reply.send({ tasteProfile });
+  });
+
+  const FreeTextSchema = z.object({ text: z.string().trim().min(1).max(120) });
+  app.post('/users/me/taste/free-text', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const parsed = FreeTextSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+    const tasteProfile = await addFreeTextSignal(request.user.id, parsed.data.text);
+    return reply.send({ tasteProfile });
+  });
+
+  app.delete('/users/me/taste/free-text', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const parsed = FreeTextSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
+    await removeFreeTextSignal(request.user.id, parsed.data.text);
+    return reply.send({ ok: true });
+  });
+
+  const CategoryBudgetSchema = z.object({
+    category: z.string(),
+    // null clears the category-specific override, back to the one global budget range.
+    range: z.object({ minMinor: z.number().int().nonnegative(), maxMinor: z.number().int().nonnegative() }).nullable(),
+  });
+  app.post('/users/me/taste/budget', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const parsed = CategoryBudgetSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+    const tasteProfile = await setCategoryBudget(request.user.id, parsed.data.category, parsed.data.range);
     return reply.send({ tasteProfile });
   });
 
