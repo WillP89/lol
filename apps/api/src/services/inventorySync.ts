@@ -430,3 +430,60 @@ export async function ensureInventory(city: string): Promise<void> {
 
   await ensureInventoryProduction(city);
 }
+
+export interface ImageQualityBackfillResult {
+  checked: number;
+  cleared: number;
+}
+
+// Bounded concurrency for the backfill below — every probe is a real network request against a
+// provider's own CDN; running hundreds sequentially would be needlessly slow, running them all
+// at once would be a thundering herd against providers this app still needs to be well-behaved
+// towards.
+const BACKFILL_CONCURRENCY = 5;
+
+/**
+ * THE RETROACTIVE HALF of the image-quality floor — real gap found from a live report: the
+ * resolution/dimension gates in syncProvider (above) and providers/live/ticketmaster.ts only
+ * protect a row the MOMENT it's (re)synced. A row already sitting in the database from before
+ * either gate existed keeps its stale, ungated `imageUrl` until that row's city happens to be
+ * resynced again — which, on a pilot-scale app with no constant traffic, can be a real,
+ * user-visible delay ("still stretched and distorted" reported minutes after the gate itself
+ * shipped and deployed). This re-probes every EXISTING Experience with an image against the
+ * exact same floor, so the fix reaches already-synced rows on the very next deploy rather than
+ * waiting on that city's own resync cadence.
+ *
+ * MANUAL-sourced images are deliberately excluded — see syncProvider's own `preserveManualImage`
+ * comment: an operator's own upload is the one thing an automated pass must never silently
+ * clear, regardless of its dimensions. Every other source is re-checked, including ones already
+ * gated at sync-time (Ticketmaster, Wikipedia) — a row from before that gate shipped is
+ * indistinguishable from one after it without actually re-checking, and a re-check on an
+ * already-good image is a cheap no-op.
+ */
+export async function backfillImageQuality(limit = 300): Promise<ImageQualityBackfillResult> {
+  const rows = await prisma.experience.findMany({
+    where: { imageUrl: { not: null }, imageSource: { not: 'MANUAL' } },
+    select: { id: true, imageUrl: true },
+    orderBy: { updatedAt: 'desc' },
+    take: limit,
+  });
+
+  let cleared = 0;
+  for (let i = 0; i < rows.length; i += BACKFILL_CONCURRENCY) {
+    const batch = rows.slice(i, i + BACKFILL_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(async (row) => {
+        const width = await probeImageWidth(row.imageUrl!);
+        return { id: row.id, tooSmall: width !== null && width < MIN_IMAGE_WIDTH };
+      }),
+    );
+    const toClear = results.filter((r) => r.tooSmall).map((r) => r.id);
+    if (toClear.length) {
+      await prisma.experience.updateMany({ where: { id: { in: toClear } }, data: { imageUrl: null, imageSource: null } });
+      cleared += toClear.length;
+    }
+  }
+
+  logger.info({ checked: rows.length, cleared }, 'Image quality backfill complete');
+  return { checked: rows.length, cleared };
+}
