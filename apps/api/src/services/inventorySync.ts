@@ -453,6 +453,19 @@ const BACKFILL_CONCURRENCY = 5;
  * exact same floor, so the fix reaches already-synced rows on the very next deploy rather than
  * waiting on that city's own resync cadence.
  *
+ * SECOND real gap, found only after that SAME complaint kept recurring even after the first
+ * version of this function shipped and ran on every boot: it selected `orderBy: updatedAt desc,
+ * take: 300` — the 300 MOST RECENTLY updated rows, every single time. A row that stops being
+ * touched by any sync (its provider's feed moved on, or it's simply outside whatever city gets
+ * resynced most) never rises back into that top-300 window — it is permanently skipped, forever,
+ * no matter how many times the process reboots. That is indistinguishable from "the backfill
+ * doesn't work" from the outside, and is exactly the shape of "still seeing the same bad image
+ * after every fix" reports. Fixed by fetching the ENTIRE matching set in one query (see this
+ * function's own comment below for why that query is a single upfront snapshot, not a re-queried
+ * cursor loop) — one call walks every non-exempt row with an image exactly once, however large
+ * the catalogue has grown. `maxToCheck` only exists for the admin endpoint's own on-demand
+ * testing, never for the boot/periodic callers below, which always run to full completion.
+ *
  * MANUAL-sourced images are deliberately excluded — see syncProvider's own `preserveManualImage`
  * comment: an operator's own upload is the one thing an automated pass must never silently
  * clear, regardless of its dimensions. Every other source is re-checked, including ones already
@@ -460,17 +473,28 @@ const BACKFILL_CONCURRENCY = 5;
  * indistinguishable from one after it without actually re-checking, and a re-check on an
  * already-good image is a cheap no-op.
  */
-export async function backfillImageQuality(limit = 300): Promise<ImageQualityBackfillResult> {
-  const rows = await prisma.experience.findMany({
+export async function backfillImageQuality(maxToCheck?: number): Promise<ImageQualityBackfillResult> {
+  // A SINGLE upfront query for the full candidate id list, not a re-queried cursor loop — real
+  // bug found writing the first version of this fix: Prisma's cursor+skip pagination needs the
+  // cursor row to still satisfy the query's own WHERE clause to skip correctly, and this
+  // function's WHERE clause (`imageUrl: { not: null }`) is exactly the field THIS function
+  // itself mutates mid-run. The moment a page boundary happened to land on a row that had just
+  // been cleared, the next page's `skip: 1` silently dropped one real, unprocessed row instead of
+  // the (now filtered-out) cursor row — a genuine, reproducible off-by-one, not a flake. Fetching
+  // every matching id/url ONCE, before any clearing happens, removes the moving target entirely.
+  // At this app's real pilot scale (a handful of UK cities' worth of listings) the full id+url
+  // projection is trivially small to hold in memory — nowhere near the shape of problem cursor
+  // pagination exists to solve.
+  const candidates = await prisma.experience.findMany({
     where: { imageUrl: { not: null }, imageSource: { notIn: ['MANUAL', 'THESPORTSDB'] } },
     select: { id: true, imageUrl: true },
-    orderBy: { updatedAt: 'desc' },
-    take: limit,
+    orderBy: { id: 'asc' },
+    ...(maxToCheck !== undefined ? { take: maxToCheck } : {}),
   });
 
   let cleared = 0;
-  for (let i = 0; i < rows.length; i += BACKFILL_CONCURRENCY) {
-    const batch = rows.slice(i, i + BACKFILL_CONCURRENCY);
+  for (let i = 0; i < candidates.length; i += BACKFILL_CONCURRENCY) {
+    const batch = candidates.slice(i, i + BACKFILL_CONCURRENCY);
     const results = await Promise.all(
       batch.map(async (row) => ({ id: row.id, bad: await isImageQualityBad(row.imageUrl!) })),
     );
@@ -481,6 +505,60 @@ export async function backfillImageQuality(limit = 300): Promise<ImageQualityBac
     }
   }
 
-  logger.info({ checked: rows.length, cleared }, 'Image quality backfill complete');
-  return { checked: rows.length, cleared };
+  const checked = candidates.length;
+  logger.info({ checked, cleared }, 'Image quality backfill complete');
+  return { checked, cleared };
+}
+
+export const IMAGE_QUALITY_BACKFILL_JOB_NAME = 'image_quality_backfill';
+
+/**
+ * The same DB-backed "is a run actually due" atomic claim as crewRecommendations.ts
+ * #claimSweepIfDue — see that function's own comment for the full reasoning (this app's real
+ * deployment shape can sleep/restart/scale, so a bare in-memory setInterval/one-shot boot call
+ * can't be trusted as the only thing standing between a stale row and the user seeing it). A
+ * SEPARATE scheduler row from the recommendation sweep's, not a shared one: this job's job is
+ * fundamentally different — it must keep RE-checking rows it already passed before (a provider's
+ * CDN can start serving something different later, and any future write path this app doesn't
+ * yet know needs gating is only ever caught by something that keeps coming back), not just sweep
+ * forward through newly-created rows the way the recommendation sweep does.
+ */
+async function claimImageQualityBackfillIfDue(dueIntervalMs: number): Promise<boolean> {
+  const cutoff = new Date(Date.now() - dueIntervalMs);
+  const now = new Date();
+
+  await prisma.schedulerState.upsert({
+    where: { jobName: IMAGE_QUALITY_BACKFILL_JOB_NAME },
+    update: {},
+    create: { jobName: IMAGE_QUALITY_BACKFILL_JOB_NAME },
+  });
+
+  const claim = await prisma.schedulerState.updateMany({
+    where: { jobName: IMAGE_QUALITY_BACKFILL_JOB_NAME, OR: [{ lastClaimedAt: null }, { lastClaimedAt: { lt: cutoff } }] },
+    data: { lastClaimedAt: now },
+  });
+
+  return claim.count === 1;
+}
+
+/**
+ * The one function server.ts (and, in principle, an external cron hitting
+ * `POST /admin/image-quality-backfill`) should call — "run the FULL exhaustive backfill if the
+ * database says one is actually due", never "run it because my own timer just fired" or "run it
+ * once at boot and hope that was enough". See claimImageQualityBackfillIfDue above.
+ */
+export async function runImageQualityBackfillIfDue(
+  dueIntervalMs: number,
+): Promise<{ ran: boolean; result?: ImageQualityBackfillResult }> {
+  const claimed = await claimImageQualityBackfillIfDue(dueIntervalMs);
+  if (!claimed) {
+    return { ran: false };
+  }
+  const result = await backfillImageQuality();
+  await prisma.schedulerState.update({
+    where: { jobName: IMAGE_QUALITY_BACKFILL_JOB_NAME },
+    data: { lastRunAt: new Date(), lastResult: result as unknown as Prisma.InputJsonValue },
+  });
+  logger.info({ event: 'image_quality_backfill_ran', ...result }, 'Image quality backfill: ran (database confirmed it was due)');
+  return { ran: true, result };
 }
