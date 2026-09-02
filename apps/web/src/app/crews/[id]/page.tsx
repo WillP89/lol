@@ -1364,7 +1364,7 @@ export default function CrewPage() {
           with a desktop-scoped `!important` override (globals.css's `.v2-crew-main`, same
           established pattern as `.v2-sheet-root`'s own height guard) rather than changing this
           inline value, which would break the exact case `100dvh` exists for on mobile. */}
-      <div className="v2-crew-main" style={{ maxWidth: 980, width: '100%', height: '100dvh', display: 'flex', flexDirection: 'column' }}>
+      <div className="v2-crew-main" style={{ maxWidth: 1400, width: '100%', height: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <div style={{ flexShrink: 0 }}>
         {/* Header — HARD RESET. Real, reported feedback: "tiny Crew header, tiny social presence".
             This is now a real banner, not a slim top bar: the Crew's own identity wash fills it
@@ -1572,7 +1572,12 @@ export default function CrewPage() {
                       <PersonAvatar name={m.author.displayName} email={m.author.email} photoUrl={m.author.avatarUrl} size={24} />
                     </div>
                   )}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start', maxWidth: '76%' }}>
+                  {/* `min(76%, 460px)` — the 76% alone was fine at the old fixed 980px pane width,
+                      but now that the pane itself grows to fill the row (see .v2-crew-main), 76%
+                      of a genuinely wide pane would balloon message bubbles and event/poll cards
+                      to an unreadable width. The px ceiling only bites once the pane is actually
+                      wide; mobile/narrow panes are unaffected (76% of those is always smaller). */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start', maxWidth: 'min(76%, 460px)' }}>
                     {!mine && !grouped && <div className="v2-dim" style={{ fontSize: 10.5, marginBottom: 2, marginLeft: 2 }}>{displayNameOf(m.author.displayName, m.author.email)}</div>}
                     {m.poll ? (
                       <PollCard

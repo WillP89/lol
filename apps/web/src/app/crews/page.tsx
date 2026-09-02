@@ -11,6 +11,7 @@ import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { MediaUploadButton } from '@/components/MediaUploadButton';
 import { identityGradient } from '@/lib/identity';
 import { isCrewArtUrl } from '@/lib/crewArt';
+import { IconMore } from '@/components/icons';
 
 interface CrewSummary {
   id: string;
@@ -71,6 +72,30 @@ export default function CrewsPage() {
   const [newCrewImageUrl, setNewCrewImageUrl] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Real, reported gap: leaving a Crew only existed buried inside that Crew's own chat (avatar
+  // cluster -> members sheet -> scroll to the bottom) — nowhere on the list of Crews itself,
+  // where you'd actually expect a quick way out. `leaveTarget` holds the one Crew a confirm
+  // sheet is open for; the actual leave call reuses the same `/crews/:id/leave` this Crew's own
+  // chat page already calls, and a left Crew disappears from every list that reads GET /crews
+  // (this one, Home's story rail, Home's "In the groups" feed) automatically — that's what
+  // membership-scoped queries already do, nothing extra needed to "remove it from the feed".
+  const [leaveTarget, setLeaveTarget] = useState<CrewSummary | null>(null);
+  const [leaving, setLeaving] = useState(false);
+
+  async function confirmLeave() {
+    if (!leaveTarget) return;
+    setLeaving(true);
+    try {
+      await api.post(`/crews/${leaveTarget.id}/leave`);
+      setLeaveTarget(null);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not leave that Crew.');
+    } finally {
+      setLeaving(false);
+    }
+  }
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('new') === '1') setShowCreate(true);
@@ -194,13 +219,17 @@ export default function CrewsPage() {
                 // outside those two places. See CrewMark's own `allowThemeArt` comment.
                 const realPhoto = crew.imageUrl && !isCrewArtUrl(crew.imageUrl) ? crew.imageUrl : null;
                 return (
+                  // A plain relative wrapper, not the tile's own interactive element — the Leave
+                  // button below is a real sibling to the Link (both absolutely positioned inside
+                  // it), never a <button> nested inside the <a> the Link renders, which is invalid
+                  // HTML and unreliable for stopping the click from also navigating.
+                  <div key={crew.id} className="fade-up v2-stagger" style={{ position: 'relative', ['--stagger-i' as string]: i }}>
                   <Link
-                    key={crew.id}
                     href={`/crews/${crew.id}`}
-                    className="v2-hoverable fade-up v2-stagger"
+                    className="v2-hoverable"
                     style={{
                       display: 'block', position: 'relative', height: 220, borderRadius: 'var(--v2-r-lg)', overflow: 'hidden',
-                      boxShadow: 'var(--v2-shadow-sm)', ['--stagger-i' as string]: i,
+                      boxShadow: 'var(--v2-shadow-sm)',
                       background: realPhoto ? `url("${realPhoto}") center/cover` : identityGradient(crew.name, 190),
                     }}
                   >
@@ -253,6 +282,24 @@ export default function CrewsPage() {
                       </div>
                     </div>
                   </Link>
+                  {/* Real, reported gap: leaving a Crew only lived inside that Crew's own chat
+                      (avatar cluster -> members sheet -> scroll to the bottom) — nowhere on the
+                      list of Crews itself. Sits below the Locked/Voting badge when one's present
+                      rather than fighting it for the same corner. */}
+                  <button
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setLeaveTarget(crew); }}
+                    aria-label={`More options for ${crew.name}`}
+                    className="v2-tap-feedback"
+                    style={{
+                      position: 'absolute', top: activity.tone === 'plan' || activity.tone === 'deciding' ? 46 : 12, right: 12,
+                      width: 28, height: 28, borderRadius: '50%', border: 'none', cursor: 'pointer',
+                      background: 'rgba(0,0,0,0.38)', backdropFilter: 'blur(4px)', color: '#fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    <IconMore size={15} />
+                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -331,6 +378,27 @@ export default function CrewsPage() {
             <button className="v2-btn v2-btn-ghost" style={{ width: '100%' }} onClick={finishCreate}>
               Done
             </button>
+          </div>
+        )}
+      </BottomSheet>
+
+      <BottomSheet open={Boolean(leaveTarget)} onClose={() => !leaving && setLeaveTarget(null)}>
+        {leaveTarget && (
+          <div style={{ textAlign: 'center', padding: '4px 4px 8px' }}>
+            <CrewMark name={leaveTarget.name} imageUrl={leaveTarget.imageUrl} size={56} />
+            <h2 className="v2-display" style={{ fontSize: 19, margin: '14px 0 6px' }}>Leave {leaveTarget.name}?</h2>
+            <p className="v2-muted" style={{ marginBottom: 22, lineHeight: 1.6, fontSize: 13.5 }}>
+              You&rsquo;ll stop seeing their messages and plans, and they won&rsquo;t see yours. You&rsquo;d need a
+              new invite to come back.
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={confirmLeave} disabled={leaving} className="v2-btn v2-btn-brand" style={{ flex: 1 }}>
+                {leaving ? 'Leaving…' : 'Leave'}
+              </button>
+              <button onClick={() => setLeaveTarget(null)} disabled={leaving} className="v2-btn v2-btn-ghost" style={{ flex: 1 }}>
+                Stay
+              </button>
+            </div>
           </div>
         )}
       </BottomSheet>
