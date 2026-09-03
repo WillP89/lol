@@ -86,7 +86,15 @@ if (config.NODE_ENV !== 'test') {
 // reasoning). Same due/check split, same reason, as the two jobs above — staggered a further 10s
 // so all three don't compete for the same startup window; also triggerable on demand via
 // POST /admin/missing-image-backfill.
-const MISSING_IMAGE_BACKFILL_DUE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours — same cadence as the other backfill
+// Was 6 hours (matching the dimension-floor backfill's own cadence) until a real, live-reported
+// bug made that gap too wide to defend: a Crew's very first Plot recommendation can land on a
+// brand-new Experience row that hasn't had a sweep pass yet, showing the generic v2Art fallback
+// graphic on the single most scrutinised card in the product. That specific path now runs its
+// own synchronous, best-effort enrichment attempt at delivery time (see crewRecommendations.ts's
+// call to enrichMissingImageForExperience) — but every OTHER surface a fresh row can reach first
+// (Explore, a manual "Suggest Something" share) still depends on this sweep alone. Tightened to
+// close that same gap for those paths too, not just the one that got reported.
+const MISSING_IMAGE_BACKFILL_DUE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const MISSING_IMAGE_BACKFILL_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 const checkMissingImageBackfill = () => {
   runMissingImageBackfillIfDue(MISSING_IMAGE_BACKFILL_DUE_INTERVAL_MS)

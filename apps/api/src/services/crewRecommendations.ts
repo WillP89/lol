@@ -1,7 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { track } from './analytics';
-import { ensureInventory } from './inventorySync';
+import { ensureInventory, enrichMissingImageForExperience } from './inventorySync';
 import { scoreExperiencesForCrew, getCrewExcludedExperienceIds, type MatchOption } from './match';
 import { createRecommendationPlanForCrew } from './plan';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
@@ -392,6 +392,25 @@ export async function generateRecommendationForCrew(crewId: string, opts: { guar
   }
 
   const best = evaluation.best;
+
+  // Real, live-reported bug this fixes: "I just created a crew... the first event plot sent...
+  // STOCK IMAGES" — a fresh Experience can sit with `imageUrl: null` for up to 6 hours (see
+  // inventorySync.ts's own MISSING_IMAGE_BACKFILL_DUE_INTERVAL_MS) before the periodic sweep
+  // ever reaches it, during which every card for it renders the generic v2Art fallback graphic
+  // instead of a real photo. That's an acceptable wait for routine inventory sitting unseen in
+  // Explore; it is NOT acceptable for the single most scrutinised card in the whole product — a
+  // Crew's own Plot recommendation, "one shot to make a good impression" already established for
+  // taste-matching (see evaluateCrewEligibility's own guaranteeFirst comment) and no less true
+  // for imagery. Best-effort and synchronous, right before delivery: if the chosen experience
+  // has no image yet, run the exact same enrichment chain the scheduled backfill uses, right now,
+  // so the card this Crew is about to see gets whatever real photo is genuinely findable at send
+  // time rather than waiting on a sweep that might not run for hours. A miss here (nothing found,
+  // or the source is briefly down) is never fatal — the row simply stays null and the next
+  // scheduled sweep still picks it up, same as any other unfilled row.
+  if (!best.experience.imageUrl) {
+    await enrichMissingImageForExperience({ id: best.experience.id, name: best.experience.name, category: best.experience.category });
+  }
+
   const systemUserId = await getPlotSystemUserId();
   const { plan, messageId } = await createRecommendationPlanForCrew(crewId, best.experience.id, systemUserId);
 

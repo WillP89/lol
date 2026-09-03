@@ -606,6 +606,76 @@ export interface MissingImageBackfillResult {
  * A `MANUAL` row is never targeted here — imageUrl is only null in the first place if no operator
  * has uploaded one; there's nothing to preserve for a row this query would ever touch.
  */
+/**
+ * The single-row version of the backfill loop below — pulled out into its own function so the
+ * exact same enrichment chain can also run SYNCHRONOUSLY, on demand, for one specific row, not
+ * just as part of a full sweep. Real gap this closes: a brand-new Experience can sit with
+ * `imageUrl: null` for up to MISSING_IMAGE_BACKFILL_DUE_INTERVAL_MS (6 hours, see server.ts)
+ * before the periodic sweep ever reaches it — invisible for routine inventory, but genuinely
+ * unacceptable for a Crew's Plot recommendation (crewRecommendations.ts calls this right before
+ * delivering one): that is the single highest-visibility, most scrutinised card in the whole
+ * product, "one shot to make a good impression" already established for taste-matching and no
+ * less true for imagery — it should never ship the generic v2Art fallback graphic when a real
+ * photo was genuinely findable at send time, just because the scheduled sweep hadn't reached
+ * that row yet. Returns true only when a real image was found, quality-gated, AND written.
+ */
+export async function enrichMissingImageForExperience(row: { id: string; name: string; category: string }): Promise<boolean> {
+  const sportBadge = row.category === 'SPORT' ? await enrichImageFromTheSportsDb(row.name) : null;
+  const enriched = sportBadge ?? (await enrichImageFromWikipedia(row.name));
+  let imageUrl: string | null = null;
+  let imageSource: 'THESPORTSDB' | 'WIKIPEDIA' | 'CATEGORY_STOCK' | 'PEXELS_STOCK' | null = null;
+  if (enriched) {
+    imageUrl = enriched.url;
+    imageSource = sportBadge ? 'THESPORTSDB' : 'WIKIPEDIA';
+  } else {
+    // Same two-independent-sources reasoning as syncProvider's own call site above — see
+    // that comment, and categoryStockImages.ts's/pexelsStockImages.ts's own headers.
+    const commonsStock = await getCategoryStockImage(row.category, row.name);
+    const pexelsStock = commonsStock ? null : await getPexelsStockImage(row.category, row.name);
+    const stock = commonsStock ?? pexelsStock;
+    if (stock) {
+      imageUrl = stock.url;
+      imageSource = commonsStock ? 'CATEGORY_STOCK' : 'PEXELS_STOCK';
+    }
+  }
+  // Same real, provider-agnostic quality floor as syncProvider — a THESPORTSDB badge is
+  // exempt (see IMAGE_QUALITY_EXEMPT_SOURCES's own comment), everything else found here gets
+  // byte-verified before it's trusted onto a row, not just this function's own metadata-
+  // level filtering (categoryStockImages.ts's pool already filters on Commons' own declared
+  // size; this is defense in depth against a mismatched/corrupted response, same discipline
+  // as every other image source in this app).
+  const pickedSource = imageSource;
+  const pickedUrl = imageUrl;
+  if (imageUrl && imageSource && !IMAGE_QUALITY_EXEMPT_SOURCES.has(imageSource)) {
+    if (await isImageQualityBad(imageUrl)) {
+      imageUrl = null;
+      imageSource = null;
+    }
+  }
+  // Real diagnostic gap found live: a production run with FULL Commons candidate pools
+  // (real photos confirmed via categoryStockImages.ts's own "search complete" log) still
+  // finished 0/288 filled, with no error/rejection visible anywhere — meaning something
+  // between "a candidate was picked" and "the row was updated" was silently discarding it,
+  // and there was no per-row log to show which step. This makes every row's own outcome
+  // explicit rather than inferring it from an aggregate count.
+  try {
+    if (imageUrl && imageSource) {
+      await prisma.experience.update({ where: { id: row.id }, data: { imageUrl, imageSource } });
+      logger.info({ id: row.id, name: row.name, category: row.category, imageSource }, 'Missing-image backfill: row filled');
+      return true;
+    }
+    if (pickedUrl) {
+      logger.info({ id: row.id, name: row.name, category: row.category, pickedSource, pickedUrl }, 'Missing-image backfill: candidate found but rejected by the quality gate');
+    } else {
+      logger.info({ id: row.id, name: row.name, category: row.category }, 'Missing-image backfill: no candidate found from any source');
+    }
+    return false;
+  } catch (err) {
+    logger.error({ err, id: row.id, name: row.name, category: row.category, imageUrl, imageSource }, 'Missing-image backfill: DB update failed for this row');
+    return false;
+  }
+}
+
 export async function backfillMissingImages(maxToCheck?: number): Promise<MissingImageBackfillResult> {
   // Same single-upfront-query reasoning as backfillImageQuality above — this function's own WHERE
   // clause is `imageUrl: null`, and this function is exactly the thing that mutates that field, so
@@ -621,61 +691,8 @@ export async function backfillMissingImages(maxToCheck?: number): Promise<Missin
   let filled = 0;
   for (let i = 0; i < candidates.length; i += BACKFILL_CONCURRENCY) {
     const batch = candidates.slice(i, i + BACKFILL_CONCURRENCY);
-    await Promise.all(
-      batch.map(async (row) => {
-        const sportBadge = row.category === 'SPORT' ? await enrichImageFromTheSportsDb(row.name) : null;
-        const enriched = sportBadge ?? (await enrichImageFromWikipedia(row.name));
-        let imageUrl: string | null = null;
-        let imageSource: 'THESPORTSDB' | 'WIKIPEDIA' | 'CATEGORY_STOCK' | 'PEXELS_STOCK' | null = null;
-        if (enriched) {
-          imageUrl = enriched.url;
-          imageSource = sportBadge ? 'THESPORTSDB' : 'WIKIPEDIA';
-        } else {
-          // Same two-independent-sources reasoning as syncProvider's own call site above — see
-          // that comment, and categoryStockImages.ts's/pexelsStockImages.ts's own headers.
-          const commonsStock = await getCategoryStockImage(row.category, row.name);
-          const pexelsStock = commonsStock ? null : await getPexelsStockImage(row.category, row.name);
-          const stock = commonsStock ?? pexelsStock;
-          if (stock) {
-            imageUrl = stock.url;
-            imageSource = commonsStock ? 'CATEGORY_STOCK' : 'PEXELS_STOCK';
-          }
-        }
-        // Same real, provider-agnostic quality floor as syncProvider — a THESPORTSDB badge is
-        // exempt (see IMAGE_QUALITY_EXEMPT_SOURCES's own comment), everything else found here gets
-        // byte-verified before it's trusted onto a row, not just this function's own metadata-
-        // level filtering (categoryStockImages.ts's pool already filters on Commons' own declared
-        // size; this is defense in depth against a mismatched/corrupted response, same discipline
-        // as every other image source in this app).
-        const pickedSource = imageSource;
-        const pickedUrl = imageUrl;
-        if (imageUrl && imageSource && !IMAGE_QUALITY_EXEMPT_SOURCES.has(imageSource)) {
-          if (await isImageQualityBad(imageUrl)) {
-            imageUrl = null;
-            imageSource = null;
-          }
-        }
-        // Real diagnostic gap found live: a production run with FULL Commons candidate pools
-        // (real photos confirmed via categoryStockImages.ts's own "search complete" log) still
-        // finished 0/288 filled, with no error/rejection visible anywhere — meaning something
-        // between "a candidate was picked" and "the row was updated" was silently discarding it,
-        // and there was no per-row log to show which step. This makes every row's own outcome
-        // explicit rather than inferring it from an aggregate count.
-        try {
-          if (imageUrl && imageSource) {
-            await prisma.experience.update({ where: { id: row.id }, data: { imageUrl, imageSource } });
-            filled += 1;
-            logger.info({ id: row.id, name: row.name, category: row.category, imageSource }, 'Missing-image backfill: row filled');
-          } else if (pickedUrl) {
-            logger.info({ id: row.id, name: row.name, category: row.category, pickedSource, pickedUrl }, 'Missing-image backfill: candidate found but rejected by the quality gate');
-          } else {
-            logger.info({ id: row.id, name: row.name, category: row.category }, 'Missing-image backfill: no candidate found from any source');
-          }
-        } catch (err) {
-          logger.error({ err, id: row.id, name: row.name, category: row.category, imageUrl, imageSource }, 'Missing-image backfill: DB update failed for this row');
-        }
-      }),
-    );
+    const results = await Promise.all(batch.map((row) => enrichMissingImageForExperience(row)));
+    filled += results.filter(Boolean).length;
   }
 
   const checked = candidates.length;
