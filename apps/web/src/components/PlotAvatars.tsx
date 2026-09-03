@@ -1,23 +1,27 @@
 /**
- * Plot Characters — a small, deliberately limited, art-directed collection (character over
- * quantity), not a generated icon set. Each is a self-contained badge: its own fixed duotone
- * background (drawn from the exact same tonal identity palette as everything else in Plot —
- * lib/identity.ts — so the set reads as Plot's own colour language, not a separate "sticker"
- * palette bolted on), a confident two-tone silhouette, and a few cut-out ink details. Nothing
- * here is a system emoji, stock clipart, or an AI-generated animal head — every path is
- * hand-authored for this. See docs/DECISIONS.md#plot-characters.
+ * Plot Characters — REBUILT AS REAL CARTOON CHARACTERS, full stop, per direct live feedback
+ * ("I DO NOT LIKE ANY OF THE AVATARS... I'd prefer cartoon characters"). The previous version
+ * was a set of flat, unoutlined geometric abstractions — clean, but read as minimal icon-set,
+ * not "characters" — exactly the complaint. This version commits to an actual cartoon-mascot
+ * language and doesn't hedge:
+ *  - A bold dark ink OUTLINE on every shape (the single biggest thing the old set lacked — flat
+ *    fills with no outline is why it read as "icon", not "character").
+ *  - Big, glossy, expressive eyes — white sclera, a dark pupil, a small offset highlight dot —
+ *    the thing that gives any cartoon face actual personality and a sense of looking at you.
+ *  - Flat, vibrant, contemporary colour per character (a light-to-mid single-hue wash for a
+ *    touch of dimension, never the old set's moody near-black duotone) — the kind of palette a
+ *    modern app mascot set (Slack's emoji, Duolingo, Notion) actually uses, not a children's-book
+ *    palette and not a corporate-neutral one either.
+ *  - A distinct expression/mouth per character (smirk, open grin, small smile, tongue-out) so
+ *    the SET has personality range, not one face repeated with different ears.
  *
- * Earlier version of this file rendered a bare white silhouette with no background at all,
- * handed a colour by whatever container happened to be drawing it — which is exactly why the
- * old picker read as "unfinished" (a dark ink shape on a flat grey circle, no identity, no
- * colour, no presence). Each character is now a complete piece of art on its own: `render()`
- * returns the whole badge, background included, so it looks the same everywhere — the picker
- * grid, the hero preview, a chat avatar — never assembled differently by whoever's using it.
+ * Same 12 identities as before (same ids) so anyone who already picked one keeps their pick —
+ * every one of the drawings underneath is new.
  *
- * Storage: NOT a real uploaded file — there is nothing to persist as a photo. A chosen Plot
- * avatar is stored as the marker string `plot-avatar:<id>` in the same `avatarUrl`/`imageUrl`
- * column a real upload would occupy; `PersonAvatar`/`CrewMark` (components/Avatar.tsx) detect
- * the prefix and render the matching badge here instead of an <img>.
+ * Storage: NOT a real uploaded file — a chosen Plot avatar is stored as the marker string
+ * `plot-avatar:<id>` in the same `avatarUrl` column a real upload would occupy;
+ * `PersonAvatar`/`CrewMark` (components/Avatar.tsx) detect the prefix and render the matching
+ * badge here instead of an <img>.
  */
 export const PLOT_AVATAR_PREFIX = 'plot-avatar:';
 export const PLOT_CREW_ART_PREFIX = 'plot-crew-art:';
@@ -25,43 +29,62 @@ export const PLOT_CREW_ART_PREFIX = 'plot-crew-art:';
 export interface PlotAvatarDef {
   id: string;
   label: string;
-  /** The exact same tonal pair as identity.ts's IDENTITY_PALETTE — a fixed, curated assignment
-   * per character (not hashed) so the set reads as art-directed, and so a chat bubble's plain
-   * background tint always matches the badge sitting on it. */
+  /** [light, mid] — the flat cartoon-colour wash for this character's background, referenced by
+   *  IdentityPicker for non-SVG contexts (e.g. a loading-state tint). */
   pair: [string, string];
   render: () => React.ReactNode;
 }
 
-// [dark, mid] — reused verbatim from lib/identity.ts's IDENTITY_PALETTE so a Plot Character
-// never introduces a colour outside Plot's own system.
-const RUST: [string, string] = ['#7a2e18', '#c2532b'];
-const PLUM: [string, string] = ['#3b1f3d', '#7d4379'];
-const INK_TEAL: [string, string] = ['#0f2f2c', '#276b60'];
-const OCHRE: [string, string] = ['#4a2f0a', '#966123'];
-const BERRY: [string, string] = ['#3d1226', '#8a2650'];
-const MOSS: [string, string] = ['#1f2e17', '#4c6e33'];
-const SLATE: [string, string] = ['#16233f', '#33528a'];
-const CLAY: [string, string] = ['#431c14', '#9c4f38'];
-// Four more tonal pairs, extending the family for the second wave of characters below — same
-// single-hue dark→mid formula, chosen to sit clearly apart from the eight above (a neutral
-// graphite, a blue-leaning violet distinct from plum's magenta, a true ocean navy distinct from
-// slate-blue's muted grey-blue, and a warm sand distinct from ochre's more golden cast).
-const GRAPHITE: [string, string] = ['#1c1f24', '#4d545e'];
-const INK_VIOLET: [string, string] = ['#1c1230', '#4a2f7a'];
-const DEEP_NAVY: [string, string] = ['#0c1f33', '#1f5fa0'];
-const SAND: [string, string] = ['#3d2f18', '#8a6a35'];
+// Dark warm ink — every outline, pupil, and linework detail uses this ONE colour, never pure
+// black (too harsh against flat colour) and never a different tone per character (that's what
+// would make the set read as sloppy rather than illustrated as one family).
+const INK = '#2b211c';
 
-function badge([dark, mid]: [string, string], id: string, art: React.ReactNode) {
+// A bright, contemporary, flat-cartoon palette — one light/mid pair per character. Deliberately
+// more saturated and cheerful than the old moody near-black duotone set: this is what "cartoon
+// character" actually calls for, the same register Duolingo/Slack/Notion's own mascot sets use.
+const RUST: [string, string] = ['#FFB37A', '#FF8A3D'];
+const TEAL: [string, string] = ['#7FD9CE', '#3FAFA0'];
+const AMBER: [string, string] = ['#F6C86B', '#E3A63A'];
+const CORAL: [string, string] = ['#FF9E8A', '#F2694E'];
+const MOSS: [string, string] = ['#9BDB7E', '#65B84A'];
+const ORCHID: [string, string] = ['#E7A0D6', '#C862B0'];
+const SLATE: [string, string] = ['#B7C2CE', '#8C9AA8'];
+const SKY: [string, string] = ['#8FC4F2', '#4F97DD'];
+const FOG: [string, string] = ['#C7CDD3', '#9AA3AD'];
+const VIOLET: [string, string] = ['#B6A6E8', '#8A72D4'];
+const AQUA: [string, string] = ['#9FE0EF', '#5FC1DA'];
+const SAND: [string, string] = ['#F0CE9C', '#D9A86C'];
+
+function badge([light, mid]: [string, string], id: string, art: React.ReactNode) {
   return (
     <>
       <defs>
-        <radialGradient id={`pa-${id}`} cx="32%" cy="26%" r="85%">
-          <stop offset="0%" stopColor={mid} />
-          <stop offset="100%" stopColor={dark} />
-        </radialGradient>
+        <linearGradient id={`pa-${id}`} x1="20%" y1="10%" x2="85%" y2="95%">
+          <stop offset="0%" stopColor={light} />
+          <stop offset="100%" stopColor={mid} />
+        </linearGradient>
       </defs>
       <circle cx="20" cy="20" r="20" fill={`url(#pa-${id})`} />
       {art}
+    </>
+  );
+}
+
+/** Big glossy cartoon eyes — the one construction every character shares, so the set reads as
+ *  one illustrated family no matter how the ears/snout/markings vary. `look` nudges the pupil
+ *  off-centre for a bit of personality (default straight-ahead). */
+function eyes(leftX: number, rightX: number, y: number, r = 3.1, look: 'centre' | 'up' | 'side' = 'centre') {
+  const dx = look === 'side' ? 0.6 : 0;
+  const dy = look === 'up' ? -0.6 : 0;
+  return (
+    <>
+      <circle cx={leftX} cy={y} r={r} fill="#fff" stroke={INK} strokeWidth="1.1" />
+      <circle cx={rightX} cy={y} r={r} fill="#fff" stroke={INK} strokeWidth="1.1" />
+      <circle cx={leftX + dx} cy={y + dy} r={r * 0.52} fill={INK} />
+      <circle cx={rightX + dx} cy={y + dy} r={r * 0.52} fill={INK} />
+      <circle cx={leftX + dx - r * 0.22} cy={y + dy - r * 0.22} r={r * 0.16} fill="#fff" />
+      <circle cx={rightX + dx - r * 0.22} cy={y + dy - r * 0.22} r={r * 0.16} fill="#fff" />
     </>
   );
 }
@@ -74,63 +97,69 @@ export const PLOT_AVATARS: PlotAvatarDef[] = [
     render: () =>
       badge(RUST, 'fox', (
         <>
-          <path d="M12 9 4 4l2.5 10.5Z" fill="#fff" fillOpacity="0.92" />
-          <path d="M28 9 36 4l-2.5 10.5Z" fill="#fff" fillOpacity="0.92" />
-          <path d="M20 11c-9 0-15 6-15 13.5 0 6.8 6.3 11.3 15 11.3s15-4.5 15-11.3C35 17 29 11 20 11Z" fill="#fff" fillOpacity="0.92" />
-          <path d="M20 22 14 32h12Z" fill="#7a2e18" fillOpacity="0.85" />
-          <circle cx="14" cy="19" r="1.8" fill="#3d1509" />
-          <circle cx="26" cy="19" r="1.8" fill="#3d1509" />
+          <path d="M9 10 3 4l3 11Z" fill="#fff" stroke={INK} strokeWidth="1.2" strokeLinejoin="round" />
+          <path d="M31 10 37 4l-3 11Z" fill="#fff" stroke={INK} strokeWidth="1.2" strokeLinejoin="round" />
+          <path d="M9.5 8.5 6 6l1.5 6.5Z" fill="#FF8A3D" />
+          <path d="M30.5 8.5 34 6l-1.5 6.5Z" fill="#FF8A3D" />
+          <path d="M20 12c-8 0-13.5 5.6-13.5 12.5S13 33 20 33s13.5-4 13.5-8.5S28 12 20 12Z" fill="#fff" stroke={INK} strokeWidth="1.3" />
+          <path d="M20 22.5 15 30h10Z" fill="#FF8A3D" stroke={INK} strokeWidth="1" strokeLinejoin="round" />
+          <circle cx="20" cy="30" r="1.15" fill={INK} />
+          {eyes(14.5, 25.5, 20, 3, 'side')}
+          <path d="M17.5 26q2.5 1.8 5 0" stroke={INK} strokeWidth="1.2" fill="none" strokeLinecap="round" />
         </>
       )),
   },
   {
     id: 'owl',
     label: 'Owl',
-    pair: SLATE,
+    pair: SKY,
     render: () =>
-      badge(SLATE, 'owl', (
+      badge(SKY, 'owl', (
         <>
-          <ellipse cx="20" cy="23" rx="14.5" ry="14.5" fill="#fff" fillOpacity="0.92" />
-          <path d="M7 10 13 16M33 10 27 16" stroke="#fff" strokeOpacity="0.92" strokeWidth="3.4" strokeLinecap="round" />
-          <circle cx="14" cy="21" r="6" fill="#16233f" />
-          <circle cx="26" cy="21" r="6" fill="#16233f" />
-          <circle cx="14" cy="21" r="2.3" fill="#fff" />
-          <circle cx="26" cy="21" r="2.3" fill="#fff" />
-          <path d="M20 26 16.5 32h7Z" fill="#33528a" />
+          <path d="M7 9c-2.5 1.5-3.5 4-2.8 6.3 1.8-.6 4-2 5-4.2Z" fill="#fff" stroke={INK} strokeWidth="1.1" strokeLinejoin="round" />
+          <path d="M33 9c2.5 1.5 3.5 4 2.8 6.3-1.8-.6-4-2-5-4.2Z" fill="#fff" stroke={INK} strokeWidth="1.1" strokeLinejoin="round" />
+          <ellipse cx="20" cy="23" rx="14.5" ry="13.5" fill="#fff" stroke={INK} strokeWidth="1.3" />
+          {eyes(14, 26, 21, 5.6, 'centre')}
+          <path d="M20 25.5 17.5 30h5Z" fill="#F2694E" stroke={INK} strokeWidth="1" strokeLinejoin="round" />
+          <path d="M9 33c2.5-2 5-2.6 6.5-2M31 33c-2.5-2-5-2.6-6.5-2" stroke={INK} strokeWidth="1.1" fill="none" strokeLinecap="round" />
         </>
       )),
   },
   {
     id: 'bear',
     label: 'Bear',
-    pair: OCHRE,
+    pair: SAND,
     render: () =>
-      badge(OCHRE, 'bear', (
+      badge(SAND, 'bear', (
         <>
-          <circle cx="9" cy="12" r="5" fill="#fff" fillOpacity="0.92" />
-          <circle cx="31" cy="12" r="5" fill="#fff" fillOpacity="0.92" />
-          <circle cx="20" cy="23" r="16" fill="#fff" fillOpacity="0.92" />
-          <ellipse cx="20" cy="27" rx="6.5" ry="5.2" fill="#4a2f0a" fillOpacity="0.85" />
-          <circle cx="20" cy="25" r="2.1" fill="#241505" />
-          <circle cx="13.5" cy="19" r="1.9" fill="#241505" />
-          <circle cx="26.5" cy="19" r="1.9" fill="#241505" />
+          <circle cx="9" cy="12" r="5.2" fill="#fff" stroke={INK} strokeWidth="1.2" />
+          <circle cx="31" cy="12" r="5.2" fill="#fff" stroke={INK} strokeWidth="1.2" />
+          <circle cx="9" cy="12.5" r="2.2" fill="#D9A86C" />
+          <circle cx="31" cy="12.5" r="2.2" fill="#D9A86C" />
+          <circle cx="20" cy="23" r="15.5" fill="#fff" stroke={INK} strokeWidth="1.3" />
+          {eyes(14, 26, 21, 3, 'centre')}
+          <ellipse cx="20" cy="27.5" rx="6.5" ry="5" fill="#D9A86C" stroke={INK} strokeWidth="1.1" />
+          <ellipse cx="20" cy="25.5" rx="2.2" ry="1.8" fill={INK} />
+          <path d="M17 29.5q3 2.2 6 0" stroke={INK} strokeWidth="1.1" fill="none" strokeLinecap="round" />
         </>
       )),
   },
   {
     id: 'tiger',
     label: 'Tiger',
-    pair: CLAY,
+    pair: AMBER,
     render: () =>
-      badge(CLAY, 'tiger', (
+      badge(AMBER, 'tiger', (
         <>
-          <path d="M9 8 12 15M31 8 28 15M6 20l4.5 2.2M34 20l-4.5 2.2" stroke="#fff" strokeOpacity="0.92" strokeWidth="2.8" strokeLinecap="round" />
-          <circle cx="20" cy="22" r="15" fill="#fff" fillOpacity="0.92" />
-          <path d="M8 18 12 21M32 18 28 21M9 26 13 26M31 26 27 26" stroke="#431c14" strokeOpacity="0.4" strokeWidth="1.8" strokeLinecap="round" />
-          <ellipse cx="20" cy="26" rx="7" ry="5.4" fill="#431c14" fillOpacity="0.85" />
-          <circle cx="20" cy="24" r="2.1" fill="#200c08" />
-          <circle cx="13.5" cy="18" r="1.8" fill="#200c08" />
-          <circle cx="26.5" cy="18" r="1.8" fill="#200c08" />
+          <path d="M8 8 12 15h-7Z" fill="#fff" stroke={INK} strokeWidth="1.1" strokeLinejoin="round" />
+          <path d="M32 8 28 15h7Z" fill="#fff" stroke={INK} strokeWidth="1.1" strokeLinejoin="round" />
+          <circle cx="20" cy="22" r="15" fill="#fff" stroke={INK} strokeWidth="1.3" />
+          <path d="M7 16 11.5 19M6 22 11 23M8 27 12 26.5" stroke={INK} strokeWidth="1.4" strokeLinecap="round" fill="none" />
+          <path d="M33 16 28.5 19M34 22 29 23M32 27 28 26.5" stroke={INK} strokeWidth="1.4" strokeLinecap="round" fill="none" />
+          {eyes(14, 26, 19.5, 3.2, 'up')}
+          <ellipse cx="20" cy="26" rx="6.5" ry="5" fill="#fff" />
+          <path d="M17 29.8q3 2.2 6 0" stroke={INK} strokeWidth="1.2" fill="none" strokeLinecap="round" />
+          <path d="M20 23.5 17.5 26h5Z" fill={INK} />
         </>
       )),
   },
@@ -141,128 +170,149 @@ export const PLOT_AVATARS: PlotAvatarDef[] = [
     render: () =>
       badge(MOSS, 'frog', (
         <>
-          <circle cx="13" cy="12" r="5.4" fill="#fff" fillOpacity="0.92" />
-          <circle cx="27" cy="12" r="5.4" fill="#fff" fillOpacity="0.92" />
-          <circle cx="13" cy="12" r="2.2" fill="#1f2e17" />
-          <circle cx="27" cy="12" r="2.2" fill="#1f2e17" />
-          <ellipse cx="20" cy="27" rx="16" ry="10.5" fill="#fff" fillOpacity="0.92" />
-          <path d="M8 27c4.5 3.4 19.5 3.4 24 0" stroke="#1f2e17" strokeOpacity="0.55" strokeWidth="2.2" fill="none" strokeLinecap="round" />
+          <circle cx="13.5" cy="12.5" r="6" fill="#fff" stroke={INK} strokeWidth="1.2" />
+          <circle cx="26.5" cy="12.5" r="6" fill="#fff" stroke={INK} strokeWidth="1.2" />
+          <circle cx="13.5" cy="12.5" r="2.6" fill={INK} />
+          <circle cx="26.5" cy="12.5" r="2.6" fill={INK} />
+          <circle cx="12.2" cy="11.2" r="0.9" fill="#fff" />
+          <circle cx="25.2" cy="11.2" r="0.9" fill="#fff" />
+          <ellipse cx="20" cy="26" rx="16" ry="10.5" fill="#fff" stroke={INK} strokeWidth="1.3" />
+          <path d="M9 27q11 5 22 0" stroke={INK} strokeWidth="1.3" fill="none" strokeLinecap="round" />
+          <circle cx="15" cy="24" r="1.6" fill="#65B84A" opacity="0.6" />
+          <circle cx="25" cy="24" r="1.6" fill="#65B84A" opacity="0.6" />
         </>
       )),
   },
   {
     id: 'octopus',
     label: 'Octopus',
-    pair: BERRY,
+    pair: ORCHID,
     render: () =>
-      badge(BERRY, 'octopus', (
+      badge(ORCHID, 'octopus', (
         <>
-          <circle cx="20" cy="15" r="11.5" fill="#fff" fillOpacity="0.92" />
-          <circle cx="16" cy="13" r="2" fill="#3d1226" />
-          <circle cx="24" cy="13" r="2" fill="#3d1226" />
           <path
-            d="M9 21c-2.5 4.5 0.3 10 3.5 8.8 1-4.5-1.3-6.8 0-9M14.5 24.5c-1.3 5.6 1 11 4.3 10 0-5.6-2-7.8-1-10M20 25.5c0 5.8 1.3 11.3 4.5 10.2 1-5.6-1-7.8 0-10.2M25.5 24.5c1.3 5.6 4.5 9 6.7 6.7-1-4.5-4.5-5.6-3.3-9M31 21c2.5 4.5 5.8 6.7 8 3.3-2.3-3.4-5.6-3.4-4.3-6.7"
+            d="M9 22c-2.8 4.6 0.2 10.4 3.6 9-0.6-4.6-1.6-7-0.2-9.4M14.5 25.5c-1.4 5.8 0.8 11.4 4.2 10.4-0.2-5.8-1.8-8-0.6-10.4M20 26.5c0 6 1.2 11.6 4.4 10.6 1-5.8-0.8-8-0.2-10.6M25.5 25.5c1.4 5.8 4.4 9.2 6.6 7-1-4.6-4.2-5.8-3-9.2M31 22c2.6 4.6 5.8 6.8 8 3.6-2.2-3.6-5.4-3.6-4.2-7"
             fill="none"
-            stroke="#fff"
-            strokeOpacity="0.92"
-            strokeWidth="3.6"
+            stroke={INK}
+            strokeWidth="2.4"
             strokeLinecap="round"
           />
+          <circle cx="20" cy="16" r="12.5" fill="#fff" stroke={INK} strokeWidth="1.3" />
+          {eyes(14.5, 25.5, 16, 3.4, 'centre')}
+          <path d="M17 20.5q3 2 6 0" stroke={INK} strokeWidth="1.2" fill="none" strokeLinecap="round" />
         </>
       )),
   },
   {
     id: 'raccoon',
     label: 'Raccoon',
-    pair: INK_TEAL,
+    pair: SLATE,
     render: () =>
-      badge(INK_TEAL, 'raccoon', (
+      badge(SLATE, 'raccoon', (
         <>
-          <path d="M7 9 13 16M33 9 27 16" stroke="#fff" strokeOpacity="0.92" strokeWidth="3.2" strokeLinecap="round" />
-          <circle cx="20" cy="23" r="15" fill="#fff" fillOpacity="0.92" />
-          <path d="M6 20c0-4.4 4.4-6.6 8.8-4.4-2.2 3.3-3.3 6.6-1.1 9.9-4.4 1.1-7.7-1.1-7.7-5.5Z" fill="#0f2f2c" fillOpacity="0.5" />
-          <path d="M34 20c0-4.4-4.4-6.6-8.8-4.4 2.2 3.3 3.3 6.6 1.1 9.9 4.4 1.1 7.7-1.1 7.7-5.5Z" fill="#0f2f2c" fillOpacity="0.5" />
-          <circle cx="15" cy="21" r="2" fill="#0f2f2c" />
-          <circle cx="25" cy="21" r="2" fill="#0f2f2c" />
-          <ellipse cx="20" cy="29" rx="3.3" ry="2.2" fill="#0f2f2c" fillOpacity="0.75" />
+          <path d="M7 9 12.5 15" stroke={INK} strokeWidth="1.3" strokeLinecap="round" />
+          <path d="M33 9 27.5 15" stroke={INK} strokeWidth="1.3" strokeLinecap="round" />
+          <circle cx="8" cy="10" r="4" fill="#fff" stroke={INK} strokeWidth="1.1" />
+          <circle cx="32" cy="10" r="4" fill="#fff" stroke={INK} strokeWidth="1.1" />
+          <circle cx="20" cy="23" r="15" fill="#fff" stroke={INK} strokeWidth="1.3" />
+          <path d="M6.5 20c-0.6-4.6 3.6-7.4 8.4-5.2-2.4 3.2-3.4 6.4-0.8 9.8-4.8.8-7.2-1.2-7.6-4.6Z" fill={INK} opacity="0.85" />
+          <path d="M33.5 20c0.6-4.6-3.6-7.4-8.4-5.2 2.4 3.2 3.4 6.4 0.8 9.8 4.8.8 7.2-1.2 7.6-4.6Z" fill={INK} opacity="0.85" />
+          <circle cx="15" cy="21.5" r="2.2" fill="#fff" />
+          <circle cx="25" cy="21.5" r="2.2" fill="#fff" />
+          <circle cx="15.4" cy="21.9" r="1.15" fill={INK} />
+          <circle cx="25.4" cy="21.9" r="1.15" fill={INK} />
+          <ellipse cx="20" cy="28" rx="3.4" ry="2.4" fill={INK} />
+          <path d="M17 30.5q3 1.8 6 0" stroke={INK} strokeWidth="1.1" fill="none" strokeLinecap="round" />
         </>
       )),
   },
   {
     id: 'shark',
     label: 'Shark',
-    pair: PLUM,
+    pair: TEAL,
     render: () =>
-      badge(PLUM, 'shark', (
+      badge(TEAL, 'shark', (
         <>
-          <path d="M20 4 25 15h-10Z" fill="#fff" fillOpacity="0.92" />
-          <ellipse cx="20" cy="24" rx="17" ry="10.5" fill="#fff" fillOpacity="0.92" />
-          <path d="M5 24 -2 18v12Z" fill="#fff" fillOpacity="0.92" />
-          <circle cx="12" cy="21" r="1.8" fill="#3b1f3d" />
-          <path d="M22 28.5h13l-6.5 5.5Z" fill="#3b1f3d" fillOpacity="0.5" />
+          <path d="M20 4 26 16H14Z" fill="#fff" stroke={INK} strokeWidth="1.2" strokeLinejoin="round" />
+          <ellipse cx="20" cy="24" rx="17" ry="10.5" fill="#fff" stroke={INK} strokeWidth="1.3" />
+          <path d="M4 24-3 17v14Z" fill="#fff" stroke={INK} strokeWidth="1.1" strokeLinejoin="round" />
+          {eyes(13, 24, 21, 3, 'side')}
+          <path d="M21 27.5h13l-6.5 6Z" fill={INK} opacity="0.55" />
+          <path d="M17 29q3 2 6.5 0.4" stroke={INK} strokeWidth="1.2" fill="none" strokeLinecap="round" />
         </>
       )),
   },
   {
     id: 'wolf',
     label: 'Wolf',
-    pair: GRAPHITE,
+    pair: FOG,
     render: () =>
-      badge(GRAPHITE, 'wolf', (
+      badge(FOG, 'wolf', (
         <>
-          <path d="M10 6 3 3l3 9Z" fill="#fff" fillOpacity="0.92" />
-          <path d="M30 6 37 3l-3 9Z" fill="#fff" fillOpacity="0.92" />
-          <path d="M20 10c-8.5 0-14 6-14 13 0 6.5 6 11 14 11s14-4.5 14-11c0-7-5.5-13-14-13Z" fill="#fff" fillOpacity="0.92" />
-          <path d="M20 21 13 32h14Z" fill="#1c1f24" fillOpacity="0.85" />
-          <circle cx="14" cy="18" r="1.7" fill="#0a0b0d" />
-          <circle cx="26" cy="18" r="1.7" fill="#0a0b0d" />
+          <path d="M9 5 2 2l3 10.5Z" fill="#fff" stroke={INK} strokeWidth="1.2" strokeLinejoin="round" />
+          <path d="M31 5 38 2l-3 10.5Z" fill="#fff" stroke={INK} strokeWidth="1.2" strokeLinejoin="round" />
+          <path d="M9.5 6.5 6 4l1.5 6.5Z" fill="#9AA3AD" />
+          <path d="M30.5 6.5 34 4l-1.5 6.5Z" fill="#9AA3AD" />
+          <path d="M20 10c-9 0-15 6.2-15 13.5S12 34 20 34s15-4.2 15-10.5S29 10 20 10Z" fill="#fff" stroke={INK} strokeWidth="1.3" />
+          <path d="M8 20.5c3-1.5 6-1 7.5 1M32 20.5c-3-1.5-6-1-7.5 1" stroke={INK} strokeWidth="1.1" fill="none" strokeLinecap="round" opacity="0.5" />
+          {eyes(14, 26, 20.5, 3.1, 'centre')}
+          <path d="M20 24 15.5 31.5h9Z" fill="#9AA3AD" stroke={INK} strokeWidth="1" strokeLinejoin="round" />
+          <circle cx="20" cy="31" r="1.15" fill={INK} />
+          <path d="M17.5 27.5q2.5 1.6 5 0" stroke={INK} strokeWidth="1.1" fill="none" strokeLinecap="round" />
         </>
       )),
   },
   {
     id: 'panther',
     label: 'Panther',
-    pair: INK_VIOLET,
+    pair: VIOLET,
     render: () =>
-      badge(INK_VIOLET, 'panther', (
+      badge(VIOLET, 'panther', (
         <>
-          <path d="M9 8 13 15M31 8 27 15" stroke="#fff" strokeOpacity="0.92" strokeWidth="3" strokeLinecap="round" />
-          <circle cx="20" cy="22" r="14.5" fill="#fff" fillOpacity="0.92" />
-          <path d="M12 20 16 22 12 24Z" fill="#1c1230" fillOpacity="0.85" />
-          <path d="M28 20 24 22 28 24Z" fill="#1c1230" fillOpacity="0.85" />
-          <ellipse cx="20" cy="27" rx="3.2" ry="2.2" fill="#1c1230" fillOpacity="0.85" />
+          <path d="M8 8 12.5 15" stroke={INK} strokeWidth="1.2" strokeLinecap="round" />
+          <path d="M32 8 27.5 15" stroke={INK} strokeWidth="1.2" strokeLinecap="round" />
+          <path d="M4.5 9 10 6.5 8 13Z" fill="#8A72D4" stroke={INK} strokeWidth="1.1" strokeLinejoin="round" />
+          <path d="M35.5 9 30 6.5 32 13Z" fill="#8A72D4" stroke={INK} strokeWidth="1.1" strokeLinejoin="round" />
+          <circle cx="20" cy="22" r="14.5" fill="#fff" stroke={INK} strokeWidth="1.3" />
+          {eyes(14, 26, 21, 3.4, 'side')}
+          <ellipse cx="20" cy="27" rx="3.4" ry="2.4" fill={INK} />
+          <path d="M16.5 29.5q3.5 2 7 0" stroke={INK} strokeWidth="1.2" fill="none" strokeLinecap="round" />
         </>
       )),
   },
   {
     id: 'seal',
     label: 'Seal',
-    pair: DEEP_NAVY,
+    pair: AQUA,
     render: () =>
-      badge(DEEP_NAVY, 'seal', (
+      badge(AQUA, 'seal', (
         <>
-          <ellipse cx="20" cy="22" rx="14.5" ry="13.5" fill="#fff" fillOpacity="0.92" />
-          <circle cx="14" cy="19" r="2.2" fill="#0c1f33" />
-          <circle cx="26" cy="19" r="2.2" fill="#0c1f33" />
-          <ellipse cx="20" cy="25" rx="4" ry="3" fill="#0c1f33" fillOpacity="0.85" />
-          <path d="M10 25 4 23M10 27 3 27M30 25l6-2M30 27l7 0" stroke="#0c1f33" strokeOpacity="0.55" strokeWidth="1.3" strokeLinecap="round" />
+          <ellipse cx="20" cy="22" rx="15" ry="14" fill="#fff" stroke={INK} strokeWidth="1.3" />
+          {eyes(14, 26, 20, 3.6, 'centre')}
+          <ellipse cx="20" cy="26" rx="4.5" ry="3.4" fill="#5FC1DA" opacity="0.7" stroke={INK} strokeWidth="1" />
+          <circle cx="20" cy="25.5" r="1.15" fill={INK} />
+          <path d="M9 26 3 24M9 28 2 28.5M31 26l6-2M31 28l7 .5" stroke={INK} strokeWidth="1.2" fill="none" strokeLinecap="round" opacity="0.55" />
+          <path d="M17.5 29q2.5 1.6 5 0" stroke={INK} strokeWidth="1.1" fill="none" strokeLinecap="round" />
         </>
       )),
   },
   {
     id: 'greyhound',
     label: 'Greyhound',
-    pair: SAND,
+    pair: CORAL,
     render: () =>
-      badge(SAND, 'greyhound', (
+      badge(CORAL, 'greyhound', (
         <>
-          <path d="M13 6 9 16M27 6 31 16" stroke="#fff" strokeOpacity="0.92" strokeWidth="3.2" strokeLinecap="round" />
-          <ellipse cx="20" cy="19" rx="12" ry="10" fill="#fff" fillOpacity="0.92" />
-          <path d="M14 26c-3 2-5 6-4 9 3 0 6-3 7-6Z" fill="#fff" fillOpacity="0.92" />
-          <path d="M26 26c3 2 5 6 4 9-3 0-6-3-7-6Z" fill="#fff" fillOpacity="0.92" />
-          <circle cx="15" cy="17" r="1.6" fill="#3d2f18" />
-          <circle cx="25" cy="17" r="1.6" fill="#3d2f18" />
-          <ellipse cx="20" cy="23" rx="2.6" ry="1.8" fill="#3d2f18" fillOpacity="0.8" />
+          <path d="M14 5 9 15" stroke={INK} strokeWidth="1.3" strokeLinecap="round" />
+          <path d="M26 5 31 15" stroke={INK} strokeWidth="1.3" strokeLinecap="round" />
+          <path d="M13 5.5 8.5 8l3 9Z" fill="#fff" stroke={INK} strokeWidth="1.1" strokeLinejoin="round" />
+          <path d="M27 5.5 31.5 8l-3 9Z" fill="#fff" stroke={INK} strokeWidth="1.1" strokeLinejoin="round" />
+          <ellipse cx="20" cy="19" rx="12.5" ry="10.5" fill="#fff" stroke={INK} strokeWidth="1.3" />
+          <path d="M13.5 26c-3 2.2-5 6-4 9.5 3.2-.2 6.4-3 7.4-6.4Z" fill="#fff" stroke={INK} strokeWidth="1.1" strokeLinejoin="round" />
+          <path d="M26.5 26c3 2.2 5 6 4 9.5-3.2-.2-6.4-3-7.4-6.4Z" fill="#fff" stroke={INK} strokeWidth="1.1" strokeLinejoin="round" />
+          {eyes(14.5, 25.5, 17.5, 3, 'up')}
+          <ellipse cx="20" cy="23.5" rx="3" ry="2.2" fill={INK} />
+          <path d="M17 26.5q3 1.8 6 0" stroke={INK} strokeWidth="1.1" fill="none" strokeLinecap="round" />
         </>
       )),
   },
