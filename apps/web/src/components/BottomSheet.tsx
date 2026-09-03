@@ -124,12 +124,21 @@ export function BottomSheet({
       <div
         onClick={onClose}
         aria-hidden="true"
+        // Real, live-reported bug this fixes: "I have to click into white space and that's not
+        // functional" — a well-known iOS Safari quirk where a plain, non-native-interactive
+        // element (a bare <div>) doesn't reliably register tap/click events at all unless it
+        // either IS a natively-interactive element or is explicitly marked as one via
+        // `cursor: pointer` — WebKit uses that style as one of its own signals for "this is
+        // tappable" when deciding whether to fire a synthetic click after a touch. Without it,
+        // a tap on this backdrop could be silently swallowed instead of closing the sheet,
+        // exactly the intermittent "doesn't work" the report describes.
         style={{
           position: 'absolute',
           inset: 0,
           background: 'rgba(22, 19, 15, 0.5)',
           opacity: open ? 1 : 0,
           transition: 'opacity 0.2s ease',
+          cursor: 'pointer',
         }}
       />
       <div
