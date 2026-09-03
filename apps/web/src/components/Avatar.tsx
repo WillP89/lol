@@ -138,10 +138,18 @@ export function CrewMark({
 
   if (artTheme) {
     return (
+      // Real, live-reported bug this fixes (same root cause as IdentityPicker's own instance —
+      // see its comment for the full CSS mechanics): crewArtAvatarStyle() already gives its hero
+      // icon layer an explicit `/62% auto` size, deliberately smaller than the badge so it reads
+      // as a mark rather than a stretched sticker. A trailing `backgroundSize: 'cover'` is a
+      // longhand for the same property, declared after the shorthand — it always wins for that
+      // sub-property regardless of specificity, so it was silently blowing the icon up to
+      // fill/crop the ENTIRE badge instead of sitting centred at its intended size, everywhere
+      // this renders app-wide (a Crew's own chat header, Home's story rail).
       <div
         style={{
           width: size, height: size, borderRadius: radius, flexShrink: 0,
-          background: crewArtAvatarStyle(artTheme), backgroundSize: 'cover',
+          background: crewArtAvatarStyle(artTheme),
         }}
       />
     );

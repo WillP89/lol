@@ -342,7 +342,21 @@ export function IdentityPicker({
                 <span style={captionStyle}>{label}</span>
               </button>
             ) : (
-              <button key={slide.id} type="button" onClick={() => (active ? commitActive() : scrollTo(i))} style={{ ...wrapperStyle, background: crewArtStyle(slide.id), backgroundSize: 'cover' }}>
+              // Real, live-reported bug this fixes ("Still not working! They're the same as old
+              // build"): crewArtStyle() already gives each of its three layers (the off-centre
+              // hero icon, the small echo icon, the wash) its OWN size via the `/58% auto` and
+              // `/22% auto` syntax inside the `background` shorthand — that's the entire poster
+              // composition. A separate `backgroundSize: 'cover'` declared alongside it is a
+              // LONGHAND for the same underlying property, and a longhand declared after a
+              // shorthand always wins for that sub-property, regardless of which one is "more
+              // specific" — so `cover` was silently overriding all three per-layer sizes,
+              // scaling every layer (including both icons) up to fill/crop the entire card. The
+              // result was one giant, roughly-centred icon dominating the frame — exactly the
+              // "flat generic icon on a colour blob" look crewArtAvatarStyle's own header comment
+              // already named as the specific bug the poster composition was built to avoid, back
+              // when it was accidentally only reaching the small badge/avatar scale. `cover` was
+              // never correct here; crewArtStyle()'s own sizing is the entire point.
+              <button key={slide.id} type="button" onClick={() => (active ? commitActive() : scrollTo(i))} style={{ ...wrapperStyle, background: crewArtStyle(slide.id) }}>
                 <span style={{ position: 'absolute', bottom: 16, left: 0, right: 0, textAlign: 'center', fontSize: 13, fontWeight: 800, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
                   {label}
                 </span>
