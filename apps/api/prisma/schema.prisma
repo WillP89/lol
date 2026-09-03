@@ -572,6 +572,11 @@ enum ImageSource {
   WIKIPEDIA
   THESPORTSDB
   SKIDDLE
+  CATEGORY_STOCK // lib/categoryStockImages.ts — a real, live-searched Wikimedia Commons photo
+  // matching the listing's category (a real gig crowd, a real restaurant interior, …), tried only
+  // once a specific artist/venue/team photo couldn't be found — the last resort before leaving
+  // imageUrl null, so no event is ever left showing the generated category-art graphic instead of
+  // a real photograph. See docs/DECISIONS.md#category-stock-images.
   MANUAL // POST /admin/experiences/manual — an operator-entered real photo URL
 }
 

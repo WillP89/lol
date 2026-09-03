@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { config } from '../lib/config';
-import { syncAllProviders, backfillImageQuality } from '../services/inventorySync';
+import { syncAllProviders, backfillImageQuality, backfillMissingImages } from '../services/inventorySync';
 import { buildCanonicalKey } from '../services/entityResolution';
 import { computeQualityScore } from '../services/qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
@@ -55,6 +55,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const Schema = z.object({ limit: z.number().int().positive().max(2000).optional() });
     const parsed = Schema.safeParse(request.body ?? {});
     const result = await backfillImageQuality(parsed.success ? parsed.data.limit : undefined);
+    return reply.send({ result });
+  });
+
+  // Manual re-trigger for the retroactive real-image pass (also runs once automatically on boot
+  // — see server.ts) — the explicit product directive this exists for: "I don't want to see ANY
+  // events without a real image." For re-running it on demand rather than waiting for a redeploy,
+  // e.g. right after this endpoint's own live inventory changed.
+  app.post('/missing-image-backfill', async (request, reply) => {
+    const Schema = z.object({ limit: z.number().int().positive().max(2000).optional() });
+    const parsed = Schema.safeParse(request.body ?? {});
+    const result = await backfillMissingImages(parsed.success ? parsed.data.limit : undefined);
     return reply.send({ result });
   });
 

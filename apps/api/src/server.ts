@@ -1,7 +1,7 @@
 import { buildApp } from './app';
 import { config } from './lib/config';
 import { runSweepIfDue, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from './services/crewRecommendations';
-import { runImageQualityBackfillIfDue } from './services/inventorySync';
+import { runImageQualityBackfillIfDue, runMissingImageBackfillIfDue } from './services/inventorySync';
 
 const app = buildApp();
 
@@ -79,6 +79,25 @@ const checkImageQualityBackfill = () => {
 if (config.NODE_ENV !== 'test') {
   setTimeout(checkImageQualityBackfill, 20_000);
   setInterval(checkImageQualityBackfill, IMAGE_QUALITY_BACKFILL_CHECK_INTERVAL_MS);
+}
+
+// The retroactive half of the real-image directive ("I don't want to see ANY events without a
+// real image" — services/inventorySync.ts#backfillMissingImages's own comment has the full
+// reasoning). Same due/check split, same reason, as the two jobs above — staggered a further 10s
+// so all three don't compete for the same startup window; also triggerable on demand via
+// POST /admin/missing-image-backfill.
+const MISSING_IMAGE_BACKFILL_DUE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours — same cadence as the other backfill
+const MISSING_IMAGE_BACKFILL_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+const checkMissingImageBackfill = () => {
+  runMissingImageBackfillIfDue(MISSING_IMAGE_BACKFILL_DUE_INTERVAL_MS)
+    .then((outcome) => {
+      if (outcome.ran) app.log.info(outcome.result, 'Missing-image backfill ran (database confirmed it was due)');
+    })
+    .catch((err) => app.log.error({ err }, 'Missing-image backfill check failed'));
+};
+if (config.NODE_ENV !== 'test') {
+  setTimeout(checkMissingImageBackfill, 30_000);
+  setInterval(checkMissingImageBackfill, MISSING_IMAGE_BACKFILL_CHECK_INTERVAL_MS);
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

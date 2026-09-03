@@ -2073,3 +2073,74 @@ version was contaminated by real mock restaurant data matching an unrelated tast
 API's own `tsc` production build clean. Every layout/behavior claim in this section was verified
 with real Playwright screenshots against a live dev server, not just code reasoning — the map-fit
 bug two sections up was already a lesson in exactly why that discipline matters here.
+
+## #category-stock-images
+
+**Real, explicit, repeated product directive**: "For every single event, that currently has a
+stock image... replace this with a HD image, either of the artist or the person the event is for,
+OR a generic image that aligns with the type of event (by generic, I mean an actual image not a
+stock graphic)... EVERY SINGLE ONE... I don't want to see ANY events without a real image." The
+"stock image" being rejected is `apps/web/src/lib/v2Art.ts`'s own generated category-art graphic
+(a CSS gradient + hand-drawn stroke icon) — a deliberate, previously-shipped fallback for a
+listing with no photo (see this file's own `#…` entry on that graphic's original "purple music
+graphic" bug and fix). That graphic itself isn't being removed — it still needs to exist as the
+render path's own absolute last resort, and as the visible-while-loading state — but it is no
+longer an ACCEPTABLE outcome for any synced Experience row to reach; a real photograph must exist
+for every one of them, full stop.
+
+**The gap**: the existing enrichment chain (provider photo -> `enrichImageFromWikipedia`/
+`enrichImageFromTheSportsDb` by artist/team/venue NAME) already covers anything with its own
+Wikipedia page or sports-team badge. It structurally cannot cover a generic listing with no such
+page — "Quiz Night at The Anchor", "Tuesday Open Mic", a small independent restaurant with no
+online presence beyond its own booking page. Those listings are real, identifiable TYPES of event
+even without being individually famous, and were the ones silently falling through to the
+generated graphic.
+
+**The fix**: a new, final enrichment tier — `apps/api/src/lib/categoryStockImages.ts` —
+live-searches Wikimedia Commons' own free, key-free `action=query&generator=search` API (File
+namespace only) for a broad, honest category term ("live music concert crowd", "restaurant
+interior dining", …), builds a real candidate POOL per category (not one fixed photo — the same
+"no two same-category tiles should look pixel-identical" principle v2Art.ts's own per-item hash
+variation already applies to its generated graphics, now applied to real photography), filters
+every candidate against the exact same resolution/aspect-ratio floor (`lib/imageDimensions.ts`)
+every other image source in this app is judged against, and hash-picks a candidate per listing so
+the SAME listing always lands on the SAME photo (no flicker across resyncs) while DIFFERENT
+listings in the same category spread across the pool. Wired into `inventorySync.ts`'s existing
+per-listing enrichment chain as the tier tried only after Wikipedia/TheSportsDB both miss — never
+instead of a specific artist/venue photo, only as the fallback beneath it. A new `CATEGORY_STOCK`
+`ImageSource` enum value (migration `20260903120000_add_category_stock_image_source`) marks a row
+filled this way, kept distinct from `MANUAL`/`WIKIPEDIA`/etc. for the same provenance reasons
+every other source is tracked.
+
+**Deliberately NOT hardcoded Commons filenames picked from memory**: a single wrong guessed
+filename would be a real, silent PRODUCTION bug (a 404 hotlink), not a sandbox artifact — this
+sandbox has no way to verify a specific file actually exists on Commons (outbound network to
+commons.wikimedia.org is blocked here, the same restriction that already blocks
+en.wikipedia.org/thesportsdb.com — confirmed via curl `connect_rejected`, not a production
+limitation). A LIVE, verified-every-time search query is the only version of this that can be
+trusted, exactly the same reasoning `imageEnrichment.ts`'s own Wikipedia lookup was already built
+on.
+
+**The retroactive half**: `backfillMissingImages` (`inventorySync.ts`) — same shape, same
+reasoning, as the pre-existing `backfillImageQuality` (the dimension-floor's own retroactive
+pass): re-runs the FULL enrichment chain against every EXISTING Experience row with `imageUrl:
+null`, not just future syncs, because a row already sitting in the database from before this tier
+existed would otherwise keep showing the generated graphic until its own city happened to be
+resynced. Same DB-backed due/check scheduler pattern as every other periodic job in this app
+(`MISSING_IMAGE_BACKFILL_JOB_NAME`, its own `SchedulerState` row, boot + 15-minute check, 6-hour
+due interval) — runs automatically on every deploy, and on demand via
+`POST /admin/missing-image-backfill`, so this reaches already-synced rows on the very next deploy
+rather than waiting on resync cadence, the identical "self-healing across restarts/sleep/scaling"
+reasoning `server.ts`'s own comments already document for the other two scheduled jobs.
+
+**Verified**: `tsc --noEmit` clean, `eslint` clean, full backend regression suite 245/245 passing
+(19 new tests: 8 unit tests for `categoryStockImages.ts`'s own search/filter/cache/hash-variation
+logic against a mocked `fetch`; 2 integration tests proving `syncProvider`'s real fallback order;
+9 tests for `backfillMissingImages` and its scheduler, mirroring `imageQualityBackfill.test.ts`'s
+own coverage exactly). The backfill was also run directly against this session's own dev database
+(10 existing rows, all `imageUrl: null`) to prove the wiring end-to-end — it completed cleanly
+with `checked: 10, filled: 0`, the `filled: 0` being the expected, honest result of this sandbox's
+own network block on Wikipedia/Commons (the same "NOT exercised against the live API from this
+environment" situation already documented for every other live-provider adapter in this app) —
+verify a nonzero `filled` count against Render's own logs once deployed, the same discipline
+already applied everywhere else in this file.
