@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { identityGradient, initialsOf, crewInitial } from '@/lib/identity';
 import { PLOT_AVATAR_PREFIX, getPlotAvatarDef } from '@/components/PlotAvatars';
-import { crewArtAvatarStyle, isCrewArtUrl } from '@/lib/crewArt';
+import { isCrewArtUrl } from '@/lib/crewArt';
 import { IconGathering } from '@/components/icons';
 
 // The system account Plot itself posts recommendation messages as (apps/api/src/services/
@@ -110,13 +110,14 @@ export function PersonAvatar({
 /**
  * A squircle (~28% corner radius) — Plot's shape for a Crew, distinct from a person's circle.
  *
- * `allowThemeArt` (default false): a real, explicit product decision, not a bug — a Crew's
- * chosen theme art (crewArtAvatarStyle) is deliberately shown ONLY inside that Crew's own chat
- * and in Home's story rail (the one place it doubles as a live-state notification, via the ring
- * around it) — everywhere else a Crew is referenced in passing (Plans, Profile's Crews row, the
- * Crews list, an invite preview) falls back to the plain identity-gradient + initial mark, never
- * the theme icon. Pass `allowThemeArt` explicitly true at exactly those two call sites; every
- * other call site is correct by doing nothing.
+ * `allowThemeArt` (default false): a real, explicit product decision, not a bug — a Crew's own
+ * chosen Plot Character mark is deliberately shown ONLY inside that Crew's own chat and in
+ * Home's story rail (the one place it doubles as a live-state notification, via the ring around
+ * it) — everywhere else a Crew is referenced in passing (Plans, Profile's Crews row, the Crews
+ * list, an invite preview) falls back to the plain identity-gradient + initial mark, never the
+ * character. Pass `allowThemeArt` explicitly true at exactly those two call sites; every other
+ * call site is correct by doing nothing. (Named for the marker's own storage prefix history —
+ * `plot-crew-art:<id>` — not a separate "theme" system any more; see IdentityPicker.tsx.)
  */
 export function CrewMark({
   name,
@@ -131,27 +132,32 @@ export function CrewMark({
 }) {
   const radius = Math.round(size * 0.28);
   const artTheme = allowThemeArt ? isCrewArtUrl(imageUrl) : null;
+  // Real, live-reported bug this fixes ("the avatar section for the crews is still not right,
+  // it's the old version of images... change them to match the profile avatars"): a Crew's own
+  // chosen mark used to be one of 8 abstract themed-poster icons (lib/crewArt.ts), a genuinely
+  // different visual system from the redrawn Plot Character collection personal identity picks
+  // from — IdentityPicker.tsx now offers a Crew the exact same character set, in the exact same
+  // circular badge, as a person's own identity (see its own comment); this is the other half of
+  // that same change — wherever a Crew's mark actually RENDERS after being chosen (this
+  // component, everywhere `allowThemeArt` is passed), it now draws that same Plot Character
+  // artwork instead of the retired theme-icon background. Still a squircle, not a circle — the
+  // shape stays how you tell a Crew from a person at a glance; only the mark inside it changed.
+  const crewCharacter = artTheme ? getPlotAvatarDef(artTheme) : null;
   // Same real gap as PersonAvatar's own — see its comment. A broken/expired real Crew photo
   // falls back to the identity-gradient + initial mark instead of a bare broken-image icon.
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const realPhoto = imageUrl && !isCrewArtUrl(imageUrl) && imageUrl !== failedUrl ? imageUrl : null;
 
-  if (artTheme) {
+  if (crewCharacter) {
     return (
-      // Real, live-reported bug this fixes (same root cause as IdentityPicker's own instance —
-      // see its comment for the full CSS mechanics): crewArtAvatarStyle() already gives its hero
-      // icon layer an explicit `/62% auto` size, deliberately smaller than the badge so it reads
-      // as a mark rather than a stretched sticker. A trailing `backgroundSize: 'cover'` is a
-      // longhand for the same property, declared after the shorthand — it always wins for that
-      // sub-property regardless of specificity, so it was silently blowing the icon up to
-      // fill/crop the ENTIRE badge instead of sitting centred at its intended size, everywhere
-      // this renders app-wide (a Crew's own chat header, Home's story rail).
       <div
         style={{
-          width: size, height: size, borderRadius: radius, flexShrink: 0,
-          background: crewArtAvatarStyle(artTheme),
+          width: size, height: size, borderRadius: radius, flexShrink: 0, overflow: 'hidden',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}
-      />
+      >
+        <svg width={size} height={size} viewBox="0 0 40 40">{crewCharacter.render()}</svg>
+      </div>
     );
   }
 
