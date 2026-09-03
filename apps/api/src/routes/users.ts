@@ -119,7 +119,15 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
   // web/components/PlotAvatars.tsx) — no file at all, just a `plot-avatar:<id>` marker stored
   // in the same column a real photo URL would occupy. Validated server-side against the same
   // fixed set the picker offers, never trusting the client to only ever send a real one.
-  const PresetSchema = z.object({ presetId: z.enum(['fox', 'owl', 'bear', 'tiger', 'frog', 'octopus', 'raccoon', 'shark', 'wolf', 'panther', 'seal', 'greyhound']) });
+  //
+  // Real, live-reported bug this fixes: "Request to /users/me/avatar/preset failed" on every
+  // single preset pick, no exceptions — this enum still listed the FIRST character set's ids
+  // (fox/owl/bear/...), rejected outright per direct live feedback and fully replaced by
+  // PlotAvatars.tsx's own "SECOND FULL REPLACEMENT" (sparky/blink/gummy/...). The frontend
+  // picker was updated; this schema, the one thing that has to agree with it byte-for-byte, was
+  // not — every real preset request the new picker could ever send failed z.enum validation and
+  // 400'd, silently and completely, since the moment that redesign shipped.
+  const PresetSchema = z.object({ presetId: z.enum(['sparky', 'blink', 'gummy', 'drift', 'nova', 'pip', 'zag', 'ember', 'lull', 'patch', 'puff', 'flare']) });
   app.post('/users/me/avatar/preset', async (request, reply) => {
     if (!requireUser(request, reply)) return;
     const parsed = PresetSchema.safeParse(request.body);
