@@ -9,7 +9,19 @@ html,
 body {
   margin: 0;
   padding: 0;
+  /* Real, not merely cosmetic: without this, iOS Safari's overscroll/bounce reveals raw white
+     underneath every `.v2` page wrapper (which paints its OWN `var(--v2-bg)` background, but
+     only across its own box, not the true document root) — invisible in light mode (both are
+     already off-white) but a jarring white flash mid-bounce in dark mode. Kept as literal hex,
+     not `var(--v2-bg)`, deliberately: this sits OUTSIDE any `.v2` element (the class that
+     actually declares that variable — see globals.css's own dark-mode block below), so the var
+     wouldn't resolve here without duplicating the whole token set onto :root as well. */
+  background: #f6f6f4;
 }
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) body { background: #131316; }
+}
+html[data-theme="dark"] body { background: #131316; }
 
 ::selection {
   background: #ff4a1f;
@@ -147,6 +159,73 @@ body {
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   min-height: 100dvh;
   position: relative;
+}
+
+/* ==========================================================================
+   DARK MODE — same app, same brand system, every token above just gets a
+   dark-appropriate value; nothing else in this file (or any page/component)
+   needs to change, since every real colour in the app already routes
+   through these `--v2-*` variables rather than a hardcoded hex. Same
+   relative structure as the light set: --v2-surface is the brightest/most
+   "elevated" tone (cards, sheets, the message bubble that isn't "mine"),
+   --v2-bg is the mid canvas, --v2-bg-deep is the darkest/most "recessed"
+   tone (skeletons, pressed/inset states) — exactly the same three-step
+   relationship the light palette uses, just inverted in luminance.
+
+   `--v2-brand` (the one UI action colour — buttons, "mine" bubble) flips
+   from near-black to near-white, keeping the file's own founding principle
+   intact: one neutral monochrome action colour, never a hue: on light it's
+   black-on-white, on dark it's white-on-black. `--v2-pop` (the one signature
+   accent) stays the same pink in both — that's the one colour that's
+   supposed to jump out identically regardless of theme.
+
+   Two selectors, not one, per the standard "theme-aware" contract: the
+   `prefers-color-scheme` block covers "system default, no explicit choice
+   made yet" (guarded by `:not([data-theme="light"])` so it never fights an
+   explicit light choice), and the plain `[data-theme="dark"]` block —
+   declared after, so it always wins on a tie — covers an explicit toggle
+   regardless of the OS setting. See components/ThemeToggle.tsx for what
+   actually sets `data-theme` on <html>, and app/layout.tsx for the
+   anti-flash inline script that applies it before first paint. */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) .v2 {
+    --v2-bg: #131316;
+    --v2-bg-deep: #0b0b0d;
+    --v2-surface: #1e1e22;
+    --v2-ink: #f3f2f0;
+    --v2-ink-muted: #a6a4aa;
+    --v2-ink-dim: #706e75;
+
+    --v2-brand: #f3f2f0;
+    --v2-brand-ink: #131316;
+
+    --v2-error: #ff6259;
+    --v2-gold: #e0a940;
+    --v2-green: #3ddc94;
+
+    --v2-line: rgba(255, 255, 255, 0.13);
+    --v2-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 16px -8px rgba(0, 0, 0, 0.6);
+    --v2-shadow-lg: 0 4px 10px rgba(0, 0, 0, 0.4), 0 20px 44px -16px rgba(0, 0, 0, 0.7);
+  }
+}
+:root[data-theme="dark"] .v2 {
+  --v2-bg: #131316;
+  --v2-bg-deep: #0b0b0d;
+  --v2-surface: #1e1e22;
+  --v2-ink: #f3f2f0;
+  --v2-ink-muted: #a6a4aa;
+  --v2-ink-dim: #706e75;
+
+  --v2-brand: #f3f2f0;
+  --v2-brand-ink: #131316;
+
+  --v2-error: #ff6259;
+  --v2-gold: #e0a940;
+  --v2-green: #3ddc94;
+
+  --v2-line: rgba(255, 255, 255, 0.13);
+  --v2-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 16px -8px rgba(0, 0, 0, 0.6);
+  --v2-shadow-lg: 0 4px 10px rgba(0, 0, 0, 0.4), 0 20px 44px -16px rgba(0, 0, 0, 0.7);
 }
 
 /* Staggered list entrance — apply alongside .fade-up with a numeric --stagger-i custom property
@@ -556,8 +635,12 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
     width: 40px;
     height: 40px;
     border-radius: 12px;
-    background: var(--v2-ink);
-    color: #fff;
+    /* --v2-brand/--v2-brand-ink, not --v2-ink/#fff — real dark-mode bug this avoids: --v2-ink
+       flips to near-white in dark mode, and a hardcoded white text colour on it would go
+       invisible. --v2-brand carries the matching dark-mode-aware --v2-brand-ink companion this
+       solid dark chip actually needs (see globals.css's own dark-mode block for both tokens). */
+    background: var(--v2-brand);
+    color: var(--v2-brand-ink);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -575,7 +658,7 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
     justify-content: center;
     color: var(--v2-ink-dim);
   }
-  .v2-nav-rail .v2-tab.active { background: var(--v2-ink); color: #fff; }
+  .v2-nav-rail .v2-tab.active { background: var(--v2-brand); color: var(--v2-brand-ink); }
   @media (hover: hover) {
     .v2-nav-rail .v2-tab:not(.active):hover { background: var(--v2-bg-deep); color: var(--v2-ink); }
   }

@@ -488,7 +488,7 @@ export default function ExplorePage() {
             display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 14, border: 'none', borderRadius: 100,
             padding: '7px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
             background: tasteFilterOn ? 'var(--v2-brand)' : 'var(--v2-bg-deep)',
-            color: tasteFilterOn ? '#fff' : 'var(--v2-ink-muted)',
+            color: tasteFilterOn ? 'var(--v2-brand-ink)' : 'var(--v2-ink-muted)',
           }}
         >
           {tasteFilterOn
@@ -827,7 +827,7 @@ export default function ExplorePage() {
                 type="button"
                 onClick={() => toggleCategory(opt.value)}
                 className="v2-tap-feedback"
-                style={{ border: 'none', borderRadius: 100, padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', background: active ? 'var(--v2-brand)' : 'var(--v2-bg-deep)', color: active ? '#fff' : 'var(--v2-ink-muted)' }}
+                style={{ border: 'none', borderRadius: 100, padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', background: active ? 'var(--v2-brand)' : 'var(--v2-bg-deep)', color: active ? 'var(--v2-brand-ink)' : 'var(--v2-ink-muted)' }}
               >
                 {opt.label}
               </button>

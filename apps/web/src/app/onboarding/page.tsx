@@ -175,7 +175,7 @@ function OnboardingWizard() {
                     style={{
                       padding: '10px 16px', borderRadius: 100, border: 'none', cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
                       background: selected ? 'var(--v2-brand)' : 'var(--v2-surface)',
-                      color: selected ? '#fff' : 'var(--v2-ink-muted)',
+                      color: selected ? 'var(--v2-brand-ink)' : 'var(--v2-ink-muted)',
                       boxShadow: selected ? 'none' : 'var(--v2-shadow-sm)',
                     }}
                   >
