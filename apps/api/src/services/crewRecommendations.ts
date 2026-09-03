@@ -2,7 +2,7 @@ import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { track } from './analytics';
 import { ensureInventory } from './inventorySync';
-import { scoreExperiencesForCrew, type MatchOption } from './match';
+import { scoreExperiencesForCrew, getCrewExcludedExperienceIds, type MatchOption } from './match';
 import { createRecommendationPlanForCrew } from './plan';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { Prisma } from '@prisma/client';
@@ -287,12 +287,9 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   // Never repeat: anything ever recommended to this Crew before (any status — a dismissal is
   // still a "don't show again", not a "try harder next time"), and anything a member has
   // already shared/found themselves — recommending something the Crew is already looking at
-  // would read as Plot not paying attention.
-  const [alreadyRecommended, alreadyShared] = await Promise.all([
-    prisma.crewRecommendation.findMany({ where: { crewId }, select: { experienceId: true } }),
-    prisma.plan.findMany({ where: { crewId, experienceId: { not: null } }, select: { experienceId: true } }),
-  ]);
-  const excluded = new Set([...alreadyRecommended.map((r) => r.experienceId), ...alreadyShared.map((p) => p.experienceId as string)]);
+  // would read as Plot not paying attention. Shared with the manual "Find us something" flow —
+  // see getCrewExcludedExperienceIds's own comment (match.ts).
+  const excluded = await getCrewExcludedExperienceIds(crewId);
 
   // A real taste signal is required, not just "it's close, cheap and everyone's free" — those
   // three alone can clear MIN_RECOMMENDATION_SCORE for literally any category (a real gap

@@ -345,6 +345,45 @@ export async function scoreExperiencesForCrew(
 }
 
 /**
+ * Every Experience this Crew should never be shown as "new" again — anything ever recommended
+ * to it before (any status; a dismissal is still a "don't show again", not a "try harder next
+ * time"), and anything a member has already shared/found and sent to the Crew as a Plan. Shared
+ * by BOTH the automatic sweep (crewRecommendations.ts#evaluateCrewEligibility) and the manual
+ * "Find us something"/"Suggest something" flow (findUsSomething below) — one definition, not
+ * two that can drift. Real, live-reported gap this closes: before this was shared, ONLY the
+ * automatic sweep excluded a Crew's own past rejections — a member tapping "Find us something"
+ * again could be handed back the exact same event the Crew had just said NOT_FOR_US to, which
+ * reads as Plot having no memory at all, exactly the "freshness" failure mode the brief warns
+ * against.
+ */
+export async function getCrewExcludedExperienceIds(crewId: string): Promise<Set<string>> {
+  const [alreadyRecommended, alreadyShared] = await Promise.all([
+    prisma.crewRecommendation.findMany({ where: { crewId }, select: { experienceId: true } }),
+    prisma.plan.findMany({ where: { crewId, experienceId: { not: null } }, select: { experienceId: true } }),
+  ]);
+  return new Set([...alreadyRecommended.map((r) => r.experienceId), ...alreadyShared.map((p) => p.experienceId as string)]);
+}
+
+/**
+ * The narrower sibling used by the MANUAL "Find us something" flow only — every Experience this
+ * Crew has given a definitively negative response to (NOT_FOR_US, WRONG_VIBE, TOO_FAR,
+ * TOO_EXPENSIVE), never re-surfaced. Deliberately NOT `getCrewExcludedExperienceIds`'s full set:
+ * that also excludes anything still sitting as a pending, unresponded automatic recommendation
+ * (status SENT) — correct for the automatic sweep (never send the SAME thing twice, delivered or
+ * not), but wrong here, since a member manually asking "Find us something" while Plot's own
+ * current best find is still sitting unanswered in the Crew's chat should still be able to see
+ * that exact thing, not have it silently swapped for a weaker match. A response is a real signal
+ * either way; still-pending is not a rejection at all.
+ */
+export async function getCrewRejectedExperienceIds(crewId: string): Promise<Set<string>> {
+  const rejected = await prisma.crewRecommendation.findMany({
+    where: { crewId, status: { in: ['NOT_FOR_US', 'WRONG_VIBE', 'TOO_FAR', 'TOO_EXPENSIVE'] } },
+    select: { experienceId: true },
+  });
+  return new Set(rejected.map((r) => r.experienceId));
+}
+
+/**
  * The signature "Find us something" interaction — runs the shared scorer, persists the result
  * for explainability/audit (brief §13 Intent Graph), and returns the top 3.
  */
@@ -361,7 +400,16 @@ export async function findUsSomething(
   await ensureInventory(city);
 
   const scored = await scoreExperiencesForCrew(crewId);
-  const reranked = await identityRanker.rerank(scored.slice(0, 10), { crewId });
+  // Never resurface something this Crew has explicitly rejected before — see
+  // getCrewRejectedExperienceIds's own comment on why this is deliberately narrower than the
+  // automatic sweep's exclusion set. Only falls back to the unfiltered list when filtering would
+  // leave nothing at all to show a member who explicitly asked (same "never come up completely
+  // empty" reasoning as guaranteeFirst in crewRecommendations.ts) — a manual ask standing
+  // empty-handed is worse than one repeat.
+  const rejected = await getCrewRejectedExperienceIds(crewId);
+  const fresh = scored.filter((o) => !rejected.has(o.experience.id));
+  const candidatePool = fresh.length > 0 ? fresh : scored;
+  const reranked = await identityRanker.rerank(candidatePool.slice(0, 10), { crewId });
   const top = reranked.slice(0, RESULT_COUNT);
 
   const [memberCount, dna, tasteProfiles] = await Promise.all([
