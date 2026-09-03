@@ -7,6 +7,37 @@ import { identityGradient, initialsOf, crewInitial } from '@/lib/identity';
 import { PLOT_AVATARS, PLOT_AVATAR_PREFIX } from '@/components/PlotAvatars';
 import { CREW_ART_THEME_IDS, CREW_ART_PREFIX, crewArtStyle, crewArtLabel } from '@/lib/crewArt';
 
+// Matches lib/imageDimensions.ts's own MIN_IMAGE_WIDTH exactly — the app's own real HD floor, so
+// resizing down to this is never a quality downgrade anywhere the result actually gets shown.
+const MAX_UPLOAD_DIMENSION = 1600;
+const UPLOAD_JPEG_QUALITY = 0.85;
+
+/** Shrinks a photo client-side, before the upload even starts — see handleFile's own comment for
+ *  the real complaint this fixes. Fails safe: any decode/canvas problem (an odd format, an old
+ *  browser, a security-restricted canvas) just returns the original file untouched rather than
+ *  blocking the upload on an optimisation that didn't work out. */
+async function resizeForUpload(file: File): Promise<File> {
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) return file;
+  try {
+    const scale = Math.min(1, MAX_UPLOAD_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    if (scale >= 1) return file; // already at or under the floor — nothing to gain from re-encoding
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, file.type, UPLOAD_JPEG_QUALITY));
+    if (!blob || blob.size >= file.size) return file; // the re-encode didn't actually help — keep the original
+    return new File([blob], file.name, { type: file.type });
+  } finally {
+    bitmap.close();
+  }
+}
+
 /**
  * The real "how do I show up in Plot" experience — a full-screen takeover, not a sheet with a
  * title/grid/save-button (the thing that read as a dev feature, not a piece of a premium
@@ -120,15 +151,26 @@ export function IdentityPicker({
       setError('Use a JPEG, PNG, or WebP image.');
       return;
     }
-    if (file.size > 6 * 1024 * 1024) {
-      setStatus('error');
-      setError('That image is too large — under 6MB, please.');
-      return;
-    }
     setStatus('busy');
     setError(null);
     try {
-      const body = await api.upload<{ avatarUrl?: string; imageUrl?: string }>(uploadPath, file);
+      // Real, live complaint this fixes: uploading felt slow, not instant — a modern phone photo
+      // is routinely 3-8MB at 3000px+ wide, almost none of which the app ever actually shows:
+      // even Home's own hero, the single biggest image placement anywhere in Plot, only ever
+      // needs ~1600px to render crisp (see lib/imageDimensions.ts's own comment on that exact
+      // math — same number, reused here). Shrinking client-side, before the upload even starts,
+      // cuts the real bytes travelling over a mobile connection by several times, with zero
+      // visible quality loss anywhere the result is actually displayed. Resizing FIRST, then
+      // checking the resulting size against the 6MB cap (rather than rejecting the original
+      // upfront) also means a big-but-shrinkable photo now succeeds instead of being turned away
+      // for being "too large" when resizing alone would have easily solved it.
+      const upload = await resizeForUpload(file);
+      if (upload.size > 6 * 1024 * 1024) {
+        setStatus('error');
+        setError('That image is too large — under 6MB, please.');
+        return;
+      }
+      const body = await api.upload<{ avatarUrl?: string; imageUrl?: string }>(uploadPath, upload);
       const url = body.avatarUrl ?? body.imageUrl ?? null;
       onChange(url);
       setStatus('idle');
