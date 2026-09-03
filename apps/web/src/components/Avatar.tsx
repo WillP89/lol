@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { identityGradient, initialsOf, crewInitial } from '@/lib/identity';
 import { PLOT_AVATAR_PREFIX, getPlotAvatarDef } from '@/components/PlotAvatars';
 import { crewArtAvatarStyle, isCrewArtUrl } from '@/lib/crewArt';
@@ -44,7 +45,14 @@ export function PersonAvatar({
   const initials = initialsOf(name, email);
   const plotAvatarId = photoUrl?.startsWith(PLOT_AVATAR_PREFIX) ? photoUrl.slice(PLOT_AVATAR_PREFIX.length) : null;
   const plotAvatar = plotAvatarId ? getPlotAvatarDef(plotAvatarId) : null;
-  const realPhoto = photoUrl && !plotAvatarId ? photoUrl : null;
+  // Real gap found auditing this against the brief's own "zero broken images, no exceptions"
+  // rule: a real uploaded photo had NO error handling at all — a deleted/expired/momentarily
+  // unreachable R2 URL rendered the browser's bare broken-image icon, exactly the failure this
+  // whole component exists to prevent for every OTHER case (a Plot avatar, a missing photo).
+  // `failedUrl` remembers exactly which URL didn't load; if `photoUrl` later changes (a fresh
+  // upload replacing a broken one) it no longer matches, so the new photo gets a fair attempt.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const realPhoto = photoUrl && !plotAvatarId && photoUrl !== failedUrl ? photoUrl : null;
   // Plot itself, posting as the system account — real, reported feedback: a generic "PL"
   // initials circle (the same treatment any two-letter-name human gets) read as an unfinished
   // placeholder, not a product with an actual identity, exactly where it matters most (Plot's
@@ -77,7 +85,7 @@ export function PersonAvatar({
           <IconGathering size={Math.round(size * 0.52)} />
         </span>
       ) : realPhoto ? (
-        <img src={realPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        <img src={realPhoto} alt="" onError={() => setFailedUrl(realPhoto)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
       ) : plotAvatar ? (
         <svg width={size} height={size} viewBox="0 0 40 40">
           {plotAvatar.render()}
@@ -123,7 +131,10 @@ export function CrewMark({
 }) {
   const radius = Math.round(size * 0.28);
   const artTheme = allowThemeArt ? isCrewArtUrl(imageUrl) : null;
-  const realPhoto = imageUrl && !isCrewArtUrl(imageUrl) ? imageUrl : null;
+  // Same real gap as PersonAvatar's own — see its comment. A broken/expired real Crew photo
+  // falls back to the identity-gradient + initial mark instead of a bare broken-image icon.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const realPhoto = imageUrl && !isCrewArtUrl(imageUrl) && imageUrl !== failedUrl ? imageUrl : null;
 
   if (artTheme) {
     return (
@@ -151,7 +162,7 @@ export function CrewMark({
       }}
     >
       {realPhoto ? (
-        <img src={realPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        <img src={realPhoto} alt="" onError={() => setFailedUrl(realPhoto)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
       ) : (
         <>
           {/* The "gathering" motif — three converging points, the same family as IconLock/
