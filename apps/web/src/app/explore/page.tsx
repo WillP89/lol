@@ -420,8 +420,21 @@ export default function ExplorePage() {
   // docs/DECISIONS.md#explore-detail-desktop.
   const detailContent = selected && !pickingCrew ? (
     <div>
-      <div style={{ position: 'relative', margin: '-10px -20px 16px', height: 210, background: v2Art(selected.imageUrl, selected.category, selected.id) }} />
-      <div className="v2-eyebrow" style={{ marginBottom: 4 }}>{selected.category.replace(/_/g, ' ')}</div>
+      {/* Real, live-reported complaint this fixes ("the white space on the image to book an
+          event, that is not good"): a short card (a one-line venue/date, no description) left a
+          large dimmed BACKDROP gap above the sheet — the panel only grows as tall as its own
+          content, and 210px of image plus a couple of text lines wasn't enough to fill the screen
+          on most devices. Growing the hero image itself (210 -> 300, the same immersive-image
+          instinct already applied to Home's own hero) is the honest fix, not padding: it makes
+          the sheet genuinely taller with something worth looking at, rather than empty space
+          either above the sheet OR inside it. The category badge moves onto the image itself
+          (Home's own card treatment) instead of sitting as a second, separate line of text below
+          it — one clean visual read, not two competing labels for the same fact. */}
+      <div style={{ position: 'relative', margin: '-10px -20px 16px', height: 300, background: v2Art(selected.imageUrl, selected.category, selected.id) }}>
+        <span style={{ position: 'absolute', top: 14, left: 14, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#fff', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', padding: '5px 10px', borderRadius: 100 }}>
+          {selected.category.replace(/_/g, ' ')}
+        </span>
+      </div>
       <h2 className="v2-display" style={{ fontSize: 23, marginBottom: 6 }}>{selected.name}</h2>
       <div className="v2-muted" style={{ fontSize: 13.5, marginBottom: 14 }}>
         {selected.venue.name} · {formatWhen(selected.startsAt)}
