@@ -327,15 +327,39 @@ export default function ProfilePage() {
 
           {error && <div style={{ color: 'var(--v2-error)', fontSize: 13, marginBottom: 16, textAlign: 'center' }}>{error}</div>}
 
-          {/* My Crews — real social context, not another card of stats. */}
+          {/* My Crews — real social context, not another card of stats. Real, reported design
+              constraint: this must feel like PEOPLE, identity before you even read the name —
+              a bare mark + a name label alone still reads as a list row wearing a nicer font.
+              Each tile now also carries a small overlapping face stack of whoever's actually in
+              it (real member avatars, never placeholder silhouettes), the same visual grammar
+              Home's own "Plot found this" cards already use for a Crew's people. */}
           {crews && crews.length > 0 && (
             <div style={{ marginBottom: 22 }}>
               <div className="v2-eyebrow" style={{ marginBottom: 10 }}>My Crews</div>
-              <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 4 }}>
+              <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 }}>
                 {crews.map((crew) => (
-                  <Link key={crew.id} href={`/crews/${crew.id}`} className="v2-tap-feedback" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 66 }}>
-                    <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={56} />
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--v2-ink)', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>{crew.name}</span>
+                  <Link
+                    key={crew.id}
+                    href={`/crews/${crew.id}`}
+                    className="v2-tap-feedback v2-card"
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, flexShrink: 0, width: 104, padding: '14px 10px' }}
+                  >
+                    <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={52} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--v2-ink)', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>{crew.name}</span>
+                    {crew.members.length > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <div className="stack">
+                          {crew.members.slice(0, 4).map((m, mi) => (
+                            <div key={m.user.email} style={{ marginLeft: mi === 0 ? 0 : -8, borderRadius: '50%', boxShadow: '0 0 0 2px var(--v2-surface)' }}>
+                              <PersonAvatar name={m.user.displayName} email={m.user.email} photoUrl={m.user.avatarUrl ?? null} size={20} />
+                            </div>
+                          ))}
+                        </div>
+                        {crew.members.length > 4 && (
+                          <span className="v2-dim" style={{ fontSize: 10, fontWeight: 700, marginLeft: 4 }}>+{crew.members.length - 4}</span>
+                        )}
+                      </div>
+                    )}
                   </Link>
                 ))}
               </div>
