@@ -827,6 +827,19 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
    an editorial activity feed with no card chrome instead of a boxed list. */
 .v2-home-page { max-width: 640px; margin: 0 auto; }
 
+/* THE BRAND MOMENT — real, reported feedback on an earlier attempt to fill the dead space at the
+   bottom of a quiet Home page: piling in more Explore event cards just turned Home into a second
+   copy of the Discover tab. This is Plot's own editorial voice instead — a tinted panel (never
+   plain white, never a photo card) so it reads unmistakably as "the product talking to you", not
+   another listing you could tap into Explore. The signature converging-points mark ties it to the
+   same "Plot found this" language used everywhere else a Plot-authored moment appears. */
+.v2-brand-moment {
+  border-radius: var(--v2-r-lg);
+  padding: 22px 22px 24px;
+  background: linear-gradient(155deg, rgba(255,47,126,0.07), rgba(255,197,61,0.05));
+  border: 1px solid rgba(255,47,126,0.12);
+}
+
 /* Bleeds a block to the physical screen edge on mobile (out of `.v2-page`'s 20px padding) and to
    the reading column's own edge on desktop — an image/moment that fills the space it's given
    instead of sitting inset inside a rounded card. Plain negative-margin, not a 100vw trick, so it
@@ -874,7 +887,11 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
    language the Crew chat page's own context strip uses (amber = deciding, green = locked) so the
    two surfaces read as one consistent signal system, not two invented separately. */
 .v2-notify-row {
-  display: flex; align-items: center; gap: 14px; padding: 13px 14px; border-radius: var(--v2-r-md);
+  /* Real, reported feedback: these read too small/quiet next to everything else on the page —
+     bumped avatar/icon size (see the inline 44->52 changes at each call site), type scale, and
+     the row's own padding/gap together so it reads as one deliberately larger notification
+     module, not just wider text crammed into the old cramped shape. */
+  display: flex; align-items: center; gap: 16px; padding: 16px; border-radius: var(--v2-r-md);
   border-left: 3px solid transparent; transition: background-color 0.15s ease, transform 0.15s ease;
 }
 .v2-notify-row + .v2-notify-row { margin-top: 4px; }
