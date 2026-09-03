@@ -129,20 +129,41 @@ export async function syncProvider(
           },
         }));
 
-      // Real, live-caught bug this specifically fixes: an earlier version of the mock ticketing
-      // provider generated a `picsum.photos` stock-photo URL (see mock/ticketingProvider.ts's
-      // own comment on why that was removed) — rows synced back then still carry it in this
-      // dev database today. A naive "only overwrite imageUrl on an actual new truthy value"
-      // rule (this function's own previous version) can NEVER clear that: the mock provider now
-      // correctly maps to `imageUrl: null` every sync, but null was being treated as "no
-      // opinion, leave whatever's there" forever. The correct rule needs the EXISTING row's
-      // provenance, not just the new mapping: a `MANUAL`ly-entered real photo (an operator's own
-      // upload — see routes/admin.ts) is the one thing an automated resync must never silently
-      // clear; anything else (a prior real-provider image that's since disappeared, a stale mock
-      // artifact, nothing at all) should reflect what this sync run actually found.
+      // Real, live-caught bug this specifically fixes (originally): an earlier version of the
+      // mock ticketing provider generated a `picsum.photos` stock-photo URL (see
+      // mock/ticketingProvider.ts's own comment on why that was removed) — rows synced back then
+      // still carried it in the dev database. A naive "only overwrite imageUrl on an actual new
+      // truthy value" rule can never clear that kind of stale artifact, so this used to clear
+      // the field whenever the new sync pass found nothing — protecting only a `MANUAL`ly-entered
+      // photo (an operator's own upload — see routes/admin.ts) from that.
+      //
+      // SECOND, more serious real bug that same rule caused, found from a live report ("STOCK
+      // IMAGES, AGAIN") of Explore cards that had a real photo flip BACK to the generic v2Art
+      // fallback graphic on their own: `ensureInventoryProduction` resyncs an already-seeded
+      // city periodically in the background (not just once), and every resync re-runs the FULL
+      // enrichment chain (Wikipedia/TheSportsDB -> Commons -> Pexels) from scratch for every
+      // listing. Those two external stock sources are real, rate-limited, occasionally-flaky
+      // network calls (this exact "one pass came up short" pattern is already documented in
+      // categoryStockImages.ts's/pexelsStockImages.ts's own EMPTY_POOL_TTL_MS comments) — a
+      // transient miss on any LATER resync used to overwrite an already-real, already quality-
+      // verified image straight back to null, even though nothing about that photo had actually
+      // stopped being valid. A resync should only ever IMPROVE or REFRESH imageUrl (a genuine new
+      // provider photo, or a fresh enrichment success) — never regress a working real photo back
+      // to the fallback graphic just because one particular pass got unlucky.
+      //
+      // The distinguishing signal is `imageSource`, not just `imageUrl`: the original stale-
+      // picsum-artifact case this guard first existed for is a row with a real `imageUrl` STRING
+      // but `imageSource: null` — genuinely untrusted/legacy provenance from before this field
+      // existed, which a resync correctly still clears (imageProvenance.test.ts's own first
+      // test). Every row this newer fix protects (a real provider photo, Wikipedia/TheSportsDB,
+      // Commons/Pexels category stock, or a MANUAL upload) always has a real, non-null
+      // `imageSource` written alongside its `imageUrl` — see every call site above and in
+      // backfillMissingImages/enrichMissingImageForExperience below. So "does the existing row
+      // have a known, tracked source" is exactly the right test for "is this a real photo worth
+      // protecting from a later pass's transient miss", independent of MANUAL specifically.
       const existing = await prisma.experience.findUnique({ where: { canonicalKey }, select: { imageSource: true } });
-      const preserveManualImage = existing?.imageSource === 'MANUAL' && !canonicalInput.imageUrl;
-      const imageUpdate = preserveManualImage ? {} : { imageUrl: canonicalInput.imageUrl, imageSource: canonicalInput.imageSource };
+      const keepExistingImage = Boolean(existing?.imageSource) && !canonicalInput.imageUrl;
+      const imageUpdate = keepExistingImage ? {} : { imageUrl: canonicalInput.imageUrl, imageSource: canonicalInput.imageSource };
 
       const experience = await prisma.experience.upsert({
         where: { canonicalKey },
