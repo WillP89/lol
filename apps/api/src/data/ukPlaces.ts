@@ -132,12 +132,18 @@ export function nearestUkPlace(lat: number, lng: number): UkPlace {
  * syncs and queries exactly this set of real cities/towns, never a fabricated wider catalogue.
  * The cap exists because a large radius in a densely-covered region (the Midlands, in
  * particular) can otherwise pull in a dozen-plus places, each needing its own provider sync —
- * bounding it keeps a radius search's worst-case latency sane. Always includes the nearest
- * place even if it technically falls just outside `radiusKm` (rounding, or a very tight radius
- * around a point that isn't itself a named place), so a radius search never comes back with
- * literally nothing to sync.
+ * bounding it keeps a radius search's worst-case latency sane. Real bug this comment used to
+ * miss: a low cap combined with a NARROW per-provider search radius meant widening the app's own
+ * radius genuinely found almost nothing new (see skiddle.ts's and ticketmaster.ts's own
+ * RADIUS_MILES/SEARCH_RADIUS_KM comments for the actual fix) — now that each single place's own
+ * provider sync already reaches Explore's own largest radius preset (100km), this cap mostly
+ * just guards against redundant syncs of near-duplicate ground in a dense region, not against
+ * missing real coverage, so it can stay a modest number rather than needing to grow with radius.
+ * Always includes the nearest place even if it technically falls just outside `radiusKm`
+ * (rounding, or a very tight radius around a point that isn't itself a named place), so a radius
+ * search never comes back with literally nothing to sync.
  */
-export function placesWithinRadiusKm(lat: number, lng: number, radiusKm: number, maxCount = 10): UkPlace[] {
+export function placesWithinRadiusKm(lat: number, lng: number, radiusKm: number, maxCount = 15): UkPlace[] {
   const withDistance = UK_PLACES.map((place) => ({ place, distanceKm: haversineKm(lat, lng, place.lat, place.lng) })).sort((a, b) => a.distanceKm - b.distanceKm);
   const within = withDistance.filter((p) => p.distanceKm <= radiusKm);
   const result = within.length > 0 ? within : withDistance.slice(0, 1); // guarantee at least the nearest place

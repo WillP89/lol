@@ -38,7 +38,19 @@ const SKIDDLE_BASE = 'https://www.skiddle.com/api/v1/events/search/';
 // the categories with the cleanest, least-ambiguous mapping onto Plot's own ExperienceCategory
 // enum; see mapEventCode's own comment for the ones deliberately left out and why.
 const EVENT_CODES = ['FEST', 'LIVE', 'CLUB', 'COMEDY', 'THEATRE', 'ARTS', 'SPORT'] as const;
-const RADIUS_MILES = 15;
+// Real, live-reported bug this fixes: "extend the map radius from 10km to 25km and I should see
+// more events" was returning almost nothing new. Root cause — this was 15 miles (~24km), and
+// Explore's own radius search (services/explore.ts#listExploreExperiencesByRadius) syncs each
+// nearby gazetteer town (data/ukPlaces.ts) as its OWN separate city, each making its OWN Skiddle
+// call at THIS radius. Neighbouring Staffordshire towns sit ~10-20km apart, so two towns' own
+// 24km search bubbles overlap almost entirely — syncing "Stone" after "Stafford" was querying
+// nearly the same real ground a second time, not reaching genuinely further out. Widening this
+// to comfortably clear Explore's own largest radius preset (100km) means a SINGLE city's sync
+// already pulls in the full real candidate pool that wide search wants; Explore's own already-
+// correct haversine distance filter (not this constant) is what does the actual narrowing back
+// down to whatever radius the user picked — so changing the app's radius now genuinely changes
+// what's shown, from a real, already-fetched pool, not from an under-reached one.
+const RADIUS_MILES = 65; // ~104km — comfortably covers the 100km UI preset from one sync
 const PAGE_SIZE = 50;
 // Observed real-world pacing from an actively-maintained open-source consumer of this exact
 // endpoint (no official rate limit is published — see docs/providers/ticketing.md) — a small,
