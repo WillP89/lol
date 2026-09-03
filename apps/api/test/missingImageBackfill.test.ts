@@ -21,11 +21,20 @@ vi.mock('../src/lib/categoryStockImages', async () => {
   const actual = await vi.importActual<typeof import('../src/lib/categoryStockImages')>('../src/lib/categoryStockImages');
   return {
     ...actual,
-    getCategoryStockImage: vi.fn(async (category: string) => (category === 'RESTAURANT' ? null : { url: 'https://upload.wikimedia.org/category-stock.jpg', sourcePage: 'File:Stock.jpg' })),
+    getCategoryStockImage: vi.fn(async (category: string) => (category === 'LIVE_MUSIC' ? { url: 'https://upload.wikimedia.org/category-stock.jpg', sourcePage: 'File:Stock.jpg' } : null)),
+  };
+});
+// Same reasoning as categoryStockImageFallback.test.ts's own header — a real, independent second
+// source, not a hypothetical duplicate of Commons (see pexelsStockImages.ts's own header for why).
+vi.mock('../src/lib/pexelsStockImages', async () => {
+  const actual = await vi.importActual<typeof import('../src/lib/pexelsStockImages')>('../src/lib/pexelsStockImages');
+  return {
+    ...actual,
+    getPexelsStockImage: vi.fn(async (category: string) => (category === 'BAR' ? { url: 'https://images.pexels.com/pexels-stock.jpg', sourcePage: 'Bar interior' } : null)),
   };
 });
 
-async function seedExperience(name: string, category: 'LIVE_MUSIC' | 'RESTAURANT' = 'LIVE_MUSIC') {
+async function seedExperience(name: string, category: 'LIVE_MUSIC' | 'RESTAURANT' | 'BAR' | 'COMEDY' = 'LIVE_MUSIC') {
   const { prisma } = await import('../src/lib/prisma');
   const venue = await prisma.venue.create({
     data: { name: `${name} Venue`, latitude: 52.8062, longitude: -2.1169, city: 'Missing Image Backfill Test City' },
@@ -80,7 +89,19 @@ describe('backfillMissingImages — retroactive real-image fill for already-sync
     expect(row!.imageSource).toBe('CATEGORY_STOCK');
   });
 
-  test('a row where even the category-stock search comes up empty is left null, never fabricated', async () => {
+  test('falls through to a real Pexels photo when Commons has nothing for this category', async () => {
+    const { backfillMissingImages } = await import('../src/services/inventorySync');
+    const { prisma } = await import('../src/lib/prisma');
+    await seedExperience('Unmatched Local Pub Quiz', 'BAR');
+
+    await backfillMissingImages();
+
+    const row = await prisma.experience.findFirst({ where: { name: 'Unmatched Local Pub Quiz' } });
+    expect(row!.imageUrl).toBe('https://images.pexels.com/pexels-stock.jpg');
+    expect(row!.imageSource).toBe('PEXELS_STOCK');
+  });
+
+  test('a row where every real-photo tier comes up empty is left null, never fabricated', async () => {
     const { backfillMissingImages } = await import('../src/services/inventorySync');
     const { prisma } = await import('../src/lib/prisma');
     await seedExperience('Totally Unmatched Diner', 'RESTAURANT');

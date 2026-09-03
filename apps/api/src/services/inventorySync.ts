@@ -8,6 +8,7 @@ import { computeQualityScore } from './qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { enrichImageFromWikipedia, enrichImageFromTheSportsDb } from '../lib/imageEnrichment';
 import { getCategoryStockImage } from '../lib/categoryStockImages';
+import { getPexelsStockImage } from '../lib/pexelsStockImages';
 import { isImageQualityBad } from '../lib/imageDimensions';
 import { config } from '../lib/config';
 
@@ -80,13 +81,20 @@ export async function syncProvider(
           // image" — a generic listing ("Quiz Night at The Anchor") has no Wikipedia page to
           // enrich from, but it's still a real, identifiable TYPE of event. This is the true last
           // resort before a listing is left with imageUrl null (and the web app's own generated
-          // category-art graphic — lib/v2Art.ts — is all that's left to show): a real, live-
-          // searched Wikimedia Commons photograph matching the category. See
-          // lib/categoryStockImages.ts's own header for the full reasoning.
-          const stock = await getCategoryStockImage(canonicalInput.category, canonicalInput.name);
+          // category-art graphic — lib/v2Art.ts — is all that's left to show): a real,
+          // category-appropriate photograph. TWO independent sources tried in order, not one —
+          // Commons first (free, no key), then Pexels (needs PEXELS_API_KEY) — because Wikimedia's
+          // own edge infrastructure returns a hard 403 to this app's real Render deployment
+          // (confirmed from production logs; en.wikipedia.org and commons.wikimedia.org share that
+          // same edge), which would otherwise silently defeat the Commons tier alone. See
+          // lib/categoryStockImages.ts's and lib/pexelsStockImages.ts's own headers for the full
+          // reasoning.
+          const commonsStock = await getCategoryStockImage(canonicalInput.category, canonicalInput.name);
+          const pexelsStock = commonsStock ? null : await getPexelsStockImage(canonicalInput.category, canonicalInput.name);
+          const stock = commonsStock ?? pexelsStock;
           if (stock) {
             canonicalInput.imageUrl = stock.url;
-            canonicalInput.imageSource = 'CATEGORY_STOCK';
+            canonicalInput.imageSource = commonsStock ? 'CATEGORY_STOCK' : 'PEXELS_STOCK';
           }
         }
       }
@@ -618,15 +626,19 @@ export async function backfillMissingImages(maxToCheck?: number): Promise<Missin
         const sportBadge = row.category === 'SPORT' ? await enrichImageFromTheSportsDb(row.name) : null;
         const enriched = sportBadge ?? (await enrichImageFromWikipedia(row.name));
         let imageUrl: string | null = null;
-        let imageSource: 'THESPORTSDB' | 'WIKIPEDIA' | 'CATEGORY_STOCK' | null = null;
+        let imageSource: 'THESPORTSDB' | 'WIKIPEDIA' | 'CATEGORY_STOCK' | 'PEXELS_STOCK' | null = null;
         if (enriched) {
           imageUrl = enriched.url;
           imageSource = sportBadge ? 'THESPORTSDB' : 'WIKIPEDIA';
         } else {
-          const stock = await getCategoryStockImage(row.category, row.name);
+          // Same two-independent-sources reasoning as syncProvider's own call site above — see
+          // that comment, and categoryStockImages.ts's/pexelsStockImages.ts's own headers.
+          const commonsStock = await getCategoryStockImage(row.category, row.name);
+          const pexelsStock = commonsStock ? null : await getPexelsStockImage(row.category, row.name);
+          const stock = commonsStock ?? pexelsStock;
           if (stock) {
             imageUrl = stock.url;
-            imageSource = 'CATEGORY_STOCK';
+            imageSource = commonsStock ? 'CATEGORY_STOCK' : 'PEXELS_STOCK';
           }
         }
         // Same real, provider-agnostic quality floor as syncProvider — a THESPORTSDB badge is

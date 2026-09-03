@@ -2144,3 +2144,72 @@ own network block on Wikipedia/Commons (the same "NOT exercised against the live
 environment" situation already documented for every other live-provider adapter in this app) —
 verify a nonzero `filled` count against Render's own logs once deployed, the same discipline
 already applied everywhere else in this file.
+
+### Addendum: Wikimedia blocks this app's real production traffic — Pexels added as a second, independent source
+
+**Real, live report, with production log evidence attached**: the fix above shipped and deployed,
+and the user's own screenshot of the live app minutes later showed the exact same generated-
+graphic fallback on most events — proven wrong, not a "give it time" situation. They then pasted
+the actual Render production logs, which showed something this sandbox could never have caught:
+every single `enrichImageFromWikipedia` call was failing with `Wikipedia summary API returned
+403` — not a 404 (no match, the expected/handled outcome this whole session assumed), a 403
+(Forbidden). This is Wikimedia's own edge infrastructure actively rejecting requests from this
+app's real Render deployment — the well-documented posture many sites' edge/WAF layers take
+against traffic identified as coming from cloud/datacenter hosting IP ranges, unrelated to
+anything about this app's request shape (a compliant, identifying User-Agent was already being
+sent). `en.wikipedia.org` and `commons.wikimedia.org` sit behind the same Wikimedia edge, so
+`categoryStockImages.ts`'s own Commons search — the ENTIRE fix shipped in the section above — was
+almost certainly being silently defeated by the exact same block, despite passing 100% of its own
+tests (which, correctly per this app's own established discipline, only ever proved the code's
+logic against a mocked `fetch`, never a live call — the one thing no test in this sandbox could
+have caught, because the sandbox's OWN network block to the same domains looks identical to
+Wikimedia's block from the outside: both present as a request that never gets a real photo back).
+
+**This is the sharpest instance yet, in this whole session, of the gap between "every test passes,
+`tsc`/`eslint` are clean, the logic is correct" and "verified against the real, deployed system" —
+and it was only catchable at all because the user pasted real production logs, which this sandbox
+has no way to fetch on its own (no Render dashboard/log access from here). The lesson kept
+explicitly, going forward: a fallback chain built entirely on ONE provider's family of endpoints
+(Wikipedia's own REST summary API AND Wikimedia Commons' own search API) has a single point of
+failure this app cannot detect from its own test suite alone if that provider blocks this app's
+specific hosting environment — a second, genuinely independent source is not redundancy for its
+own sake here, it's the actual fix.**
+
+**The fix**: `apps/api/src/lib/pexelsStockImages.ts` — a second, independent real-photo search,
+same category-appropriate-photo concept as `categoryStockImages.ts`, sourced from Pexels' own API
+instead of Wikimedia Commons. Pexels' entire product is serving real photos into third-party apps
+via API — not an incidental REST endpoint bolted onto an encyclopedia — so it doesn't share
+Wikimedia's infra, edge, or (going by every account of real-world usage) its anti-cloud-IP
+blocking posture. Gated behind a new optional `PEXELS_API_KEY` (free tier, no billing, ~2-minute
+signup at pexels.com/api — same optional-provider-key contract as every other key in `config.ts`:
+unset is a clean, logged no-op, never a crash). Wired as the FOURTH tier in the exact same chain —
+provider photo -> Wikipedia/TheSportsDB by name -> Commons category search -> Pexels category
+search — in both `syncProvider` (future syncs) and `backfillMissingImages` (existing rows), Commons
+tried first (free, no key, and would recover on its own for free if Wikimedia's block ever turns
+out to be narrower than it currently looks) with Pexels as the tier that actually makes the "no
+event without a real image" guarantee hold in the deployment this app actually runs on today.
+
+**Genuinely new `ImageSource` value** (`PEXELS_STOCK`, migration
+`20260903130000_add_pexels_stock_image_source`) rather than reusing `CATEGORY_STOCK` — provenance
+matters here specifically BECAUSE the two sources have such different reliability profiles in
+production; collapsing them would have hidden the exact signal ("is Commons actually working from
+Render, or is everything routing through Pexels") that would have made this problem visible
+immediately instead of needing a user's own screenshot and pasted logs to surface it.
+
+**Verified**: `tsc --noEmit` clean, `eslint` clean, full backend regression suite 257/257 passing
+(12 new tests: 10 unit tests for `pexelsStockImages.ts`'s own search/filter/cache/hash-variation/
+missing-key-no-op logic against a mocked `fetch` — including the missing-`PEXELS_API_KEY` case,
+proven as a clean no-op that never calls `fetch` at all; the `syncProvider` and
+`backfillMissingImages` integration tests rewritten to prove the full four-tier fallback order,
+including that Pexels is never even called once Commons already answered). Not exercised against
+either live API from this sandbox (same generic network-egress block that already covers every
+other external domain touched this session, confirmed via curl `connect_rejected` for
+`api.pexels.com` specifically too — a DIFFERENT failure mode from Wikimedia's own 403, but equally
+unobservable from here either way) — this fix cannot be visually confirmed working until a real
+`PEXELS_API_KEY` is set on Render and the next backfill/sync run is checked against Render's own
+logs, the same discipline this whole addendum exists to reinforce. **Action genuinely required
+from the user, not something further code changes here can substitute for**: get a free key at
+pexels.com/api and set `PEXELS_API_KEY` in Render's environment variables, then either wait for
+the next scheduled `backfillMissingImages` run or trigger one immediately via
+`POST /admin/missing-image-backfill` (`x-admin-key` header, same admin gate as every other admin
+route).
