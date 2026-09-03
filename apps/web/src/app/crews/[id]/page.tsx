@@ -682,12 +682,12 @@ export default function CrewPage() {
     el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
   }, [draft]);
   const router = useRouter();
-  // The real source of truth for "how much space do I actually have, and where does it actually
-  // start" on mobile — see lib/useVisualViewportHeight.ts. `null` until the API has fired once
-  // (SSR, or a browser without it), so every usage below falls back to the existing static `dvh`
-  // layout in that case.
-  const visualViewport = useVisualViewportHeight();
-  const visualViewportHeight = visualViewport?.height ?? null;
+  // The keyboard-aware fallback height for browsers that don't yet honour layout.tsx's
+  // `interactive-widget: resizes-content` (the real, primary fix — see that file's own comment).
+  // `null` until the API has fired once (SSR, or a browser without it), in which case every
+  // usage below falls back to plain `100dvh`. See lib/useVisualViewportHeight.ts's own comment
+  // for why this stays a plain height, not a positioning system.
+  const visualViewportHeight = useVisualViewportHeight();
 
   // The composer's "+" action sheet — one entry point into every way of adding something to
   // the conversation beyond plain text (see docs/DECISIONS.md#decision-objects).
@@ -1351,57 +1351,37 @@ export default function CrewPage() {
     }
   }
 
-  // Real, live-reported bug this fixes: the composer/message-list card scrolled up so far that
-  // the header (and even part of the top message) rendered off past the top edge of the screen
-  // the moment the on-screen keyboard opened — this comment block's OWN prior claim that
-  // "`100dvh` already tracks the keyboard" turned out to be exactly wrong for iOS Safari, which
-  // is precisely what useVisualViewportHeight.ts's own header comment already documented: `dvh`
-  // tracks the browser TOOLBAR auto-hiding, never the software keyboard. With a static `100dvh`
-  // container, the keyboard opening doesn't shrink this flex column at all — it just covers the
-  // bottom of it — so the browser's own "scroll the focused input into view above the keyboard"
-  // behaviour has no choice but to scroll the WHOLE fixed-height column upward, dragging the
-  // header (and however much message history that requires) up past the visible top edge.
-  //
-  // SECOND real bug the height-only version of this fix still had, found from a live follow-up
-  // report ("it should be LOCKED at the bottom of screen, no ability to move the whole
-  // interface"): shrinking a STATIC-positioned element's height to match the keyboard is not, on
-  // its own, enough — iOS Safari's native "scroll the focused input into view" behaviour still
-  // runs independently, on the LAYOUT viewport (which never resizes), scrolling the page by some
-  // amount this app doesn't control. A height fix with no positioning fix just let that native
-  // scroll and this component's own shrink compound: the container ended up the right SIZE,
-  // sitting at the wrong PLACE — the composer floating with a dead gap below it, not glued to the
-  // keyboard. Pinning the container with `position: fixed` and countering that native scroll with
-  // `transform: translateY(visualViewport.offsetTop)` (the live measurement of exactly how far
-  // that scroll has shifted things) keeps it glued to whatever is ACTUALLY visible right now,
-  // regardless of what the browser's own scroll does underneath it — this is what "LOCKED" means
-  // in practice: nothing left for the browser's own scroll-into-view to do, because the container
-  // was never waiting on it in the first place.
+  // The keyboard-cutoff bug this whole block used to chase in JS (three rounds: height alone,
+  // then position:fixed + translateY(visualViewport.offsetTop) to counter the browser's own
+  // native scroll) is now handled by layout.tsx's `interactive-widget: resizes-content` viewport
+  // meta instead — the real, standards-track fix (Safari 17.4+/iOS 17.4+, Chrome 108+): it makes
+  // the BROWSER genuinely resize the layout viewport, and therefore plain `100dvh`, for the
+  // keyboard, so there is no separate native scroll left for any transform to counter in the
+  // first place. The `position: fixed` + `translateY` version of this fix was removed after live
+  // testing showed it could ITSELF introduce a spurious shift on at least one real in-app
+  // browser (Gmail's) — reconstructing "where the visible viewport really is" from
+  // `visualViewport.offsetTop` after the fact turned out to be exactly the kind of per-WebView
+  // guesswork the platform-level fix above exists to avoid needing at all. `visualViewportHeight`
+  // is kept only as a plain height value for the rare browser that doesn't understand
+  // `interactive-widget` yet, and to drive the "keep the latest message in view" scroll effect
+  // below — no positioning trick riding on top of it.
   const chatViewportHeight = visualViewportHeight != null ? `${visualViewportHeight}px` : '100dvh';
-  const chatViewportOffset = visualViewport?.offsetTop ?? 0;
 
   return (
-    // ONE flex column filling the real, keyboard-aware viewport height: the header is a natural
-    // flex-shrink:0 child, the message list is the one `flex:1; min-height:0; overflow-y:auto`
-    // scroll region, and the composer is just the LAST flex child — inherently always visible at
-    // the bottom, because that is what a flex column does, not because of a number anyone
-    // calculated. `position: fixed` + the translateY below is what actually keeps that column
-    // glued to the real visible viewport — see this function's own comment just above.
+    // ONE flex column filling the real viewport height: the header is a natural flex-shrink:0
+    // child, the message list is the one `flex:1; min-height:0; overflow-y:auto` scroll region,
+    // and the composer is just the LAST flex child — inherently always visible at the bottom,
+    // because that is what a flex column does, not because of a number anyone calculated.
     <div
       className="v2"
       style={{
-        position: 'fixed', top: 0, left: 0, right: 0, height: chatViewportHeight,
-        // Real bug found live-testing THIS fix, not a hypothetical: `.v2`'s own base rule
-        // (globals.css) carries `min-height: 100dvh` — a floor meant for a normal in-flow page
-        // (so a short one still fills the screen), harmless there since `height` is otherwise
-        // `auto`. It is NOT harmless here: `min-height` and `height` are different properties, so
-        // the inline `height` above (correctly shrunk to the keyboard-aware value) does not
-        // override it — min/max-height always clamp the final used size regardless of which rule
-        // set `height` — and since `100dvh` doesn't shrink for the keyboard either (the same iOS
-        // Safari fact this whole fix exists for), that floor silently clamped this container's
-        // real height straight back up to the full static viewport, undoing the fix. An explicit
-        // inline `minHeight` on the very same property is what actually wins over it.
+        height: chatViewportHeight,
+        // `.v2`'s own base rule (globals.css) carries `min-height: 100dvh`, a floor meant for a
+        // normal in-flow page — harmless there since `height` is otherwise `auto`, but a
+        // real gap here: `min-height` and `height` are different properties, so a smaller
+        // `height` above would silently get clamped back up to the floor. Matching it here keeps
+        // this element's own explicit height in control, same fix as it's always been.
         minHeight: chatViewportHeight,
-        transform: chatViewportOffset ? `translateY(${chatViewportOffset}px)` : undefined,
         overflow: 'hidden',
       }}
     >

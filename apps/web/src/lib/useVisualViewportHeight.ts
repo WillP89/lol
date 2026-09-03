@@ -8,36 +8,31 @@ import { useEffect, useState } from 'react';
  * on-screen keyboard does not resize on iOS Safari; it just overlays on top, so a naively fixed
  * composer ends up hidden behind the keyboard the moment it opens).
  *
- * CSS `100dvh` handles the OTHER mobile-chrome case correctly (the address bar collapsing on
- * scroll), but it does not reliably track the keyboard opening on iOS — the dynamic viewport
- * unit is about browser chrome, not the software keyboard. `window.visualViewport` is the one
- * API that DOES report the keyboard correctly on both iOS and Android: its `height` shrinks the
- * moment the keyboard appears and grows back the moment it's dismissed. This hook is the real
- * source of truth for "how much vertical space is actually usable right now"; callers should
- * fall back to a `dvh`-based CSS value when it returns null (SSR, or a browser old enough not to
- * have the API at all — desktop browsers all have it, but nothing here depends on it there since
- * there's no on-screen keyboard to react to).
+ * The REAL, primary fix for this now lives in layout.tsx's viewport meta — `interactive-widget:
+ * resizes-content` (Safari 17.4+/iOS 17.4+, Chrome 108+) tells the browser itself to genuinely
+ * resize the layout viewport, and therefore plain `100dvh`, for the keyboard, the same way it
+ * already does for the address bar collapsing. This hook is what's left for the browsers that
+ * don't understand that yet: `window.visualViewport.height` is the one older API that DOES
+ * report the keyboard correctly on both iOS and Android, shrinking the moment it appears. Used
+ * here for two things — a plain fallback height value (see crews/[id]/page.tsx's own
+ * `chatViewportHeight`), and to re-run "scroll to the latest message" when the keyboard opens.
  *
- * `offsetTop` is the other half of the same real bug ("the whole interface moves, it should be
- * LOCKED"): shrinking a STATIC-positioned element's height to match the visual viewport is not,
- * on its own, enough — iOS Safari's own "scroll the focused input into view above the keyboard"
- * behaviour still runs independently on the LAYOUT viewport (which never resizes), scrolling the
- * whole page by some amount the app does not control. A height fix with no positioning fix just
- * lets that native scroll and the app's own shrink compound: the container ends up the right
- * SIZE, sitting at the wrong PLACE — exactly the reported "composer floats with a dead gap below
- * it" symptom. `visualViewport.offsetTop` is the live measurement of exactly how far the native
- * scroll has shifted the visual viewport from the layout viewport's own top edge; a caller that
- * pins itself with `position: fixed` and offsets by this value stays glued to whatever is
- * ACTUALLY visible right now, regardless of what the browser's own scroll does underneath it.
+ * Deliberately does NOT also report `visualViewport.offsetTop` any more, and callers should not
+ * try to reconstruct a `position: fixed` + counter-transform from it — an earlier version of this
+ * fix did exactly that, and live testing found it could itself introduce a spurious shift in at
+ * least one real in-app browser (Gmail's own), on top of whatever the platform-level fix above
+ * already handles correctly. Reconstructing "where the visible viewport really is" after the fact
+ * is exactly the kind of per-WebView guesswork `interactive-widget` exists to make unnecessary;
+ * this hook stays a plain height, not a positioning system.
  */
-export function useVisualViewportHeight(): { height: number; offsetTop: number } | null {
-  const [state, setState] = useState<{ height: number; offsetTop: number } | null>(null);
+export function useVisualViewportHeight(): number | null {
+  const [height, setHeight] = useState<number | null>(null);
 
   useEffect(() => {
     const vv = typeof window !== 'undefined' ? window.visualViewport : null;
     if (!vv) return;
     function update() {
-      setState({ height: vv!.height, offsetTop: vv!.offsetTop });
+      setHeight(vv!.height);
     }
     update();
     vv.addEventListener('resize', update);
@@ -48,5 +43,5 @@ export function useVisualViewportHeight(): { height: number; offsetTop: number }
     };
   }, []);
 
-  return state;
+  return height;
 }
