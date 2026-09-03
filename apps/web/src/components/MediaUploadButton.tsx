@@ -51,7 +51,7 @@ export function MediaUploadButton({
         <span
           style={{
             position: 'absolute', bottom: -2, right: -2, width: 26, height: 26, borderRadius: '50%',
-            background: 'var(--v2-brand)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--v2-brand)', color: 'var(--v2-brand-ink)', display: 'flex', alignItems: 'center', justifyContent: 'center',
             border: '2.5px solid var(--v2-surface)',
           }}
         >

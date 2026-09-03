@@ -302,7 +302,7 @@ function EventCard({
               "Locked in" at top-left above. See docs/DECISIONS.md#plot-brand-system for why
               IconGathering (loose converging points) rather than an "AI sparkle" mark. */}
           {data.recommendation && (
-            <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 5, background: 'var(--v2-brand)', color: '#fff', fontSize: 10, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', padding: '5px 9px', borderRadius: 100 }}>
+            <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 5, background: 'var(--v2-brand)', color: 'var(--v2-brand-ink)', fontSize: 10, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', padding: '5px 9px', borderRadius: 100 }}>
               <IconGathering size={11} /><span>Plot found this</span>
             </div>
           )}
@@ -1529,7 +1529,7 @@ export default function CrewPage() {
             <button
               onClick={() => scrollToBottom(true)}
               className="v2-pop-in v2-tap-feedback"
-              style={{ position: 'absolute', bottom: 74, left: '50%', transform: 'translateX(-50%)', zIndex: 5, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 100, border: 'none', background: 'var(--v2-ink)', color: '#fff', fontSize: 12.5, fontWeight: 700, boxShadow: 'var(--v2-shadow-lg)', cursor: 'pointer' }}
+              style={{ position: 'absolute', bottom: 74, left: '50%', transform: 'translateX(-50%)', zIndex: 5, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 100, border: 'none', background: 'var(--v2-brand)', color: 'var(--v2-brand-ink)', fontSize: 12.5, fontWeight: 700, boxShadow: 'var(--v2-shadow-lg)', cursor: 'pointer' }}
             >
               New messages ↓
             </button>
@@ -1652,7 +1652,7 @@ export default function CrewPage() {
                         style={{
                           padding: '10px 15px', wordBreak: 'break-word', fontSize: 14.5, lineHeight: 1.4,
                           background: mine ? 'var(--v2-brand)' : 'var(--v2-surface)',
-                          color: mine ? '#fff' : 'var(--v2-ink)',
+                          color: mine ? 'var(--v2-brand-ink)' : 'var(--v2-ink)',
                           borderRadius: mine ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
                           boxShadow: mine ? 'none' : 'var(--v2-shadow-sm)',
                         }}
@@ -1725,7 +1725,7 @@ export default function CrewPage() {
                 disabled={!draft.trim()}
                 aria-label="Send"
                 className="v2-tap-feedback"
-                style={{ flexShrink: 0, width: 44, height: 44, borderRadius: '50%', border: 'none', background: 'var(--v2-brand)', color: '#fff', fontSize: 17, cursor: 'pointer', opacity: !draft.trim() ? 0.5 : 1 }}
+                style={{ flexShrink: 0, width: 44, height: 44, borderRadius: '50%', border: 'none', background: 'var(--v2-brand)', color: 'var(--v2-brand-ink)', fontSize: 17, cursor: 'pointer', opacity: !draft.trim() ? 0.5 : 1 }}
               >
                 ↑
               </button>
@@ -2086,7 +2086,7 @@ export default function CrewPage() {
                         disabled={savingRecSettings}
                         className="v2-tap-feedback"
                         aria-pressed={active}
-                        style={{ padding: '7px 12px', borderRadius: 100, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: active ? 'var(--v2-brand)' : 'var(--v2-bg-deep)', color: active ? '#fff' : 'var(--v2-ink-muted)' }}
+                        style={{ padding: '7px 12px', borderRadius: 100, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: active ? 'var(--v2-brand)' : 'var(--v2-bg-deep)', color: active ? 'var(--v2-brand-ink)' : 'var(--v2-ink-muted)' }}
                       >
                         {chip.label}
                       </button>

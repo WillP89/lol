@@ -114,7 +114,7 @@ export function CrewTuneContent({
       fontSize: 12.5,
       fontWeight: 700,
       background: active ? 'var(--v2-brand)' : 'var(--v2-bg-deep)',
-      color: active ? '#fff' : 'var(--v2-ink-muted)',
+      color: active ? 'var(--v2-brand-ink)' : 'var(--v2-ink-muted)',
       transition: 'background 0.15s ease, color 0.15s ease, border 0.15s ease',
     };
   }

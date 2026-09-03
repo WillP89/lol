@@ -163,7 +163,10 @@ export function TuneMyPlotSheet({
     fontSize: 12.5,
     fontWeight: 700,
     background: active === 'love' ? 'var(--v2-pop)' : active === 'like' ? 'var(--v2-brand)' : 'var(--v2-bg-deep)',
-    color: active ? '#fff' : 'var(--v2-ink-muted)',
+    // Real dark-mode bug this avoids: `--v2-brand` flips to near-white in dark mode, so a flat
+    // `#fff` text colour for BOTH active states would go invisible on the 'like' pill (white on
+    // white) — `--v2-pop` never changes with theme, so white text stays correct for 'love'.
+    color: active === 'love' ? '#fff' : active === 'like' ? 'var(--v2-brand-ink)' : 'var(--v2-ink-muted)',
     transition: 'background 0.15s ease, color 0.15s ease, border 0.15s ease',
   });
 

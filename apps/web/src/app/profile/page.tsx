@@ -12,6 +12,7 @@ import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { MediaUploadButton } from '@/components/MediaUploadButton';
 import { LocationSearch, type UkPlaceResult } from '@/components/LocationSearch';
 import { TuneMyPlotSheet } from '@/components/TuneMyPlotSheet';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { interestLabel } from '@plot/shared';
 
 interface ProfileUser {
@@ -99,7 +100,7 @@ function Segmented<T extends string>({ options, value, onChange, disabled }: { o
               fontSize: 13,
               fontWeight: 700,
               background: active ? 'var(--v2-brand)' : 'var(--v2-bg-deep)',
-              color: active ? '#fff' : 'var(--v2-ink-muted)',
+              color: active ? 'var(--v2-brand-ink)' : 'var(--v2-ink-muted)',
               transition: 'background 0.15s ease, color 0.15s ease',
             }}
           >
@@ -423,6 +424,11 @@ export default function ProfilePage() {
             <div style={{ height: 1, background: 'var(--v2-line)', margin: '16px 0 14px' }} />
             <div className="v2-eyebrow" style={{ marginBottom: 8 }}>Energy</div>
             <Segmented options={ENERGY_BANDS} value={energy} onChange={(v) => { setEnergy(v); saveTaste({ energy: v }); }} />
+          </div>
+
+          <div className="v2-card" style={{ padding: '18px 20px', marginBottom: 14 }}>
+            <div className="v2-eyebrow" style={{ marginBottom: 8 }}>Appearance</div>
+            <ThemeToggle />
           </div>
 
           <div className="v2-card" style={{ padding: '8px 20px', marginBottom: 14 }}>
