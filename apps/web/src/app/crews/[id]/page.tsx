@@ -1351,40 +1351,27 @@ export default function CrewPage() {
     }
   }
 
-  // The keyboard-cutoff bug this whole block used to chase in JS (three rounds: height alone,
-  // then position:fixed + translateY(visualViewport.offsetTop) to counter the browser's own
-  // native scroll) is now handled by layout.tsx's `interactive-widget: resizes-content` viewport
-  // meta instead — the real, standards-track fix (Safari 17.4+/iOS 17.4+, Chrome 108+): it makes
-  // the BROWSER genuinely resize the layout viewport, and therefore plain `100dvh`, for the
-  // keyboard, so there is no separate native scroll left for any transform to counter in the
-  // first place. The `position: fixed` + `translateY` version of this fix was removed after live
-  // testing showed it could ITSELF introduce a spurious shift on at least one real in-app
-  // browser (Gmail's) — reconstructing "where the visible viewport really is" from
-  // `visualViewport.offsetTop` after the fact turned out to be exactly the kind of per-WebView
-  // guesswork the platform-level fix above exists to avoid needing at all. `visualViewportHeight`
-  // is kept only as a plain height value for the rare browser that doesn't understand
-  // `interactive-widget` yet, and to drive the "keep the latest message in view" scroll effect
-  // below — no positioning trick riding on top of it.
-  const chatViewportHeight = visualViewportHeight != null ? `${visualViewportHeight}px` : '100dvh';
+  // FOURTH and final round on the keyboard-cutoff bug, after three straight JS attempts (height
+  // alone; position:fixed + translateY(visualViewport.offsetTop); interactive-widget alone) each
+  // reported broken on the same real device/browser. The real problem with every JS version:
+  // this page was a fixed-height, `overflow: hidden` "app shell" with its OWN internal
+  // `overflow-y: auto` scroll region for messages — exactly the shape that fights an on-screen
+  // keyboard hardest, because the keyboard interacts with the PAGE's own scroll position, not a
+  // nested scrollable div, and every version of this fix was really just trying to out-guess
+  // that fight in JS instead of avoiding it. Below the desktop split breakpoint (see globals.css
+  // — same breakpoint `.v2-crew-split` already uses) this is no longer that shape at all: the
+  // page just scrolls normally, like almost every other page on the web, with the composer
+  // pinned via plain `position: sticky; bottom: 0` (see the `v2-crew-composer` class this JSX
+  // sets below). This is the standard, boring pattern browsers are actually built and tested to
+  // get right for a keyboard opening on a normal page — no viewport-height math left to get
+  // subtly wrong per browser/WebView. Desktop (>=1280px, no on-screen keyboard to begin with)
+  // keeps the previous fixed-height-shell-with-internal-scroll behaviour completely unchanged,
+  // via CSS media queries on those same classes — not touched by anything in this file.
+  // `visualViewportHeight` itself is kept only to re-run "scroll to the latest message" when the
+  // keyboard opens (see that effect above) — no longer anything to do with this page's layout.
 
   return (
-    // ONE flex column filling the real viewport height: the header is a natural flex-shrink:0
-    // child, the message list is the one `flex:1; min-height:0; overflow-y:auto` scroll region,
-    // and the composer is just the LAST flex child — inherently always visible at the bottom,
-    // because that is what a flex column does, not because of a number anyone calculated.
-    <div
-      className="v2"
-      style={{
-        height: chatViewportHeight,
-        // `.v2`'s own base rule (globals.css) carries `min-height: 100dvh`, a floor meant for a
-        // normal in-flow page — harmless there since `height` is otherwise `auto`, but a
-        // real gap here: `min-height` and `height` are different properties, so a smaller
-        // `height` above would silently get clamped back up to the floor. Matching it here keeps
-        // this element's own explicit height in control, same fix as it's always been.
-        minHeight: chatViewportHeight,
-        overflow: 'hidden',
-      }}
-    >
+    <div className="v2">
       <div className="v2-shell-desktop v2-crew-split" style={{ height: '100%' }}>
         {/* Desktop-only Crews rail beside the active conversation — see globals.css's
             .v2-crew-split comment: the conversation column staying a fixed, readable width is
@@ -1421,17 +1408,13 @@ export default function CrewPage() {
             </div>
           </div>
         )}
-      {/* The same keyboard-aware height as the outer wrapper above (chatViewportHeight) — correct
-          on mobile for the same reason (`.v2-crew-split` is a plain block there, so this needs a
-          real, keyboard-shrunk height to fill) but wrong on desktop: `.v2-crew-split` becomes a
-          flex row with its own `padding-top: 18px` (globals.css) there, and this element
-          re-measuring against the FULL viewport instead of its actual flex-allotted height
-          overflowed the bottom by that padding — the composer, the last flex child, sitting past
-          the visible edge, reading as "the text box isn't locked in place". Fixed with a
-          desktop-scoped `!important` override (globals.css's `.v2-crew-main`, same established
-          pattern as `.v2-sheet-root`'s own height guard) rather than changing this inline value,
-          which would break the exact case this exists for on mobile. */}
-      <div className="v2-crew-main" style={{ maxWidth: 1400, width: '100%', height: chatViewportHeight, display: 'flex', flexDirection: 'column' }}>
+      {/* No explicit height at all below the desktop breakpoint any more — this is a normal,
+          auto-height flex column now, growing with its own content the way a normal page does
+          (see this function's own comment above for the full reasoning). `.v2-crew-main`'s
+          desktop-only CSS rule (globals.css, `!important`-scoped to >=1280px, unchanged from
+          before) is what still gives it a real fixed height there, matching `.v2-crew-split`'s
+          own flex-row layout on that breakpoint. */}
+      <div className="v2-crew-main" style={{ maxWidth: 1400, width: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ flexShrink: 0 }}>
         {/* Header — HARD RESET. Real, reported feedback: "tiny Crew header, tiny social presence".
             This is now a real banner, not a slim top bar: the Crew's own identity wash fills it
@@ -1532,18 +1515,22 @@ export default function CrewPage() {
       </div>
 
         <div
+          className="v2-crew-fill v2-crew-wrap"
           style={{
-            // The one flex-fill scroll region — no explicit height anywhere here. `flex: 1`
-            // takes exactly whatever's left below the header inside .v2-crew-main's own
-            // height:100dvh, and `minHeight: 0` is the one non-obvious rule flexbox needs to let
-            // a flex child actually shrink below its content's natural height instead of
-            // overflowing its parent (the classic "flexbox scroll area" gotcha — without this
-            // the message list would just keep growing and push the composer off-screen again).
+            // `flex: 1; min-height: 0` (the classic "let a flex child actually shrink below its
+            // content's natural height" rule flexbox needs for an internal scroll region to work
+            // at all) now lives in `.v2-crew-fill`, desktop-only (globals.css) — see this
+            // function's own top-of-render comment for the full "why mobile doesn't use an
+            // internal scroll region any more" reasoning. Below that breakpoint this is just a
+            // normal block in the normal page flow, growing to whatever height its content
+            // actually needs. Bottom padding here is deliberately just `0` on mobile now — the
+            // composer itself (`.v2-crew-composer`) owns the real bottom/safe-area spacing once
+            // it's sticky, not this wrapper; `.v2-crew-wrap`'s own desktop-only override restores
+            // this wrapper's own bottom padding on that breakpoint, where the composer goes back
+            // to being a normal (non-sticky) flex child that doesn't provide it any more.
             display: 'flex',
             flexDirection: 'column',
-            flex: 1,
-            minHeight: 0,
-            padding: '4px 20px calc(env(safe-area-inset-bottom, 0px) + 14px)',
+            padding: '4px 20px 0',
             position: 'relative',
           }}
         >
@@ -1569,9 +1556,9 @@ export default function CrewPage() {
           <div
             ref={listRef}
             onScroll={handleListScroll}
-            className="v2-chat-canvas"
+            className="v2-chat-canvas v2-crew-fill v2-crew-scroll"
             style={{
-              flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 10,
+              display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 10,
               margin: '0 -20px', padding: '10px 20px 10px',
               ['--v2-chat-wash' as string]: `radial-gradient(90% 70% at 100% 0%, ${crewPair[0]}2e, transparent 65%), radial-gradient(90% 70% at 0% 100%, ${crewPair[1]}26, transparent 65%)`,
             }}
@@ -1711,7 +1698,7 @@ export default function CrewPage() {
           {error && <div style={{ color: 'var(--v2-error)', fontSize: 12.5, marginBottom: 6 }}>{error}</div>}
 
           {!solo && (
-            <form ref={composerFormRef} onSubmit={send} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexShrink: 0 }}>
+            <form ref={composerFormRef} onSubmit={send} className="v2-crew-composer" style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexShrink: 0 }}>
               <button
                 type="button"
                 onClick={() => setActionOpen(true)}

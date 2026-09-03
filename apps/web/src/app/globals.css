@@ -1072,13 +1072,12 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
     box-shadow: none;
     border-right: 1px solid var(--v2-line);
   }
-  /* Real, reported bug: this element's own inline `height: 100dvh` (correct on mobile, where
-     `.v2-crew-split` is a plain block with no height of its own) re-measured against the FULL
-     viewport here too, ignoring that `.v2-crew-split` is now a flex row with `padding-top: 18px`
-     above — overflowing the bottom of the actually-visible area by that padding and pushing the
-     composer (the last flex child) past the visible edge, reading as "the text box isn't locked
-     in place". `!important` is required to win over the inline style at all; scoped to this one
-     desktop media query so mobile's own `100dvh` (genuinely correct there) is untouched. */
+  /* This element carries NO explicit height at all in its own JSX below this breakpoint any
+     more (see crews/[id]/page.tsx's own top-of-render comment — mobile is a normal, auto-height
+     scrolling page now, not a fixed-height "app shell"), so this is the ONE place its real
+     height comes from on desktop: matching `.v2-crew-split`'s own flex-row layout and its
+     `padding-top: 18px` above. `!important` because a future inline style here (there isn't one
+     today) should never silently win back this element's height on desktop by accident. */
   /* Real, reported feedback: the conversation column staying a genuinely FIXED width (its own
      `maxWidth: 980` inline, `flex-shrink: 0` here) left a large void of bare page background
      between it and the right edge of the viewport on any screen wider than nav+rail+980px — the
@@ -1088,6 +1087,50 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
      the inline `maxWidth` is raised (see JSX) to a ceiling that only kicks in on genuinely
      ultra-wide monitors, not an ordinary wide desktop window like this bug was reported on. */
   .v2-crew-main { flex: 1 1 auto; height: calc(100dvh - 18px) !important; }
+}
+
+/* THE keyboard-cutoff fix, fourth and final round — see crews/[id]/page.tsx's own top-of-render
+   comment for the full story of what the three JS-only attempts before this got wrong. Below
+   the desktop split breakpoint (>=1280px, same one `.v2-crew-split` uses above), a Crew's chat
+   is no longer a fixed-height "app shell" with its own internal `overflow-y: auto` scroll region
+   for messages — it's a normal, auto-height page that the BODY scrolls, the way virtually every
+   other page on the web already does, with the composer pinned via plain `position: sticky;
+   bottom: 0`. This is the standard, boring pattern browsers are actually built and tested to
+   get right when an on-screen keyboard opens — no viewport-height JS left to get subtly wrong
+   per browser/WebView. `.v2-crew-fill` (the flex-fill role two different elements share — the
+   wrapper around the message list, and the message list itself) and `.v2-crew-scroll` (the
+   message list's own internal scrolling) are both no-ops below the breakpoint for exactly that
+   reason; `.v2-crew-composer` is what actually needs real mobile-specific styling, since going
+   sticky pulls it out of the flow other siblings assume around it. */
+.v2-crew-fill { }
+.v2-crew-scroll { }
+.v2-crew-composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--v2-bg);
+  /* Bleeds full-bleed edge-to-edge (cancelling the message canvas's own 20px side padding, same
+     `margin: 0 -20px` trick `.v2-chat-canvas` already uses) so the sticky background is a solid
+     strip across the whole screen width, not a floating pill with page background showing on
+     either side of it. Bottom safe-area padding lives HERE now, not on the wrapper around this
+     (below) — this element is the one actually sitting against the home-indicator/keyboard on
+     mobile once it's sticky. */
+  margin: 0 -20px;
+  padding: 10px 20px calc(env(safe-area-inset-bottom, 0px) + 14px);
+}
+@media (min-width: 1280px) {
+  .v2-crew-fill { flex: 1 1 auto; min-height: 0; }
+  .v2-crew-scroll { overflow-y: auto; }
+  /* Desktop already has this element correctly pinned as the last child of a fixed-height,
+     internally-scrolling column (`.v2-crew-main`, above) — no keyboard to avoid there in the
+     first place, so it goes back to being a completely normal flex child with none of the
+     mobile-only sticky treatment or safe-area padding (the wrapper's own bottom padding, right
+     below, takes that job back over on this breakpoint instead). */
+  .v2-crew-composer { position: static; z-index: auto; background: none; margin: 0; padding: 0; }
+  /* The wrapper's own bottom padding, mobile has this covered by `.v2-crew-composer`'s own
+     padding above (which is a real no-op on THIS breakpoint) — desktop still needs it here,
+     since nothing else on desktop provides it any more. */
+  .v2-crew-wrap { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px) !important; }
 }
 
 /* Static (non-interactive) tag pill — Profile's "Into" list. */
