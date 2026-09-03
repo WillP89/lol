@@ -647,15 +647,32 @@ export async function backfillMissingImages(maxToCheck?: number): Promise<Missin
         // level filtering (categoryStockImages.ts's pool already filters on Commons' own declared
         // size; this is defense in depth against a mismatched/corrupted response, same discipline
         // as every other image source in this app).
+        const pickedSource = imageSource;
+        const pickedUrl = imageUrl;
         if (imageUrl && imageSource && !IMAGE_QUALITY_EXEMPT_SOURCES.has(imageSource)) {
           if (await isImageQualityBad(imageUrl)) {
             imageUrl = null;
             imageSource = null;
           }
         }
-        if (imageUrl && imageSource) {
-          await prisma.experience.update({ where: { id: row.id }, data: { imageUrl, imageSource } });
-          filled += 1;
+        // Real diagnostic gap found live: a production run with FULL Commons candidate pools
+        // (real photos confirmed via categoryStockImages.ts's own "search complete" log) still
+        // finished 0/288 filled, with no error/rejection visible anywhere — meaning something
+        // between "a candidate was picked" and "the row was updated" was silently discarding it,
+        // and there was no per-row log to show which step. This makes every row's own outcome
+        // explicit rather than inferring it from an aggregate count.
+        try {
+          if (imageUrl && imageSource) {
+            await prisma.experience.update({ where: { id: row.id }, data: { imageUrl, imageSource } });
+            filled += 1;
+            logger.info({ id: row.id, name: row.name, category: row.category, imageSource }, 'Missing-image backfill: row filled');
+          } else if (pickedUrl) {
+            logger.info({ id: row.id, name: row.name, category: row.category, pickedSource, pickedUrl }, 'Missing-image backfill: candidate found but rejected by the quality gate');
+          } else {
+            logger.info({ id: row.id, name: row.name, category: row.category }, 'Missing-image backfill: no candidate found from any source');
+          }
+        } catch (err) {
+          logger.error({ err, id: row.id, name: row.name, category: row.category, imageUrl, imageSource }, 'Missing-image backfill: DB update failed for this row');
         }
       }),
     );
