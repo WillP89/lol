@@ -171,7 +171,13 @@ export default function HomePage() {
     loadUpcoming();
     api
       .get<{ experiences: Experience[] }>('/explore/experiences') // no hardcoded city — resolves to this viewer's own home city server-side
-      .then((res) => { if (!cancelled) setIdeas(res.experiences.slice(0, 6)); })
+      // Real, reported feedback: a sparse account (one Crew, nothing locked, nothing waiting on
+      // a vote) left the page reading as header + one short horizontal strip + a long dead white
+      // gap down to the tab bar — the feed simply ran out of real content early. 6 was only ever
+      // enough for the horizontal strip; pulling more here feeds the new "More nearby" grid below
+      // it too, so a quiet account still has a full page of real, live discovery content instead
+      // of empty margin.
+      .then((res) => { if (!cancelled) setIdeas(res.experiences.slice(0, 16)); })
       .catch(() => {});
     api
       .get<{ user: { displayName: string | null; email: string; avatarUrl: string | null } }>('/users/me')
@@ -673,6 +679,44 @@ export default function HomePage() {
                   );
                 })}
               </div>
+
+              {/* MORE NEARBY — real, reported feedback: a quiet account (one Crew, nothing
+                  locked, nothing waiting on a vote) left the page ending after this one short
+                  horizontal strip, with a long dead gap of empty white space down to the tab bar.
+                  Same real Explore data the strip above already fetched (just more of it) laid
+                  out as a proper two-column grid instead of a second identical scrolling row — an
+                  actual continuation of the page, not filler. Only renders when there's enough
+                  real content left over to justify it, never padded out with repeats. */}
+              {ideas.length > 4 && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 4 }}>
+                  {ideas.slice(4, 12).map((exp, i) => {
+                    const price = formatPriceFrom(exp.priceMinMinor, exp.currency);
+                    return (
+                      <Link
+                        key={exp.id}
+                        href="/explore"
+                        className="v2-reveal v2-hoverable"
+                        style={{ display: 'block', borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', ['--reveal-i' as string]: i }}
+                      >
+                        <div style={{ position: 'relative', height: 92, background: v2Art(exp.imageUrl, exp.category, exp.id) }}>
+                          {CATEGORY_TAG[exp.category] && (
+                            <span style={{ position: 'absolute', top: 7, left: 7, fontSize: 9, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase', color: '#fff', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', padding: '3px 7px', borderRadius: 100 }}>
+                              {CATEGORY_TAG[exp.category]}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ padding: '9px 10px', background: 'var(--v2-surface)' }}>
+                          <div style={{ fontWeight: 700, fontSize: 12, lineHeight: 1.3, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
+                          <div className="v2-dim" style={{ fontSize: 10 }}>
+                            {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
+                            {price && ` · ${price}`}
+                          </div>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
