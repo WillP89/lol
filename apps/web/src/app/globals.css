@@ -452,42 +452,44 @@ html[data-theme="dark"] body { background: #131316; }
 }
 .v2-collage-card:active { transform: rotate(var(--tilt, 0deg)) translateY(var(--lift, 0px)) scale(0.97); }
 
-/* The collage's idle life — real, reported feedback that the entrance screen "does not look any
-   different": an entrance fade that finishes in half a second plus a hover-only tilt reads as
-   static the moment nobody's pointer is on the page. Each card now bobs continuously around its
-   own resting tilt (using the same --tilt/--lift each card already sets inline), staggered via
-   --drift-delay so the three drift out of phase rather than in unison — reads as one considered,
-   living collage rather than a mechanical bounce. Hover's own `!important` transform still wins
-   while a pointer's actually on a card (CSS animations lose to !important declarations). */
-.v2-collage-drift { animation: v2CollageDrift 5.5s ease-in-out infinite; animation-delay: var(--drift-delay, 0s); }
+/* The collage's idle life — real, reported feedback across TWO rounds now: first "does not look
+   any different", then (after the first fix) "you have to look for it... I want it in your face
+   this time". This round deliberately overcorrects from subtle to unmissable: bigger amplitude,
+   much faster cycle. Each card bobs continuously around its own resting tilt (using the same
+   --tilt/--lift each card already sets inline), staggered via --drift-delay so the three drift
+   out of phase rather than in unison. Hover's own `!important` transform still wins while a
+   pointer's actually on a card (CSS animations lose to !important declarations). */
+.v2-collage-drift { animation: v2CollageDrift 3.2s ease-in-out infinite; animation-delay: var(--drift-delay, 0s); }
 @keyframes v2CollageDrift {
   0%, 100% { transform: rotate(var(--tilt, 0deg)) translateY(var(--lift, 0px)); }
-  50% { transform: rotate(var(--tilt, 0deg)) translateY(calc(var(--lift, 0px) - 10px)); }
+  50% { transform: rotate(var(--tilt, 0deg)) translateY(calc(var(--lift, 0px) - 22px)); }
 }
 @media (prefers-reduced-motion: reduce) { .v2-collage-drift { animation: none; } }
 
 /* THE SIGN-IN PAGE'S OWN ATMOSPHERE — see auth/page.tsx's own AuthAtmosphere comment for the
-   full "why". Three large, softly blurred colour fields drifting slowly (v2AuthDrift) behind the
-   card, plus a faint, blurred, dimmed echo of the landing page's own tilted plan-card collage
-   (v2AuthCardDrift) — both layers sit well below the card in stacking order and opacity so they
-   read as ambient life, never compete with the form. */
+   full "why". Large, softly blurred colour fields drifting (v2AuthDrift) behind the card, plus a
+   faint, blurred, dimmed echo of the landing page's own tilted plan-card collage (v2AuthCardDrift)
+   — both layers sit well below the card in stacking order and opacity so they read as ambient
+   life, never compete with the form. Second round of reported feedback ("in your face this
+   time") — noticeably faster cycles and bigger amplitude/opacity than the first pass throughout
+   this block, not just on the collage above. */
 .v2-auth-atmosphere { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
 .v2-auth-blob {
   position: absolute;
   border-radius: 50%;
   filter: blur(70px);
-  opacity: 0.28;
-  animation: v2AuthDrift 26s ease-in-out infinite;
+  opacity: 0.42;
+  animation: v2AuthDrift 9s ease-in-out infinite;
 }
 @keyframes v2AuthDrift {
   0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(5%, -6%) scale(1.08); }
-  66% { transform: translate(-6%, 5%) scale(0.95); }
+  33% { transform: translate(16%, -18%) scale(1.22); }
+  66% { transform: translate(-18%, 15%) scale(0.82); }
 }
 /* THE HERO'S "CORE" — a large, soft, breathing glow behind the headline, the landing hero's own
    stand-in for the reference site's sun: the one steady point of light everything else (particle
    field, blobs) reads as drifting around. Radial, not a flat blob, and pulses scale+opacity on
-   its own slow cycle independent of the pointer-parallax translate LandingClient sets inline on
+   its own fast cycle independent of the pointer-parallax translate LandingClient sets inline on
    this same element (parallax owns `translate`, this keyframe owns `scale`+`opacity` — two
    independent CSS properties, so they compose instead of one clobbering the other, the same
    reason the blobs above are two nested nodes rather than one element trying to own both). */
@@ -501,12 +503,12 @@ html[data-theme="dark"] body { background: #131316; }
   border-radius: 50%;
   background: radial-gradient(circle, var(--v2-pop) 0%, var(--v2-confetti-2) 45%, transparent 72%);
   filter: blur(50px);
-  opacity: 0.22;
-  animation: v2HeroCoreBreathe 7s ease-in-out infinite;
+  opacity: 0.32;
+  animation: v2HeroCoreBreathe 3.5s ease-in-out infinite;
 }
 @keyframes v2HeroCoreBreathe {
-  0%, 100% { scale: 1; opacity: 0.18; }
-  50% { scale: 1.12; opacity: 0.3; }
+  0%, 100% { scale: 1; opacity: 0.26; }
+  50% { scale: 1.35; opacity: 0.5; }
 }
 @media (prefers-reduced-motion: reduce) { .v2-hero-core { animation: none; } }
 @media (max-width: 700px) {
@@ -516,14 +518,14 @@ html[data-theme="dark"] body { background: #131316; }
 .v2-auth-drift-card {
   position: absolute;
   border-radius: 18px;
-  opacity: 0.16;
+  opacity: 0.26;
   filter: blur(1.5px);
   box-shadow: var(--v2-shadow-lg);
-  animation: v2AuthCardDrift 30s ease-in-out infinite;
+  animation: v2AuthCardDrift 8s ease-in-out infinite;
 }
 @keyframes v2AuthCardDrift {
   0%, 100% { transform: rotate(var(--tilt, 0deg)) translateY(0); }
-  50% { transform: rotate(var(--tilt, 0deg)) translateY(-16px); }
+  50% { transform: rotate(var(--tilt, 0deg)) translateY(-28px); }
 }
 @media (prefers-reduced-motion: reduce) {
   .v2-auth-blob, .v2-auth-drift-card { animation: none; }

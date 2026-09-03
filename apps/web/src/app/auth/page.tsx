@@ -143,42 +143,43 @@ function AuthForm() {
 }
 
 /**
- * THE SIGN-IN PAGE'S OWN ATMOSPHERE — second real round of reported feedback ("still no movement
- * at all... more immersive", citing a reference site built on a drifting particle field and real
- * parallax depth) — the first pass (slow blurred blobs on a timer) wasn't enough. Same primitives
- * as the landing page's own hero atmosphere (LandingClient.tsx — a live particle field, a
- * breathing "core" glow, and every layer reading the shared `--px`/`--py` pointer-parallax
- * variables with its own depth multiplier, set on the page's own root ref above) so the two
- * entrance screens genuinely match rather than one feeling like an afterthought. Still never
- * competes with the one thing that matters here — typing an email and hitting Continue: every
- * layer sits well behind the card in opacity/blur/z-index, `aria-hidden` throughout. Each blob is
- * two nested nodes (outer owns position + parallax `translate3d`, inner `.v2-auth-blob` owns its
- * size/colour + its own independent idle-drift animation) since a running CSS animation replaces
- * the whole `transform` property and would otherwise clobber the parallax offset. Respects
- * `prefers-reduced-motion` throughout (ParticleField freezes to one still frame; the drift/breathe
- * animations turn off; the parallax layer is simply never wired up at all — see
+ * THE SIGN-IN PAGE'S OWN ATMOSPHERE — third real round of reported feedback now: round one (slow
+ * blurred blobs on a timer) was "still no movement at all"; round two (a particle field +
+ * parallax, tuned subtle) was "better... but you have to look for it, I want it in your face this
+ * time". This round deliberately overcorrects — same primitives as the landing page's own hero
+ * atmosphere (LandingClient.tsx — a live particle field, a breathing "core" glow, every layer
+ * reading the shared `--px`/`--py` pointer-parallax variables with its own depth multiplier, set
+ * on the page's own root ref above), but every multiplier roughly TRIPLED from the previous round,
+ * plus the faster/bigger idle-drift and breathing-core keyframes globals.css now uses everywhere.
+ * Still never competes with the one thing that matters here — typing an email and hitting
+ * Continue: every layer sits well behind the card in opacity/blur/z-index, `aria-hidden`
+ * throughout. Each blob is two nested nodes (outer owns position + parallax `translate3d`, inner
+ * `.v2-auth-blob` owns its size/colour + its own independent idle-drift animation) since a running
+ * CSS animation replaces the whole `transform` property and would otherwise clobber the parallax
+ * offset. Respects `prefers-reduced-motion` throughout (ParticleField freezes to one still frame;
+ * the drift/breathe animations turn off; the parallax layer is simply never wired up at all — see
  * usePointerParallax's own comment).
  */
 function AuthAtmosphere() {
   return (
     <div aria-hidden className="v2-auth-atmosphere">
-      <ParticleField count={34} />
-      <div className="v2-hero-core" style={{ top: '38%', left: '50%', width: 460, height: 460, margin: '-230px 0 0 -230px', opacity: 0.16, transform: 'translate3d(calc(var(--px, 0) * 7px), calc(var(--py, 0) * 7px), 0)' }} />
+      <ParticleField count={70} />
+      <div className="v2-hero-core" style={{ top: '38%', left: '50%', width: 460, height: 460, margin: '-230px 0 0 -230px', opacity: 0.26, transform: 'translate3d(calc(var(--px, 0) * 16px), calc(var(--py, 0) * 16px), 0)' }} />
 
-      <div style={{ position: 'absolute', width: 480, height: 480, top: '-14%', left: '-10%', transform: 'translate3d(calc(var(--px, 0) * -16px), calc(var(--py, 0) * -12px), 0)' }}>
+      <div style={{ position: 'absolute', width: 480, height: 480, top: '-14%', left: '-10%', transform: 'translate3d(calc(var(--px, 0) * -42px), calc(var(--py, 0) * -32px), 0)' }}>
         <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-pop)', animationDelay: '0s' }} />
       </div>
-      <div style={{ position: 'absolute', width: 420, height: 420, bottom: '-16%', right: '-8%', transform: 'translate3d(calc(var(--px, 0) * 18px), calc(var(--py, 0) * 14px), 0)' }}>
+      <div style={{ position: 'absolute', width: 420, height: 420, bottom: '-16%', right: '-8%', transform: 'translate3d(calc(var(--px, 0) * 48px), calc(var(--py, 0) * 36px), 0)' }}>
         <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-confetti-2)', animationDelay: '-7s' }} />
       </div>
-      <div style={{ position: 'absolute', width: 360, height: 360, top: '38%', right: '18%', transform: 'translate3d(calc(var(--px, 0) * -12px), calc(var(--py, 0) * 10px), 0)' }}>
+      <div style={{ position: 'absolute', width: 360, height: 360, top: '38%', right: '18%', transform: 'translate3d(calc(var(--px, 0) * -32px), calc(var(--py, 0) * 26px), 0)' }}>
         <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-confetti-4)', animationDelay: '-14s' }} />
       </div>
 
-      <div style={{ position: 'absolute', width: 108, height: 150, top: '14%', right: '10%', transform: 'translate3d(calc(var(--px, 0) * 26px), calc(var(--py, 0) * 20px), 0)' }}>
+      <div style={{ position: 'absolute', width: 108, height: 150, top: '14%', right: '10%', transform: 'translate3d(calc(var(--px, 0) * 65px), calc(var(--py, 0) * 50px), 0)' }}>
         <div className="v2-auth-drift-card" style={{ position: 'absolute', inset: 0, background: `linear-gradient(155deg, var(--v2-confetti-1), rgba(12,12,13,0.85))`, ['--tilt' as string]: '-8deg' }} />
       </div>
-      <div style={{ position: 'absolute', width: 96, height: 132, bottom: '10%', left: '8%', transform: 'translate3d(calc(var(--px, 0) * -24px), calc(var(--py, 0) * -18px), 0)' }}>
+      <div style={{ position: 'absolute', width: 96, height: 132, bottom: '10%', left: '8%', transform: 'translate3d(calc(var(--px, 0) * -60px), calc(var(--py, 0) * -46px), 0)' }}>
         <div className="v2-auth-drift-card" style={{ position: 'absolute', inset: 0, background: `linear-gradient(155deg, var(--v2-confetti-3), rgba(12,12,13,0.85))`, ['--tilt' as string]: '10deg', animationDelay: '-10s' }} />
       </div>
     </div>

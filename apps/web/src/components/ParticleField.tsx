@@ -5,20 +5,20 @@ import { useEffect, useRef } from 'react';
 const PARTICLE_COLORS = ['#ff2f7e', '#7c5cfc', '#2f8aff', '#ffc53d', '#34d399'];
 
 /**
- * Real, reported feedback ("still no movement at all... more immersive", citing a site built on
- * a drifting star/particle field): the earlier rounds' blurred colour blobs read as a soft, slow
- * wash — genuinely alive, but not the "floating through something" depth a particle field gives.
- * This is that field, built plain (a single `<canvas>`, no charting/animation library — nothing
- * else in this codebase pulls one in either) rather than dozens of separate DOM nodes: a fixed
- * set of small soft dots in the confetti brand palette, each drifting on its own slow, gentle
- * heading and wrapping back around when it drifts off an edge, so the field never thins out or
- * needs restarting.
+ * Real, reported feedback across two rounds now — first "still no movement at all... more
+ * immersive", then (after the first particle field + parallax pass) "you have to look for it, I
+ * want it in your face this time". This round is a deliberate overcorrection from "ambient
+ * texture" to "unmissable, always moving even before you touch anything": far more particles,
+ * bigger, brighter, drifting noticeably faster, AND — the actual "in your face" difference — each
+ * one now draws a live connecting line to its nearby neighbours (the classic constellation/network
+ * effect), so the field reads as one connected, visibly shifting web rather than a scatter of
+ * static-feeling dots. Still a single `<canvas>`, no charting/animation library.
  *
- * `prefers-reduced-motion: reduce` renders exactly one still frame (real particles, just frozen)
- * and never starts the loop — texture without motion, not an empty canvas. Cleans up its own
- * animation frame and resize listener on unmount.
+ * `prefers-reduced-motion: reduce` renders exactly one still frame (real particles and their real
+ * connecting lines, just frozen) and never starts the loop. Cleans up its own animation frame and
+ * resize listener on unmount.
  */
-export function ParticleField({ count = 46 }: { count?: number }) {
+export function ParticleField({ count = 90 }: { count?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -45,23 +45,28 @@ export function ParticleField({ count = 46 }: { count?: number }) {
     resize();
     window.addEventListener('resize', resize);
 
+    // Real correction after a first attempt at this: a link radius that grew with particle count
+    // (more particles -> a LARGER radius) turned the whole screen into a dense, headline-
+    // obscuring mesh — the opposite of legible "in your face" motion. Fixed, modest radius
+    // instead — only genuinely nearby particles ever connect, so more particles means more small
+    // local clusters drifting around, never one screen-spanning web.
+    const linkRadius = 110;
     const particles = Array.from({ length: count }, () => ({
       x: Math.random() * width,
       y: Math.random() * height,
-      r: 1.2 + Math.random() * 2.4,
-      vx: (Math.random() - 0.5) * 0.12,
-      vy: (Math.random() - 0.5) * 0.12,
+      r: 1.8 + Math.random() * 3.2,
+      vx: (Math.random() - 0.5) * 0.6,
+      vy: (Math.random() - 0.5) * 0.6,
       color: PARTICLE_COLORS[Math.floor(Math.random() * PARTICLE_COLORS.length)],
-      alpha: 0.25 + Math.random() * 0.35,
-      // Each dot's own gentle brightness pulse — a plain sine, phase-offset per particle so the
-      // whole field twinkles asynchronously rather than in one unison pulse.
+      alpha: 0.45 + Math.random() * 0.4,
       pulsePhase: Math.random() * Math.PI * 2,
     }));
 
     function draw(t: number) {
       ctx!.clearRect(0, 0, width, height);
-      for (const p of particles) {
-        if (!reduceMotion) {
+
+      if (!reduceMotion) {
+        for (const p of particles) {
           p.x += p.vx;
           p.y += p.vy;
           if (p.x < -8) p.x = width + 8;
@@ -69,7 +74,32 @@ export function ParticleField({ count = 46 }: { count?: number }) {
           if (p.y < -8) p.y = height + 8;
           if (p.y > height + 8) p.y = -8;
         }
-        const twinkle = reduceMotion ? 1 : 0.65 + 0.35 * Math.sin(t / 1400 + p.pulsePhase);
+      }
+
+      // The connecting web — drawn first so the dots sit on top. Distance-faded: a line between
+      // two particles right next to each other is nearly opaque, fading to invisible right at
+      // `linkRadius`, never a hard cutoff edge.
+      ctx!.lineWidth = 1;
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const a = particles[i];
+          const b = particles[j];
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < linkRadius) {
+            ctx!.beginPath();
+            ctx!.moveTo(a.x, a.y);
+            ctx!.lineTo(b.x, b.y);
+            ctx!.strokeStyle = a.color;
+            ctx!.globalAlpha = (1 - dist / linkRadius) * 0.22;
+            ctx!.stroke();
+          }
+        }
+      }
+
+      for (const p of particles) {
+        const twinkle = reduceMotion ? 1 : 0.7 + 0.3 * Math.sin(t / 900 + p.pulsePhase);
         ctx!.beginPath();
         ctx!.arc(p.x, p.y, p.r, 0, Math.PI * 2);
         ctx!.fillStyle = p.color;
