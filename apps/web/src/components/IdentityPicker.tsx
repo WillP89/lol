@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { api, ApiError } from '@/lib/api';
 import { identityGradient, initialsOf, crewInitial } from '@/lib/identity';
 import { PLOT_AVATARS, PLOT_AVATAR_PREFIX } from '@/components/PlotAvatars';
-import { CREW_ART_THEME_IDS, CREW_ART_PREFIX, crewArtStyle, crewArtLabel } from '@/lib/crewArt';
+import { CREW_ART_PREFIX } from '@/lib/crewArt';
 
 // Matches lib/imageDimensions.ts's own MIN_IMAGE_WIDTH exactly — the app's own real HD floor, so
 // resizing down to this is never a quality downgrade anywhere the result actually gets shown.
@@ -77,13 +77,23 @@ export function IdentityPicker({
   const prefix = kind === 'avatar' ? PLOT_AVATAR_PREFIX : CREW_ART_PREFIX;
   const presetId = value?.startsWith(prefix) ? value.slice(prefix.length) : null;
   const hasRealPhoto = Boolean(value && !presetId);
-  const isCircle = kind === 'avatar';
+  // Real, live-reported bug this fixes ("it's the old version of images, not the new ones...
+  // change them to match the profile avatars"): a Crew used to pick from its OWN separate set —
+  // 8 abstract themed-poster icons (lib/crewArt.ts's night_out/festival/pub/...), a genuinely
+  // different visual system from the redrawn Plot Character collection personal identity already
+  // uses. Both kinds now share the exact same character set and the exact same circular-badge
+  // presentation — a Crew's own mascot is a Plot Character too, not a second, unrelated art
+  // style. `isCircle` (once a real avatar-vs-crew branch) is kept as a named constant rather
+  // than inlined `true` everywhere below, so the one remaining real difference (crew's own
+  // `CREW_ART_PREFIX` storage, the `themeId` vs `presetId` request body) stays obviously
+  // deliberate, not an oversight.
+  const isCircle = true;
   const initials = kind === 'avatar' ? initialsOf(name || null, email || 'plot') : crewInitial(name || 'Plot');
 
   type Slide = { kind: 'photo' } | { kind: 'preset'; id: string; label: string } | { kind: 'classic' };
   const slides: Slide[] = [
     { kind: 'photo' },
-    ...(kind === 'avatar' ? PLOT_AVATARS.map((a) => ({ kind: 'preset' as const, id: a.id, label: a.label })) : CREW_ART_THEME_IDS.map((id) => ({ kind: 'preset' as const, id, label: crewArtLabel(id) }))),
+    ...PLOT_AVATARS.map((a) => ({ kind: 'preset' as const, id: a.id, label: a.label })),
     { kind: 'classic' },
   ];
   const initialIndex = presetId ? slides.findIndex((s) => s.kind === 'preset' && s.id === presetId) : hasRealPhoto ? 0 : slides.length - 1;
@@ -296,7 +306,7 @@ export function IdentityPicker({
             const captionStyle: React.CSSProperties = { fontSize: 13, fontWeight: 800, color: 'var(--v2-ink)', textAlign: 'center' };
 
             if (slide.kind === 'photo') {
-              return isCircle ? (
+              return (
                 <button key="photo" type="button" onClick={() => (active ? inputRef.current?.click() : scrollTo(i))} style={wrapperStyle}>
                   <div style={{ ...badgeStyle, background: hasRealPhoto && value ? `url("${value}") center/cover` : 'var(--v2-bg-deep)' }}>
                     {!(hasRealPhoto && value) && (
@@ -307,59 +317,26 @@ export function IdentityPicker({
                   </div>
                   <span style={captionStyle}>Your photo</span>
                 </button>
-              ) : (
-                <button key="photo" type="button" onClick={() => (active ? inputRef.current?.click() : scrollTo(i))} style={{ ...wrapperStyle, background: hasRealPhoto && value ? `url("${value}") center/cover` : 'var(--v2-bg-deep)' }}>
-                  {!(hasRealPhoto && value) && (
-                    <svg width="20%" height="20%" viewBox="0 0 24 24" fill="none" stroke="var(--v2-ink-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="5" width="18" height="14" rx="3" /><circle cx="12" cy="12" r="3.4" /><path d="M8 5l1.5-2h5L16 5" />
-                    </svg>
-                  )}
-                  <span style={{ position: 'absolute', bottom: 16, left: 0, right: 0, textAlign: 'center', fontSize: 13, fontWeight: 800, color: hasRealPhoto ? '#fff' : 'var(--v2-ink)', textShadow: hasRealPhoto ? '0 1px 4px rgba(0,0,0,0.5)' : 'none' }}>Your photo</span>
-                </button>
               );
             }
             if (slide.kind === 'classic') {
-              return isCircle ? (
+              return (
                 <button key="classic" type="button" onClick={() => (active ? commitActive() : scrollTo(i))} style={wrapperStyle}>
                   <div style={{ ...badgeStyle, background: identityGradient(email || name || 'plot') }}>
                     <span style={{ fontFamily: "'Archivo', sans-serif", fontWeight: 800, fontSize: 56, color: 'rgba(255,255,255,0.95)' }}>{initials}</span>
                   </div>
                   <span style={captionStyle}>Classic</span>
                 </button>
-              ) : (
-                <button key="classic" type="button" onClick={() => (active ? commitActive() : scrollTo(i))} style={{ ...wrapperStyle, background: identityGradient(email || name || 'plot') }}>
-                  <span style={{ fontFamily: "'Archivo', sans-serif", fontWeight: 800, fontSize: 56, color: 'rgba(255,255,255,0.95)' }}>{initials}</span>
-                  <span style={{ position: 'absolute', bottom: 16, left: 0, right: 0, textAlign: 'center', fontSize: 13, fontWeight: 800, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>Classic</span>
-                </button>
               );
             }
-            // preset
-            return isCircle ? (
+            // preset — a Plot Character badge, the same set and the same circular presentation
+            // for both a person's own identity and a Crew's (see `isCircle`'s own comment above).
+            return (
               <button key={slide.id} type="button" onClick={() => (active ? commitActive() : scrollTo(i))} style={wrapperStyle}>
                 <div style={badgeStyle}>
                   <svg width="100%" height="100%" viewBox="0 0 40 40">{PLOT_AVATARS.find((a) => a.id === slide.id)?.render()}</svg>
                 </div>
                 <span style={captionStyle}>{label}</span>
-              </button>
-            ) : (
-              // Real, live-reported bug this fixes ("Still not working! They're the same as old
-              // build"): crewArtStyle() already gives each of its three layers (the off-centre
-              // hero icon, the small echo icon, the wash) its OWN size via the `/58% auto` and
-              // `/22% auto` syntax inside the `background` shorthand — that's the entire poster
-              // composition. A separate `backgroundSize: 'cover'` declared alongside it is a
-              // LONGHAND for the same underlying property, and a longhand declared after a
-              // shorthand always wins for that sub-property, regardless of which one is "more
-              // specific" — so `cover` was silently overriding all three per-layer sizes,
-              // scaling every layer (including both icons) up to fill/crop the entire card. The
-              // result was one giant, roughly-centred icon dominating the frame — exactly the
-              // "flat generic icon on a colour blob" look crewArtAvatarStyle's own header comment
-              // already named as the specific bug the poster composition was built to avoid, back
-              // when it was accidentally only reaching the small badge/avatar scale. `cover` was
-              // never correct here; crewArtStyle()'s own sizing is the entire point.
-              <button key={slide.id} type="button" onClick={() => (active ? commitActive() : scrollTo(i))} style={{ ...wrapperStyle, background: crewArtStyle(slide.id) }}>
-                <span style={{ position: 'absolute', bottom: 16, left: 0, right: 0, textAlign: 'center', fontSize: 13, fontWeight: 800, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
-                  {label}
-                </span>
               </button>
             );
           })}

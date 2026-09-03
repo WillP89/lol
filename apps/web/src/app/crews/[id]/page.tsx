@@ -682,10 +682,12 @@ export default function CrewPage() {
     el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
   }, [draft]);
   const router = useRouter();
-  // The real source of truth for "how much space do I actually have" on mobile — see
-  // lib/useVisualViewportHeight.ts. `null` until the API has fired once (SSR, or a browser
-  // without it), so every usage below falls back to the existing `dvh` calc in that case.
-  const visualViewportHeight = useVisualViewportHeight();
+  // The real source of truth for "how much space do I actually have, and where does it actually
+  // start" on mobile — see lib/useVisualViewportHeight.ts. `null` until the API has fired once
+  // (SSR, or a browser without it), so every usage below falls back to the existing static `dvh`
+  // layout in that case.
+  const visualViewport = useVisualViewportHeight();
+  const visualViewportHeight = visualViewport?.height ?? null;
 
   // The composer's "+" action sheet — one entry point into every way of adding something to
   // the conversation beyond plain text (see docs/DECISIONS.md#decision-objects).
@@ -1359,20 +1361,50 @@ export default function CrewPage() {
   // bottom of it — so the browser's own "scroll the focused input into view above the keyboard"
   // behaviour has no choice but to scroll the WHOLE fixed-height column upward, dragging the
   // header (and however much message history that requires) up past the visible top edge.
-  // `visualViewportHeight` (this component's own hook, already computed above, but never
-  // actually wired into this element's real height — it only drove the auto-scroll effect)
-  // genuinely shrinks the moment the keyboard appears, so the flex column now shrinks WITH it —
-  // the composer stays the last, always-visible flex child inside a container that already fits
-  // the real visible area, and the browser never needs to scroll the page at all to reveal it.
+  //
+  // SECOND real bug the height-only version of this fix still had, found from a live follow-up
+  // report ("it should be LOCKED at the bottom of screen, no ability to move the whole
+  // interface"): shrinking a STATIC-positioned element's height to match the keyboard is not, on
+  // its own, enough — iOS Safari's native "scroll the focused input into view" behaviour still
+  // runs independently, on the LAYOUT viewport (which never resizes), scrolling the page by some
+  // amount this app doesn't control. A height fix with no positioning fix just let that native
+  // scroll and this component's own shrink compound: the container ended up the right SIZE,
+  // sitting at the wrong PLACE — the composer floating with a dead gap below it, not glued to the
+  // keyboard. Pinning the container with `position: fixed` and countering that native scroll with
+  // `transform: translateY(visualViewport.offsetTop)` (the live measurement of exactly how far
+  // that scroll has shifted things) keeps it glued to whatever is ACTUALLY visible right now,
+  // regardless of what the browser's own scroll does underneath it — this is what "LOCKED" means
+  // in practice: nothing left for the browser's own scroll-into-view to do, because the container
+  // was never waiting on it in the first place.
   const chatViewportHeight = visualViewportHeight != null ? `${visualViewportHeight}px` : '100dvh';
+  const chatViewportOffset = visualViewport?.offsetTop ?? 0;
 
   return (
     // ONE flex column filling the real, keyboard-aware viewport height: the header is a natural
     // flex-shrink:0 child, the message list is the one `flex:1; min-height:0; overflow-y:auto`
     // scroll region, and the composer is just the LAST flex child — inherently always visible at
     // the bottom, because that is what a flex column does, not because of a number anyone
-    // calculated.
-    <div className="v2" style={{ height: chatViewportHeight, overflow: 'hidden' }}>
+    // calculated. `position: fixed` + the translateY below is what actually keeps that column
+    // glued to the real visible viewport — see this function's own comment just above.
+    <div
+      className="v2"
+      style={{
+        position: 'fixed', top: 0, left: 0, right: 0, height: chatViewportHeight,
+        // Real bug found live-testing THIS fix, not a hypothetical: `.v2`'s own base rule
+        // (globals.css) carries `min-height: 100dvh` — a floor meant for a normal in-flow page
+        // (so a short one still fills the screen), harmless there since `height` is otherwise
+        // `auto`. It is NOT harmless here: `min-height` and `height` are different properties, so
+        // the inline `height` above (correctly shrunk to the keyboard-aware value) does not
+        // override it — min/max-height always clamp the final used size regardless of which rule
+        // set `height` — and since `100dvh` doesn't shrink for the keyboard either (the same iOS
+        // Safari fact this whole fix exists for), that floor silently clamped this container's
+        // real height straight back up to the full static viewport, undoing the fix. An explicit
+        // inline `minHeight` on the very same property is what actually wins over it.
+        minHeight: chatViewportHeight,
+        transform: chatViewportOffset ? `translateY(${chatViewportOffset}px)` : undefined,
+        overflow: 'hidden',
+      }}
+    >
       <div className="v2-shell-desktop v2-crew-split" style={{ height: '100%' }}>
         {/* Desktop-only Crews rail beside the active conversation — see globals.css's
             .v2-crew-split comment: the conversation column staying a fixed, readable width is

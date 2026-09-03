@@ -17,15 +17,27 @@ import { useEffect, useState } from 'react';
  * fall back to a `dvh`-based CSS value when it returns null (SSR, or a browser old enough not to
  * have the API at all — desktop browsers all have it, but nothing here depends on it there since
  * there's no on-screen keyboard to react to).
+ *
+ * `offsetTop` is the other half of the same real bug ("the whole interface moves, it should be
+ * LOCKED"): shrinking a STATIC-positioned element's height to match the visual viewport is not,
+ * on its own, enough — iOS Safari's own "scroll the focused input into view above the keyboard"
+ * behaviour still runs independently on the LAYOUT viewport (which never resizes), scrolling the
+ * whole page by some amount the app does not control. A height fix with no positioning fix just
+ * lets that native scroll and the app's own shrink compound: the container ends up the right
+ * SIZE, sitting at the wrong PLACE — exactly the reported "composer floats with a dead gap below
+ * it" symptom. `visualViewport.offsetTop` is the live measurement of exactly how far the native
+ * scroll has shifted the visual viewport from the layout viewport's own top edge; a caller that
+ * pins itself with `position: fixed` and offsets by this value stays glued to whatever is
+ * ACTUALLY visible right now, regardless of what the browser's own scroll does underneath it.
  */
-export function useVisualViewportHeight(): number | null {
-  const [height, setHeight] = useState<number | null>(null);
+export function useVisualViewportHeight(): { height: number; offsetTop: number } | null {
+  const [state, setState] = useState<{ height: number; offsetTop: number } | null>(null);
 
   useEffect(() => {
     const vv = typeof window !== 'undefined' ? window.visualViewport : null;
     if (!vv) return;
     function update() {
-      setHeight(vv!.height);
+      setState({ height: vv!.height, offsetTop: vv!.offsetTop });
     }
     update();
     vv.addEventListener('resize', update);
@@ -36,5 +48,5 @@ export function useVisualViewportHeight(): number | null {
     };
   }, []);
 
-  return height;
+  return state;
 }

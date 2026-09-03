@@ -75,12 +75,19 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 
-  // Curated Crew art — authored abstract/editorial themes (web/lib/crewArt.ts), the honest
-  // stand-in for real licensed lifestyle photography this pass has no budget/credentials for.
-  // Same marker-string pattern as the Plot avatar preset above: `plot-crew-art:<id>`, validated
-  // against the same fixed theme set the picker offers.
+  // Real, live-reported bug this fixes ("the avatar section for the crews... change them to
+  // match the profile avatars"): a Crew's own mark used to be one of 8 authored abstract/
+  // editorial themes (an honest stand-in for real licensed lifestyle photography this pass has
+  // no budget/credentials for) — a genuinely different id space from the redrawn Plot Character
+  // collection personal identity picks from. web/components/IdentityPicker.tsx now offers a
+  // Crew the exact same character set as a person's own identity, so this enum has to match the
+  // web picker's real id list byte-for-byte, exactly as POST /users/me/avatar/preset's own
+  // PresetSchema already does for personal avatars (see that route's own comment for the
+  // "silently 400s on every real request" bug that mismatch caused once already — this enum is
+  // updated in the same commit as the picker, specifically so it can't happen again here). Same
+  // marker-string storage as before: `plot-crew-art:<id>`, just a new set of valid ids.
   const CrewArtSchema = z.object({
-    themeId: z.enum(['night_out', 'festival', 'food', 'pub', 'outdoors', 'house_party', 'city', 'road_trip']),
+    themeId: z.enum(['sparky', 'blink', 'gummy', 'drift', 'nova', 'pip', 'zag', 'ember', 'lull', 'patch', 'puff', 'flare']),
   });
   app.post('/crews/:id/image/preset', async (request, reply) => {
     if (!requireUser(request, reply)) return;
