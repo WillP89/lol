@@ -98,7 +98,7 @@ interface PexelsPhoto {
 }
 interface PexelsSearchResponse { photos?: PexelsPhoto[] }
 
-async function fetchCandidatePool(query: string, apiKey: string): Promise<EnrichedImage[]> {
+async function fetchCandidatePool(query: string, apiKey: string): Promise<{ images: EnrichedImage[]; rawCount: number }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -109,6 +109,7 @@ async function fetchCandidatePool(query: string, apiKey: string): Promise<Enrich
     });
     if (!res.ok) throw new Error(`Pexels search returned ${res.status}`);
     const body = (await res.json()) as PexelsSearchResponse;
+    const rawCount = body.photos?.length ?? 0;
     const candidates: EnrichedImage[] = [];
     for (const photo of body.photos ?? []) {
       // Validated against the ORIGINAL photo's real declared dimensions (the same "how big is the
@@ -124,15 +125,32 @@ async function fetchCandidatePool(query: string, apiKey: string): Promise<Enrich
       if (ratio < MIN_ASPECT_RATIO || ratio > MAX_ASPECT_RATIO) continue;
       candidates.push({ url, sourcePage: photo.alt || query });
     }
-    return candidates;
+    return { images: candidates, rawCount };
   } finally {
     clearTimeout(timer);
   }
 }
 
+// Real diagnostic gap found live: a production run filled 0/288 rows with NO warning logged for
+// either Commons or Pexels — meaning both searches were either succeeding but finding nothing
+// past the quality filter, or (for Pexels specifically) silently no-op'ing because the key wasn't
+// actually being read, and this file had no way to tell those two very different situations
+// apart from a log. `missingKeyLogged` makes the silent case loud (once, not once per row —
+// hundreds of identical warnings would be noise, not signal) and every fresh (non-cached) search
+// now logs its raw/filtered candidate counts at info level regardless of outcome, so the NEXT run
+// answers "was the key even read" and "did Pexels find anything at all" directly from the logs
+// instead of another round of inference.
+let missingKeyLogged = false;
+
 async function getCandidatePool(category: string): Promise<EnrichedImage[]> {
   const apiKey = config.PEXELS_API_KEY;
-  if (!apiKey) return []; // no key configured — a clean, logged-once no-op, not a crash
+  if (!apiKey) {
+    if (!missingKeyLogged) {
+      logger.warn('PEXELS_API_KEY is not configured — the Pexels real-photo fallback tier is a no-op until it is set.');
+      missingKeyLogged = true;
+    }
+    return [];
+  }
 
   const query = CATEGORY_SEARCH_QUERY[category] ?? DEFAULT_QUERY;
   const cached = pool.get(category);
@@ -141,10 +159,11 @@ async function getCandidatePool(category: string): Promise<EnrichedImage[]> {
     if (Date.now() - cached.fetchedAt < ttl) return cached.images;
   }
 
-  const images = await fetchCandidatePool(query, apiKey).catch((err) => {
+  const { images, rawCount } = await fetchCandidatePool(query, apiKey).catch((err) => {
     logger.warn({ err, category, query }, 'Pexels category-stock image search failed — continuing without one');
-    return [];
+    return { images: [] as EnrichedImage[], rawCount: 0 };
   });
+  logger.info({ category, query, rawCount, keptCount: images.length }, 'Pexels category-stock search complete');
   pool.set(category, { images, fetchedAt: Date.now() });
   return images;
 }
