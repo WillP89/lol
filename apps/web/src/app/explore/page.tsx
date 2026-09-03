@@ -437,10 +437,33 @@ export default function ExplorePage() {
       </div>
       <h2 className="v2-display" style={{ fontSize: 23, marginBottom: 6 }}>{selected.name}</h2>
       <div className="v2-muted" style={{ fontSize: 13.5, marginBottom: 14 }}>
-        {selected.venue.name} · {formatWhen(selected.startsAt)}
-        {formatPrice(selected) && ` · ${formatPrice(selected)}`}
+        {selected.venue.name} · {formatWhen(selected.startsAt)} ·{' '}
+        {/* Real, live-reported bug this fixes ("the event details... should be available...
+            so they can see what the cost and details are"): when a provider genuinely doesn't
+            give Plot a structured price (see providers/live/skiddle.ts#parseEntryPrice's own
+            honest-null comment — a real gap in some listings' own source data, not a Plot bug),
+            the price segment used to just vanish from this line entirely, with nothing telling
+            someone why — reads as a broken/missing feature, not an honestly-unknown fact. Saying
+            so explicitly, and pointing at the original listing below for the real number, beats
+            silently omitting it. */}
+        {formatPrice(selected) || 'Price not listed here'}
       </div>
-      {selected.description && <p style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--v2-ink-muted)', marginBottom: 20 }}>{selected.description}</p>}
+      {selected.description && <p style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--v2-ink-muted)', marginBottom: 16 }}>{selected.description}</p>}
+      {/* Same "see the real source" escape hatch already shipped on the Plan detail page
+          (plans/[slug]/page.tsx) — full price tiers, age restrictions, seating, whatever the
+          provider's own page has that Plot's own normalized fields were never going to carry.
+          Especially the only way to see real cost/details when the line above says "not listed". */}
+      {selected.listings?.[0]?.externalUrl && (
+        <a
+          href={selected.listings[0].externalUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="v2-btn v2-btn-ghost v2-tap-feedback"
+          style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+        >
+          View full details &amp; pricing ↗
+        </a>
+      )}
       <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={() => setPickingCrew(true)}>
         Share to Crew →
       </button>
