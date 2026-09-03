@@ -89,3 +89,71 @@ describe('mediaStorage: upload timeout', () => {
     expect(url).toMatch(/^https:\/\/pub-test\.r2\.dev\/crew-.+\.png$/);
   });
 });
+
+/**
+ * THIRD real, live-reported bug: "Something went wrong." on a real phone photo picked from the
+ * library — a phone photo is routinely several MB, easily over the app's own 6MB cap, and
+ * @fastify/multipart enforces that cap at the STREAM level (throwing FST_REQ_FILE_TOO_LARGE from
+ * inside `file.toBuffer()`) — a genuinely different code path from `saveUpload`'s own byte-length
+ * check (services/mediaStorage.ts's own `MAX_BYTES`), which only ever sees a buffer that already
+ * made it past the stream. Every route used to call `request.file()`/`file.toBuffer()` OUTSIDE
+ * its own try/catch, so that specific error bypassed every one of this app's own clean messages
+ * and fell straight through to Fastify's generic 500 handler. readMultipartUpload centralises the
+ * read so this translation happens exactly once, for every upload route.
+ */
+describe('mediaStorage: readMultipartUpload — the real fix for "Something went wrong." on an oversized phone photo', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  function fakeRequest(fileImpl: () => Promise<unknown>) {
+    return { file: fileImpl } as unknown as import('fastify').FastifyRequest;
+  }
+
+  test('a file exceeding the size limit is translated into the app\'s own clean MediaValidationError, not a raw multipart error', async () => {
+    const { readMultipartUpload, MediaValidationError } = await import('../../src/lib/mediaStorage');
+    const tooLargeError = Object.assign(new Error('request file too large'), { code: 'FST_REQ_FILE_TOO_LARGE' });
+    const request = fakeRequest(async () => ({
+      mimetype: 'image/jpeg',
+      toBuffer: async () => { throw tooLargeError; },
+    }));
+
+    await expect(readMultipartUpload(request)).rejects.toBeInstanceOf(MediaValidationError);
+    await expect(readMultipartUpload(request)).rejects.toThrow('Image must be under 6MB.');
+  });
+
+  test('the same translation applies when request.file() itself throws the size error (busboy can throw at either point)', async () => {
+    const { readMultipartUpload, MediaValidationError } = await import('../../src/lib/mediaStorage');
+    const tooLargeError = Object.assign(new Error('request file too large'), { code: 'FST_REQ_FILE_TOO_LARGE' });
+    const request = fakeRequest(async () => { throw tooLargeError; });
+
+    await expect(readMultipartUpload(request)).rejects.toBeInstanceOf(MediaValidationError);
+  });
+
+  test('a genuinely unexpected multipart failure is rethrown as-is, not mislabelled as a size error', async () => {
+    const { readMultipartUpload, MediaValidationError } = await import('../../src/lib/mediaStorage');
+    const weirdError = new Error('stream was destroyed');
+    const request = fakeRequest(async () => ({
+      mimetype: 'image/jpeg',
+      toBuffer: async () => { throw weirdError; },
+    }));
+
+    const rejection = readMultipartUpload(request).catch((e) => e);
+    await expect(rejection).resolves.toBe(weirdError);
+    await expect(rejection).resolves.not.toBeInstanceOf(MediaValidationError);
+  });
+
+  test('no file provided resolves to null, same as before — never throws for the ordinary "nothing selected" case', async () => {
+    const { readMultipartUpload } = await import('../../src/lib/mediaStorage');
+    const request = fakeRequest(async () => undefined);
+    await expect(readMultipartUpload(request)).resolves.toBeNull();
+  });
+
+  test('a normal upload reads through untouched — buffer and mimetype pass through exactly as the file provided them', async () => {
+    const { readMultipartUpload } = await import('../../src/lib/mediaStorage');
+    const realBuffer = Buffer.from('real-image-bytes');
+    const request = fakeRequest(async () => ({ mimetype: 'image/png', toBuffer: async () => realBuffer }));
+
+    await expect(readMultipartUpload(request)).resolves.toEqual({ buffer: realBuffer, mimeType: 'image/png' });
+  });
+});
