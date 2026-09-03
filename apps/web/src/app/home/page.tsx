@@ -171,13 +171,7 @@ export default function HomePage() {
     loadUpcoming();
     api
       .get<{ experiences: Experience[] }>('/explore/experiences') // no hardcoded city — resolves to this viewer's own home city server-side
-      // Real, reported feedback: a sparse account (one Crew, nothing locked, nothing waiting on
-      // a vote) left the page reading as header + one short horizontal strip + a long dead white
-      // gap down to the tab bar — the feed simply ran out of real content early. 6 was only ever
-      // enough for the horizontal strip; pulling more here feeds the new "More nearby" grid below
-      // it too, so a quiet account still has a full page of real, live discovery content instead
-      // of empty margin.
-      .then((res) => { if (!cancelled) setIdeas(res.experiences.slice(0, 16)); })
+      .then((res) => { if (!cancelled) setIdeas(res.experiences.slice(0, 6)); })
       .catch(() => {});
     api
       .get<{ user: { displayName: string | null; email: string; avatarUrl: string | null } }>('/users/me')
@@ -554,17 +548,17 @@ export default function HomePage() {
                       style={{ ['--reveal-i' as string]: i, textDecoration: 'none', color: 'inherit' }}
                     >
                       <div style={{ position: 'relative', flexShrink: 0 }}>
-                        <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(185,131,42,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a5f1f' }}>
-                          <IconPoll size={19} />
+                        <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(185,131,42,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a5f1f' }}>
+                          <IconPoll size={22} />
                         </div>
-                        <div className="v2-live-dot" style={{ position: 'absolute', top: -1, right: -1, width: 12, height: 12, borderRadius: '50%', background: '#b9832a', boxShadow: '0 0 0 2.5px var(--v2-bg)', ['--dot-glow' as string]: 'rgba(185,131,42,0.5)' }} />
+                        <div className="v2-live-dot" style={{ position: 'absolute', top: -1, right: -1, width: 13, height: 13, borderRadius: '50%', background: '#b9832a', boxShadow: '0 0 0 2.5px var(--v2-bg)', ['--dot-glow' as string]: 'rgba(185,131,42,0.5)' }} />
                       </div>
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#8a5f1f', marginBottom: 3 }}>Vote needed</div>
-                        <div className="v2-display" style={{ fontSize: 15.5, lineHeight: 1.25, marginBottom: 2, fontWeight: 700 }}>{plan.title}</div>
-                        <div className="v2-muted" style={{ fontSize: 12 }}>{c.name} · {plan.inCount}/{plan.totalMembers} voted</div>
+                        <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#8a5f1f', marginBottom: 4 }}>Vote needed</div>
+                        <div className="v2-display" style={{ fontSize: 17.5, lineHeight: 1.25, marginBottom: 3, fontWeight: 700 }}>{plan.title}</div>
+                        <div className="v2-muted" style={{ fontSize: 13 }}>{c.name} · {plan.inCount}/{plan.totalMembers} voted</div>
                       </div>
-                      <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 800, color: '#fff', background: '#b9832a', padding: '8px 14px', borderRadius: 100 }}>Vote →</span>
+                      <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 800, color: '#fff', background: '#b9832a', padding: '10px 16px', borderRadius: 100 }}>Vote →</span>
                     </Link>
                   );
                 }
@@ -577,19 +571,19 @@ export default function HomePage() {
                       className="v2-notify-row tone-event v2-reveal"
                       style={{ ['--reveal-i' as string]: i, textDecoration: 'none', color: 'inherit' }}
                     >
-                      <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(27,122,77,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1b7a4d', flexShrink: 0 }}>
-                        <IconCalendar size={19} />
+                      <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(27,122,77,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1b7a4d', flexShrink: 0 }}>
+                        <IconCalendar size={22} />
                       </div>
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#1b7a4d', marginBottom: 3 }}>Locked in</div>
-                        <div className="v2-display" style={{ fontSize: 15.5, lineHeight: 1.25, marginBottom: 2, fontWeight: 700 }}>{plan.title}</div>
-                        <div className="v2-muted" style={{ fontSize: 12 }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#1b7a4d', marginBottom: 4 }}>Locked in</div>
+                        <div className="v2-display" style={{ fontSize: 17.5, lineHeight: 1.25, marginBottom: 3, fontWeight: 700 }}>{plan.title}</div>
+                        <div className="v2-muted" style={{ fontSize: 13 }}>
                           {c.name}
                           {plan.startsAt && ` · ${new Date(plan.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}`}
                           {plan.venueName && ` · ${plan.venueName}`}
                         </div>
                       </div>
-                      <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 800, color: '#fff', background: 'var(--v2-green)', padding: '8px 14px', borderRadius: 100 }}>View →</span>
+                      <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 800, color: '#fff', background: 'var(--v2-green)', padding: '10px 16px', borderRadius: 100 }}>View →</span>
                     </Link>
                   );
                 }
@@ -609,29 +603,29 @@ export default function HomePage() {
                     style={{ ['--reveal-i' as string]: i, textDecoration: 'none', color: 'inherit' }}
                   >
                     <div style={{ position: 'relative', flexShrink: 0 }}>
-                      <PersonAvatar name={c.latestMessage!.authorName} email={c.latestMessage!.authorName} photoUrl={c.latestMessage!.authorAvatarUrl} size={44} />
+                      <PersonAvatar name={c.latestMessage!.authorName} email={c.latestMessage!.authorName} photoUrl={c.latestMessage!.authorAvatarUrl} size={52} />
                       {(c.unreadCount > 0 || justArrived) && (
-                        <div className={`v2-pop-in${justArrived ? ' v2-live-dot' : ''}`} style={{ position: 'absolute', bottom: -1, right: -1, width: 12, height: 12, borderRadius: '50%', background: 'var(--v2-pop)', boxShadow: '0 0 0 2.5px var(--v2-bg)', ['--dot-glow' as string]: 'rgba(255,47,126,0.5)' }} />
+                        <div className={`v2-pop-in${justArrived ? ' v2-live-dot' : ''}`} style={{ position: 'absolute', bottom: -1, right: -1, width: 13, height: 13, borderRadius: '50%', background: 'var(--v2-pop)', boxShadow: '0 0 0 2.5px var(--v2-bg)', ['--dot-glow' as string]: 'rgba(255,47,126,0.5)' }} />
                       )}
                     </div>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       {isPlotMessage && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--v2-pop)', marginBottom: 3 }}>
-                          <IconGathering size={11} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--v2-pop)', marginBottom: 4 }}>
+                          <IconGathering size={12} />
                           Plot
                         </div>
                       )}
-                      <div className="v2-display" style={{ fontSize: 15.5, lineHeight: 1.3, marginBottom: 2, fontWeight: isPlotMessage || c.unreadCount > 0 ? 700 : undefined }}>
+                      <div className="v2-display" style={{ fontSize: 17.5, lineHeight: 1.3, marginBottom: 3, fontWeight: isPlotMessage || c.unreadCount > 0 ? 700 : undefined }}>
                         {isPlotMessage ? messagePreview(c.latestMessage!.body) : <>&ldquo;{messagePreview(c.latestMessage!.body)}&rdquo;</>}
                       </div>
-                      <div className="v2-muted" style={{ fontSize: 12 }}>
+                      <div className="v2-muted" style={{ fontSize: 13 }}>
                         {isPlotMessage ? c.name : (<><strong style={{ color: 'var(--v2-ink)' }}>{c.latestMessage!.authorName}</strong> in {c.name}</>)} · {justArrived ? 'just now' : timeAgo(c.latestMessage!.createdAt)}
                       </div>
                     </div>
                     {isPlotMessage ? (
-                      <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 800, color: '#fff', background: 'var(--v2-pop)', padding: '8px 14px', borderRadius: 100 }}>View →</span>
+                      <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 800, color: '#fff', background: 'var(--v2-pop)', padding: '10px 16px', borderRadius: 100 }}>View →</span>
                     ) : c.unreadCount > 0 ? (
-                      <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: 10.5, fontWeight: 800, color: '#fff', background: 'var(--v2-pop)', borderRadius: 100, minWidth: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>
+                      <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: 11.5, fontWeight: 800, color: '#fff', background: 'var(--v2-pop)', borderRadius: 100, minWidth: 23, height: 23, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>
                         {c.unreadCount > 9 ? '9+' : c.unreadCount}
                       </span>
                     ) : null}
@@ -679,46 +673,30 @@ export default function HomePage() {
                   );
                 })}
               </div>
-
-              {/* MORE NEARBY — real, reported feedback: a quiet account (one Crew, nothing
-                  locked, nothing waiting on a vote) left the page ending after this one short
-                  horizontal strip, with a long dead gap of empty white space down to the tab bar.
-                  Same real Explore data the strip above already fetched (just more of it) laid
-                  out as a proper two-column grid instead of a second identical scrolling row — an
-                  actual continuation of the page, not filler. Only renders when there's enough
-                  real content left over to justify it, never padded out with repeats. */}
-              {ideas.length > 4 && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 4 }}>
-                  {ideas.slice(4, 12).map((exp, i) => {
-                    const price = formatPriceFrom(exp.priceMinMinor, exp.currency);
-                    return (
-                      <Link
-                        key={exp.id}
-                        href="/explore"
-                        className="v2-reveal v2-hoverable"
-                        style={{ display: 'block', borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', ['--reveal-i' as string]: i }}
-                      >
-                        <div style={{ position: 'relative', height: 92, background: v2Art(exp.imageUrl, exp.category, exp.id) }}>
-                          {CATEGORY_TAG[exp.category] && (
-                            <span style={{ position: 'absolute', top: 7, left: 7, fontSize: 9, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase', color: '#fff', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', padding: '3px 7px', borderRadius: 100 }}>
-                              {CATEGORY_TAG[exp.category]}
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ padding: '9px 10px', background: 'var(--v2-surface)' }}>
-                          <div style={{ fontWeight: 700, fontSize: 12, lineHeight: 1.3, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
-                          <div className="v2-dim" style={{ fontSize: 10 }}>
-                            {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
-                            {price && ` · ${price}`}
-                          </div>
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
             </div>
           )}
+
+          {/* THE BRAND MOMENT — real, reported feedback on an earlier attempt to fill this same
+              space: piling in MORE event cards just turned Home into a second copy of Explore.
+              This isn't discovery, it's Plot explaining itself — the one thing an event listing
+              can't do. A quiet page (nothing locked, nothing to vote on) is exactly the moment
+              worth spending on "here's what I'm actually doing for you" instead of more listings,
+              so this sits fixed at the bottom of the page rather than only appearing when the
+              feed above runs short — it's not filler, it's the product's own voice. */}
+          <div className="fade-up v2-brand-moment" style={{ marginTop: 28 }}>
+            <span className="v2-plotfound-mark" style={{ color: 'var(--v2-pop)' }}><IconGathering size={20} /></span>
+            <div className="v2-eyebrow" style={{ margin: '10px 0 6px' }}>How Plot works</div>
+            <div className="v2-display" style={{ fontSize: 19, lineHeight: 1.25, marginBottom: 8 }}>
+              {crews && crews.length > 0
+                ? "It's not just a list of events."
+                : 'Start a Crew and Plot goes to work.'}
+            </div>
+            <p className="v2-muted" style={{ fontSize: 13.5, lineHeight: 1.6, margin: 0 }}>
+              {crews && crews.length > 0
+                ? "Plot learns what each Crew actually says yes to, then quietly puts together the next thing worth doing — so “we should do something” turns into a real plan, without anyone having to chase it."
+                : "Bring your people in, tell Plot what your Crew's into, and it'll start finding the plans worth putting to a vote — automatically, from then on."}
+            </p>
+          </div>
         </div>
 
         {/* THE DESKTOP DISCOVER RAIL — real content under the "Discover" header, not empty
