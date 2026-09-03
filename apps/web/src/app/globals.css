@@ -471,6 +471,20 @@ html[data-theme="dark"] body { background: #131316; }
 }
 .v2-collage-card:active { transform: rotate(var(--tilt, 0deg)) translateY(var(--lift, 0px)) scale(0.97); }
 
+/* The collage's idle life — real, reported feedback that the entrance screen "does not look any
+   different": an entrance fade that finishes in half a second plus a hover-only tilt reads as
+   static the moment nobody's pointer is on the page. Each card now bobs continuously around its
+   own resting tilt (using the same --tilt/--lift each card already sets inline), staggered via
+   --drift-delay so the three drift out of phase rather than in unison — reads as one considered,
+   living collage rather than a mechanical bounce. Hover's own `!important` transform still wins
+   while a pointer's actually on a card (CSS animations lose to !important declarations). */
+.v2-collage-drift { animation: v2CollageDrift 5.5s ease-in-out infinite; animation-delay: var(--drift-delay, 0s); }
+@keyframes v2CollageDrift {
+  0%, 100% { transform: rotate(var(--tilt, 0deg)) translateY(var(--lift, 0px)); }
+  50% { transform: rotate(var(--tilt, 0deg)) translateY(calc(var(--lift, 0px) - 10px)); }
+}
+@media (prefers-reduced-motion: reduce) { .v2-collage-drift { animation: none; } }
+
 /* THE SIGN-IN PAGE'S OWN ATMOSPHERE — see auth/page.tsx's own AuthAtmosphere comment for the
    full "why". Three large, softly blurred colour fields drifting slowly (v2AuthDrift) behind the
    card, plus a faint, blurred, dimmed echo of the landing page's own tilted plan-card collage
