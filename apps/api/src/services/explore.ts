@@ -15,7 +15,14 @@ const EXPLORE_LIMIT = 200;
 // though every row this file queries has one in practice — kept nullable here rather than
 // asserted non-null, so a genuinely orphaned row (a Venue hard-deleted out from under it) fails
 // the radius distance check below instead of crashing the request.
-type ExperienceWithVenue = Experience & { venue: Venue | null };
+// `listings` (real bug fix: "the event details... should be able to see what the cost and
+// details are") is Experience's own real link back to its source provider page — `externalUrl`
+// itself lives on ProviderListing, not on Experience (see schema.prisma), so it was never on
+// this shape at all before, and Explore's detail sheet had no way to point someone at the real
+// listing for whatever Plot's own normalized fields don't carry (full price tiers, seating,
+// terms). Same field, same shape (`listings: { externalUrl }[]`), as the Plan detail page
+// already exposes for exactly this reason — one convention, not two.
+type ExperienceWithVenue = Experience & { venue: Venue | null; listings: { externalUrl: string }[] };
 
 export interface ExplorePersonalisationResult {
   experiences: ExperienceWithVenue[];
@@ -129,7 +136,7 @@ export async function listExploreExperiences(city: string, userId?: string, opts
       startsAt: { gte: windowStart, lte: windowEnd },
       venue: { city },
     },
-    include: { venue: true },
+    include: { venue: true, listings: { select: { externalUrl: true }, take: 1, orderBy: { lastRefreshedAt: 'desc' } } },
     orderBy: { startsAt: 'asc' },
     take: EXPLORE_LIMIT,
   });
@@ -175,7 +182,7 @@ export async function listExploreExperiencesByRadius(
       startsAt: { gte: windowStart, lte: windowEnd },
       venue: { city: { in: places.map((p) => p.name) } },
     },
-    include: { venue: true },
+    include: { venue: true, listings: { select: { externalUrl: true }, take: 1, orderBy: { lastRefreshedAt: 'desc' } } },
     orderBy: { startsAt: 'asc' },
     // Wider net than the single-city limit — several cities' worth of rows get distance-filtered
     // below, so this needs enough headroom that a genuinely close result from a smaller synced

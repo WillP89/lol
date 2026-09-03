@@ -16,6 +16,15 @@ export interface ExploreExperience {
   priceMaxMinor?: number | null;
   currency: string;
   imageUrl?: string | null;
+  // Real bug this fixes: "the event details... should be available... so they can see what the
+  // cost and details are" — some providers (Skiddle in particular) genuinely don't give us a
+  // structured price for every listing (see providers/live/skiddle.ts#parseEntryPrice's own
+  // honest-null comment). `externalUrl` itself lives on the related ProviderListing, not on
+  // Experience (see schema.prisma) — services/explore.ts now includes it as `listings`, same
+  // shape the Plan detail page already exposes for the identical "see the real source" job. Lets
+  // the detail sheet point someone at the source listing for whatever Plot's own normalized
+  // fields don't carry, instead of silently having no price line at all.
+  listings?: { externalUrl: string }[];
   venue: { name: string; latitude: number; longitude: number };
 }
 

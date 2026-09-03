@@ -197,7 +197,20 @@ export function BottomSheet({
           // height + its own scroll means the sheet always fits, however short the window is.
           maxHeight: 'calc(100dvh - 40px)',
           overflowY: 'auto',
-          padding: '10px 20px calc(env(safe-area-inset-bottom, 0px) + 20px)',
+          // Real, live-reported bug this fixes ("the box at top is cut off and doesn't look
+          // aligned"): top padding used to live here (10px) and get cancelled out by a matching
+          // negative top margin on the handle bar below, so the handle could sit flush against
+          // the panel's rounded top edge. That negative-margin/sticky combination measured out
+          // fine in isolation but, once this panel actually had a `position: sticky` handle
+          // sitting inside a `overflow-y: auto` scroll container, resolved a few px short of the
+          // handle's own margin-bottom — the very next element (a step's heading, e.g. "Send
+          // ... to...") started rendering UNDER the still-opaque, higher-stacking-order handle
+          // bar, clipping its top few pixels. Moving the "flush to the top edge" job onto the
+          // padding itself (0, not 10, with the handle providing its own clean marginBottom
+          // below) reaches the identical flush-top visual without any negative-margin trick for
+          // a sticky element's positioning to fight — content after it now reliably clears the
+          // handle by exactly its own margin, not an emergent, easy-to-regress number.
+          padding: '0 20px calc(env(safe-area-inset-bottom, 0px) + 20px)',
           // While actively dragging, the panel follows the finger exactly (dragY, no easing —
           // any transition lag here would read as laggy/disconnected from the touch); once
           // released, the normal eased transition takes back over for both the "spring back
@@ -222,7 +235,7 @@ export function BottomSheet({
           aria-label="Drag down or tap to close"
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%',
-            padding: '14px 0 10px', margin: '-10px 0 4px', position: 'sticky', top: 0, zIndex: 2,
+            padding: '14px 0 10px', margin: '0 0 4px', position: 'sticky', top: 0, zIndex: 2,
             background: 'var(--v2-surface)', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none',
           }}
         >
