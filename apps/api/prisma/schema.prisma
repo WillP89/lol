@@ -577,6 +577,12 @@ enum ImageSource {
   // once a specific artist/venue/team photo couldn't be found — the last resort before leaving
   // imageUrl null, so no event is ever left showing the generated category-art graphic instead of
   // a real photograph. See docs/DECISIONS.md#category-stock-images.
+  PEXELS_STOCK // lib/pexelsStockImages.ts — the SAME category-appropriate real-photo fallback as
+  // CATEGORY_STOCK above, sourced from Pexels instead of Wikimedia Commons. A genuinely separate
+  // source, not a duplicate: Wikimedia's own edge infrastructure returns a hard 403 to this app's
+  // real Render deployment (confirmed from production logs), which very likely also defeats
+  // CATEGORY_STOCK's Commons search silently — Pexels doesn't share that infra or blocking
+  // posture. See docs/DECISIONS.md#category-stock-images.
   MANUAL // POST /admin/experiences/manual — an operator-entered real photo URL
 }
 

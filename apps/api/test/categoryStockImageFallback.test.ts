@@ -10,10 +10,17 @@ import type { ProviderAdapter, RawListing, CanonicalListingInput } from '../src/
  * imageUrl: null (which would mean the web app's own generated category-art graphic is all that's
  * left to show for it). `enrichImageFromWikipedia` isn't mocked here — the real function is used,
  * and (as in this sandbox generally) its own outbound fetch fails/is blocked, which is exactly the
- * "no Wikipedia match" case this test needs; `getCategoryStockImage` IS mocked, the same pattern
- * imageResolutionFloor.test.ts already uses for isImageQualityBad, since this test is about
- * syncProvider's own wiring/fallback order, not about re-proving the Commons search logic itself
- * (see test/unit/categoryStockImages.test.ts for that).
+ * "no Wikipedia match" case this test needs.
+ *
+ * Both `getCategoryStockImage` (Commons) and `getPexelsStockImage` (Pexels) ARE mocked, the same
+ * pattern imageResolutionFloor.test.ts already uses for isImageQualityBad — this test is about
+ * syncProvider's own wiring/fallback ORDER across all four tiers, not about re-proving either
+ * search's own logic (see test/unit/categoryStockImages.test.ts and
+ * test/unit/pexelsStockImages.test.ts for that). Pexels exists as a genuinely separate,
+ * independently-tried tier — not a hypothetical — because of a real, production-confirmed fact:
+ * Wikimedia's own edge infrastructure returns a hard 403 to this app's real Render deployment,
+ * which very likely defeats Commons search too even though it's a different endpoint on the same
+ * domain family (see pexelsStockImages.ts's own header for the full story).
  */
 vi.mock('../src/lib/categoryStockImages', async () => {
   const actual = await vi.importActual<typeof import('../src/lib/categoryStockImages')>('../src/lib/categoryStockImages');
@@ -24,8 +31,17 @@ vi.mock('../src/lib/categoryStockImages', async () => {
     ),
   };
 });
+vi.mock('../src/lib/pexelsStockImages', async () => {
+  const actual = await vi.importActual<typeof import('../src/lib/pexelsStockImages')>('../src/lib/pexelsStockImages');
+  return {
+    ...actual,
+    getPexelsStockImage: vi.fn(async (category: string) =>
+      category === 'RESTAURANT' ? { url: 'https://images.pexels.com/real-restaurant-interior.jpg', sourcePage: 'Restaurant interior' } : null,
+    ),
+  };
+});
 
-function noImageAdapter(category: 'LIVE_MUSIC' | 'RESTAURANT', name: string): ProviderAdapter {
+function noImageAdapter(category: 'LIVE_MUSIC' | 'RESTAURANT' | 'COMEDY', name: string): ProviderAdapter {
   return {
     id: 'no_image_test_adapter',
     displayName: 'No-image test adapter',
@@ -68,8 +84,9 @@ describe('category-stock image fallback — no event left without a real photo',
     await resetDatabase();
   });
 
-  test('a listing with no provider image and no Wikipedia match still gets a real, category-appropriate photo', async () => {
+  test('a listing with no provider image and no Wikipedia match gets a real photo from Commons (tier 1)', async () => {
     const { syncProvider } = await import('../src/services/inventorySync');
+    const { getPexelsStockImage } = await import('../src/lib/pexelsStockImages');
     const { prisma } = await import('../src/lib/prisma');
     const params = { city: 'Category Stock Test City', fromDate: new Date(), toDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) };
 
@@ -79,9 +96,12 @@ describe('category-stock image fallback — no event left without a real photo',
     expect(experience).not.toBeNull();
     expect(experience!.imageUrl).toBe('https://upload.wikimedia.org/real-concert-crowd.jpg');
     expect(experience!.imageSource).toBe('CATEGORY_STOCK');
+    // Commons already answered — Pexels must never even be called (cost/latency: no point
+    // querying a second real-photo source once the first one already found something).
+    expect(getPexelsStockImage).not.toHaveBeenCalled();
   });
 
-  test('a listing where even the category-stock search comes up empty is left null, never a fabricated url', async () => {
+  test('a listing where Commons comes up empty falls through to a real photo from Pexels (tier 2)', async () => {
     const { syncProvider } = await import('../src/services/inventorySync');
     const { prisma } = await import('../src/lib/prisma');
     const params = { city: 'Category Stock Test City 2', fromDate: new Date(), toDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) };
@@ -89,6 +109,18 @@ describe('category-stock image fallback — no event left without a real photo',
     await syncProvider(noImageAdapter('RESTAURANT', 'Totally Unmatched Diner'), params);
 
     const experience = await prisma.experience.findFirst({ where: { name: 'Totally Unmatched Diner' } });
+    expect(experience!.imageUrl).toBe('https://images.pexels.com/real-restaurant-interior.jpg');
+    expect(experience!.imageSource).toBe('PEXELS_STOCK');
+  });
+
+  test('a listing where every real-photo tier comes up empty is left null, never a fabricated url', async () => {
+    const { syncProvider } = await import('../src/services/inventorySync');
+    const { prisma } = await import('../src/lib/prisma');
+    const params = { city: 'Category Stock Test City 3', fromDate: new Date(), toDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) };
+
+    await syncProvider(noImageAdapter('COMEDY', 'Totally Unmatched Comedy Night'), params);
+
+    const experience = await prisma.experience.findFirst({ where: { name: 'Totally Unmatched Comedy Night' } });
     expect(experience!.imageUrl).toBeNull();
     expect(experience!.imageSource).toBeNull();
   });

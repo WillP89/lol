@@ -49,6 +49,23 @@ const EnvSchema = z.object({
   // Register a real key at thesportsdb.com/documentation and set this once sync volume
   // justifies it. See docs/providers/food-and-places.md.
   SPORTSDB_API_KEY: z.string().optional(),
+  // The category-appropriate real-photo fallback (lib/pexelsStockImages.ts) — the tier tried when
+  // a listing has no provider photo AND no specific artist/venue/team match (Wikipedia/
+  // TheSportsDB above, or Commons search — lib/categoryStockImages.ts). Real, live-confirmed
+  // reason this exists as a SEPARATE source rather than relying on Commons alone: Wikimedia's own
+  // edge infrastructure (en.wikipedia.org AND commons.wikimedia.org both sit behind it) returns a
+  // hard 403 to every request from this app's actual Render deployment — confirmed directly from
+  // Render's own production logs, not a sandbox artifact or a guess — the well-documented anti-
+  // "cloud/datacenter IP" posture many sites' edge/WAF layers take, unrelated to anything this
+  // app's own request shape does right or wrong. Pexels' API is built specifically for exactly
+  // this kind of server-side integration (that's its entire product) and doesn't share Wikimedia's
+  // infra or blocking posture. Free key, no billing: pexels.com/api -> sign up -> API key, ~2
+  // minutes. Unset means this tier is skipped (a clear, logged no-op), never a crash — same
+  // graceful-degradation contract as every other optional provider key in this file; Commons
+  // search stays in the chain too (harmless, and would recover on its own if Wikimedia's block
+  // were ever specific to the REST summary endpoint rather than the whole domain family), but
+  // this key is what actually makes the "no event without a real image" guarantee hold today.
+  PEXELS_API_KEY: z.string().optional(),
   // "Describe your Crew/yourself and Plot sets up your taste for you" — services/aiTasteSetup.ts.
   // Same optional-provider pattern as every key above: unset means the feature returns a clear
   // "not configured yet" error rather than crashing, never a silent no-op. Get a key at
