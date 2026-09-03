@@ -689,6 +689,47 @@ export default function CrewPage() {
   // for why this stays a plain height, not a positioning system.
   const visualViewportHeight = useVisualViewportHeight();
 
+  // THE COMPOSER'S RESIDUAL KEYBOARD GAP — real, reported feedback on a real device (screenshot):
+  // the round-4 rebuild above (plain page scroll + `.v2-crew-composer`'s own `position: sticky;
+  // bottom: 0`) got the composer close, "much much better", but not flush — a strip of the
+  // page's own background sat between the composer and the true top of the keyboard in at least
+  // one real in-app browser (Gmail's own WebView). `position: sticky`'s `bottom: 0` is measured
+  // against the LAYOUT viewport; layout.tsx's `interactive-widget: resizes-content` is supposed
+  // to keep that equal to the real visible area once the keyboard opens, but evidently doesn't
+  // fully account for this WebView's own chrome stacked above the keyboard, leaving that layout
+  // viewport (and so `bottom: 0`'s reference point) taller than what's actually visible.
+  //
+  // `window.visualViewport` is the older, more universally-honoured API for exactly this — it
+  // reports the TRUE visible area regardless of whether `interactive-widget` is fully supported.
+  // This measures the gap between what `bottom: 0` currently assumes (`window.innerHeight`) and
+  // what's actually visible (`visualViewport.height + visualViewport.offsetTop`), and nudges the
+  // composer's own `bottom` by exactly that difference — a correction, not a guess: zero wherever
+  // `interactive-widget` is already fully honoured (the sticky default stays untouched), the
+  // exact residual gap size wherever it isn't. Unlike the `position: fixed` + `translateY` attempt
+  // an earlier round tried and reverted, this never takes the element out of the normal sticky
+  // flow or fabricates a whole coordinate system from `offsetTop` — sticky stays sticky; this only
+  // ever adjusts the one number sticky already uses for where "0" is.
+  const [composerBottomGap, setComposerBottomGap] = useState(0);
+  useEffect(() => {
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    if (!vv) return;
+    function measure() {
+      const trueVisibleBottom = vv!.height + vv!.offsetTop;
+      const gap = window.innerHeight - trueVisibleBottom;
+      // Clamped: never negative (nothing to correct the other way — sticky's own default is
+      // already at least as good), and capped so a momentarily inconsistent reading mid-keyboard-
+      // animation can't fling the composer far off-screen.
+      setComposerBottomGap(Math.min(Math.max(gap, 0), 400));
+    }
+    measure();
+    vv.addEventListener('resize', measure);
+    vv.addEventListener('scroll', measure);
+    return () => {
+      vv.removeEventListener('resize', measure);
+      vv.removeEventListener('scroll', measure);
+    };
+  }, []);
+
   // The composer's "+" action sheet — one entry point into every way of adding something to
   // the conversation beyond plain text (see docs/DECISIONS.md#decision-objects).
   const [actionOpen, setActionOpen] = useState(false);
@@ -903,14 +944,30 @@ export default function CrewPage() {
   const hasScrolledOnceRef = useRef(false);
   const [newMessagesPill, setNewMessagesPill] = useState(false);
 
+  // Real bug this closes: below the desktop breakpoint (globals.css's `.v2-crew-scroll`,
+  // >=1280px) the message list is plain in-flow content now — the PAGE scrolls, not this div
+  // (see the round-4 rework above). `el.scrollTo`/`el.scrollTop` are silent no-ops on an element
+  // that isn't actually a scroll container, so "scroll to latest message" and "am I near the
+  // bottom" both went quietly dead on mobile the moment that architecture changed. Check which
+  // regime is actually live (the CSS class, not a hardcoded breakpoint number) rather than
+  // assuming desktop's.
+  function listScrollsInternally() {
+    const el = listRef.current;
+    return !!el && getComputedStyle(el).overflowY !== 'visible';
+  }
   function handleListScroll() {
     const el = listRef.current;
-    if (!el) return;
+    if (!el || !listScrollsInternally()) return;
     nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
     if (nearBottomRef.current) setNewMessagesPill(false);
   }
   function scrollToBottom(smooth: boolean) {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    if (listScrollsInternally()) {
+      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    } else {
+      const doc = document.scrollingElement || document.documentElement;
+      window.scrollTo({ top: doc.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    }
     nearBottomRef.current = true;
     setNewMessagesPill(false);
   }
@@ -924,6 +981,22 @@ export default function CrewPage() {
     if (nearBottomRef.current) scrollToBottom(true);
     else setNewMessagesPill(true);
   }, [messages]);
+
+  // The mobile half of the same fix: `onScroll={handleListScroll}` (on the list div, below) only
+  // ever fires when that div is the thing actually scrolling — on mobile the PAGE scrolls, so
+  // near-bottom tracking needs its own window-level listener there instead. Cheap to leave this
+  // attached at every width; it's a no-op read on desktop (handleListScroll bails out via
+  // listScrollsInternally() there, so this and that never fight over nearBottomRef).
+  useEffect(() => {
+    function handleWindowScroll() {
+      if (listScrollsInternally()) return;
+      const doc = document.scrollingElement || document.documentElement;
+      nearBottomRef.current = doc.scrollHeight - window.scrollY - window.innerHeight < 120;
+      if (nearBottomRef.current) setNewMessagesPill(false);
+    }
+    window.addEventListener('scroll', handleWindowScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleWindowScroll);
+  }, []); // eslint-disable-line
 
   // The keyboard opening/closing shrinks or grows visualViewportHeight, which resizes this
   // container — if you were already reading the latest message, keep it in view through that
@@ -1698,7 +1771,16 @@ export default function CrewPage() {
           {error && <div style={{ color: 'var(--v2-error)', fontSize: 12.5, marginBottom: 6 }}>{error}</div>}
 
           {!solo && (
-            <form ref={composerFormRef} onSubmit={send} className="v2-crew-composer" style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexShrink: 0 }}>
+            <form
+              ref={composerFormRef}
+              onSubmit={send}
+              className="v2-crew-composer"
+              // `bottom` here overrides the CSS class's own `bottom: 0` only when a real keyboard
+              // gap has been measured (see composerBottomGap above) — 0 is a no-op, identical to
+              // the class default. Desktop's own `position: static` override (globals.css, >=1280px)
+              // ignores `bottom` entirely, so this is always safe there regardless of the value.
+              style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexShrink: 0, bottom: composerBottomGap }}
+            >
               <button
                 type="button"
                 onClick={() => setActionOpen(true)}
