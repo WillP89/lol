@@ -7,6 +7,7 @@ import { buildCanonicalKey } from './entityResolution';
 import { computeQualityScore } from './qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { enrichImageFromWikipedia, enrichImageFromTheSportsDb } from '../lib/imageEnrichment';
+import { getCategoryStockImage } from '../lib/categoryStockImages';
 import { isImageQualityBad } from '../lib/imageDimensions';
 import { config } from '../lib/config';
 
@@ -74,6 +75,19 @@ export async function syncProvider(
         if (enriched) {
           canonicalInput.imageUrl = enriched.url;
           canonicalInput.imageSource = sportBadge ? 'THESPORTSDB' : 'WIKIPEDIA';
+        } else {
+          // Real, explicit product directive: "I don't want to see ANY events without a real
+          // image" — a generic listing ("Quiz Night at The Anchor") has no Wikipedia page to
+          // enrich from, but it's still a real, identifiable TYPE of event. This is the true last
+          // resort before a listing is left with imageUrl null (and the web app's own generated
+          // category-art graphic — lib/v2Art.ts — is all that's left to show): a real, live-
+          // searched Wikimedia Commons photograph matching the category. See
+          // lib/categoryStockImages.ts's own header for the full reasoning.
+          const stock = await getCategoryStockImage(canonicalInput.category, canonicalInput.name);
+          if (stock) {
+            canonicalInput.imageUrl = stock.url;
+            canonicalInput.imageSource = 'CATEGORY_STOCK';
+          }
         }
       }
       // THE real, provider-agnostic quality floor (see lib/imageDimensions.ts's own header
@@ -560,5 +574,127 @@ export async function runImageQualityBackfillIfDue(
     data: { lastRunAt: new Date(), lastResult: result as unknown as Prisma.InputJsonValue },
   });
   logger.info({ event: 'image_quality_backfill_ran', ...result }, 'Image quality backfill: ran (database confirmed it was due)');
+  return { ran: true, result };
+}
+
+export interface MissingImageBackfillResult {
+  checked: number;
+  filled: number;
+}
+
+/**
+ * THE RETROACTIVE HALF of the real-image directive — real, explicit, repeated product instruction:
+ * "I don't want to see ANY events without a real image." syncProvider's own enrichment chain
+ * (provider photo -> Wikipedia/TheSportsDB -> lib/categoryStockImages.ts's live Commons search —
+ * see that function's own call site above) only protects a row the MOMENT it's (re)synced. A row
+ * already sitting in the database from before that chain existed (or from before the
+ * categoryStockImages tier was added) keeps `imageUrl: null` — and the web app's own generated
+ * category-art graphic — until that row's city happens to be resynced again, exactly the same gap
+ * backfillImageQuality above already exists to close for the dimension floor. Same fix, same
+ * shape, for "has no image at all" instead of "has a bad one": re-run the FULL enrichment chain
+ * against every existing null-image row, once, on this exact deploy, rather than waiting on
+ * whatever that row's own resync cadence happens to be.
+ *
+ * A `MANUAL` row is never targeted here — imageUrl is only null in the first place if no operator
+ * has uploaded one; there's nothing to preserve for a row this query would ever touch.
+ */
+export async function backfillMissingImages(maxToCheck?: number): Promise<MissingImageBackfillResult> {
+  // Same single-upfront-query reasoning as backfillImageQuality above — this function's own WHERE
+  // clause is `imageUrl: null`, and this function is exactly the thing that mutates that field, so
+  // a re-queried cursor loop would have the identical off-by-one hazard that function's own header
+  // comment documents. One snapshot, taken before any writes happen, removes the moving target.
+  const candidates = await prisma.experience.findMany({
+    where: { imageUrl: null },
+    select: { id: true, name: true, category: true },
+    orderBy: { id: 'asc' },
+    ...(maxToCheck !== undefined ? { take: maxToCheck } : {}),
+  });
+
+  let filled = 0;
+  for (let i = 0; i < candidates.length; i += BACKFILL_CONCURRENCY) {
+    const batch = candidates.slice(i, i + BACKFILL_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (row) => {
+        const sportBadge = row.category === 'SPORT' ? await enrichImageFromTheSportsDb(row.name) : null;
+        const enriched = sportBadge ?? (await enrichImageFromWikipedia(row.name));
+        let imageUrl: string | null = null;
+        let imageSource: 'THESPORTSDB' | 'WIKIPEDIA' | 'CATEGORY_STOCK' | null = null;
+        if (enriched) {
+          imageUrl = enriched.url;
+          imageSource = sportBadge ? 'THESPORTSDB' : 'WIKIPEDIA';
+        } else {
+          const stock = await getCategoryStockImage(row.category, row.name);
+          if (stock) {
+            imageUrl = stock.url;
+            imageSource = 'CATEGORY_STOCK';
+          }
+        }
+        // Same real, provider-agnostic quality floor as syncProvider — a THESPORTSDB badge is
+        // exempt (see IMAGE_QUALITY_EXEMPT_SOURCES's own comment), everything else found here gets
+        // byte-verified before it's trusted onto a row, not just this function's own metadata-
+        // level filtering (categoryStockImages.ts's pool already filters on Commons' own declared
+        // size; this is defense in depth against a mismatched/corrupted response, same discipline
+        // as every other image source in this app).
+        if (imageUrl && imageSource && !IMAGE_QUALITY_EXEMPT_SOURCES.has(imageSource)) {
+          if (await isImageQualityBad(imageUrl)) {
+            imageUrl = null;
+            imageSource = null;
+          }
+        }
+        if (imageUrl && imageSource) {
+          await prisma.experience.update({ where: { id: row.id }, data: { imageUrl, imageSource } });
+          filled += 1;
+        }
+      }),
+    );
+  }
+
+  const checked = candidates.length;
+  logger.info({ checked, filled }, 'Missing-image backfill complete');
+  return { checked, filled };
+}
+
+export const MISSING_IMAGE_BACKFILL_JOB_NAME = 'missing_image_backfill';
+
+/** Same DB-backed "is a run actually due" atomic claim as claimImageQualityBackfillIfDue above —
+ *  see that function's own comment for the full reasoning. A separate scheduler row: this job
+ *  targets `imageUrl: null` rows, a disjoint set from the dimension-floor backfill's own
+ *  `imageUrl: { not: null }` targets, so the two never compete over the same rows in one run. */
+async function claimMissingImageBackfillIfDue(dueIntervalMs: number): Promise<boolean> {
+  const cutoff = new Date(Date.now() - dueIntervalMs);
+  const now = new Date();
+
+  await prisma.schedulerState.upsert({
+    where: { jobName: MISSING_IMAGE_BACKFILL_JOB_NAME },
+    update: {},
+    create: { jobName: MISSING_IMAGE_BACKFILL_JOB_NAME },
+  });
+
+  const claim = await prisma.schedulerState.updateMany({
+    where: { jobName: MISSING_IMAGE_BACKFILL_JOB_NAME, OR: [{ lastClaimedAt: null }, { lastClaimedAt: { lt: cutoff } }] },
+    data: { lastClaimedAt: now },
+  });
+
+  return claim.count === 1;
+}
+
+/**
+ * The one function server.ts (and, in principle, an external cron hitting
+ * `POST /admin/missing-image-backfill`) should call — see runImageQualityBackfillIfDue above for
+ * the full "why not a bare setInterval/one-shot boot call" reasoning; identical shape here.
+ */
+export async function runMissingImageBackfillIfDue(
+  dueIntervalMs: number,
+): Promise<{ ran: boolean; result?: MissingImageBackfillResult }> {
+  const claimed = await claimMissingImageBackfillIfDue(dueIntervalMs);
+  if (!claimed) {
+    return { ran: false };
+  }
+  const result = await backfillMissingImages();
+  await prisma.schedulerState.update({
+    where: { jobName: MISSING_IMAGE_BACKFILL_JOB_NAME },
+    data: { lastRunAt: new Date(), lastResult: result as unknown as Prisma.InputJsonValue },
+  });
+  logger.info({ event: 'missing_image_backfill_ran', ...result }, 'Missing-image backfill: ran (database confirmed it was due)');
   return { ran: true, result };
 }
