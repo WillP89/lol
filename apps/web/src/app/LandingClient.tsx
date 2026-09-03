@@ -84,7 +84,7 @@ export default function LandingClient() {
           aria-hidden
           style={{
             flex: '0 0 auto', display: 'flex', gap: 14, margin: '0 auto',
-            transform: 'rotate(-2deg) translate3d(calc(var(--px, 0) * 22px), calc(var(--py, 0) * 16px), 0)',
+            transform: 'rotate(-2deg) translate3d(calc(var(--px, 0) * 60px), calc(var(--py, 0) * 44px), 0)',
           }}
         >
           {cards.map(([when, what, color], i) => (
@@ -160,36 +160,35 @@ export default function LandingClient() {
 }
 
 /**
- * THE HERO'S OWN ATMOSPHERE — second real round of reported feedback: the first pass (slow
- * blurred colour blobs drifting on a timer) was judged "still no movement at all... more
- * immersive", pointing at a reference site built around a drifting particle field and real
- * depth/parallax. This is that: a live `<canvas>` particle field (ParticleField), a large
- * breathing "core" glow standing in for the reference's sun, and — the actual difference a
- * parallax scene makes over ambient drift — every layer here reads the shared `--px`/`--py`
- * pointer-parallax variables (usePointerParallax, set on the hero's own ref above) with its own
- * depth multiplier: the particle field and core barely move (background), the blobs shift a
- * little more (midground), the plan-card collage over in the hero content shifts the most
- * (foreground) — the whole scene visibly responds to the cursor, not just to a clock. Each blob
- * is two nested nodes on purpose: the outer positions it and owns the parallax `translate3d`, the
- * inner (`.v2-auth-blob`) owns its size/colour and its own idle drift animation — a CSS animation
- * replaces the WHOLE `transform` property while running, so parallax and idle-drift need separate
- * elements to compose rather than fight over one. `aria-hidden` throughout; every animation here
- * (drift, breathe, particle motion) respects `prefers-reduced-motion`, and the parallax layer is
- * simply never wired up for reduced-motion or touch-only visitors (see usePointerParallax) — no
- * broken half-effect, just the plain still/idle version.
+ * THE HERO'S OWN ATMOSPHERE — third real round of reported feedback now: round one (slow blurred
+ * blobs on a timer) was "still no movement at all... more immersive"; round two (a particle field
+ * + parallax, but tuned subtle) was "better... but you have to look for it, I want it in your
+ * face this time". This round is a deliberate, large overcorrection on both fronts — a much
+ * denser, faster, brighter particle field (ParticleField's own comment covers that half), and
+ * every parallax depth multiplier below roughly TRIPLED from the previous round, plus faster/
+ * bigger idle-drift and a faster/bigger-swinging breathing core (globals.css) — the whole scene
+ * should be unmissably, continuously moving even before the cursor touches it, and shift hard and
+ * obviously once it does. Each blob is two nested nodes on purpose: the outer positions it and
+ * owns the parallax `translate3d`, the inner (`.v2-auth-blob`) owns its size/colour and its own
+ * idle drift animation — a CSS animation replaces the WHOLE `transform` property while running,
+ * so parallax and idle-drift need separate elements to compose rather than fight over one.
+ * `aria-hidden` throughout; every animation here (drift, breathe, particle motion) respects
+ * `prefers-reduced-motion`, and the parallax layer is simply never wired up for reduced-motion or
+ * touch-only visitors (see usePointerParallax) — no broken half-effect, just the plain still/idle
+ * version, at the same (louder) idle-drift amplitude as everyone else now gets.
  */
 function LandingAtmosphere() {
   return (
     <div aria-hidden className="v2-auth-atmosphere">
-      <ParticleField count={54} />
-      <div className="v2-hero-core" style={{ transform: 'translate3d(calc(var(--px, 0) * 8px), calc(var(--py, 0) * 8px), 0)' }} />
-      <div style={{ position: 'absolute', width: 560, height: 560, top: '-20%', left: '-14%', transform: 'translate3d(calc(var(--px, 0) * -18px), calc(var(--py, 0) * -14px), 0)' }}>
+      <ParticleField count={120} />
+      <div className="v2-hero-core" style={{ transform: 'translate3d(calc(var(--px, 0) * 20px), calc(var(--py, 0) * 20px), 0)' }} />
+      <div style={{ position: 'absolute', width: 560, height: 560, top: '-20%', left: '-14%', transform: 'translate3d(calc(var(--px, 0) * -50px), calc(var(--py, 0) * -38px), 0)' }}>
         <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-pop)', animationDelay: '0s' }} />
       </div>
-      <div style={{ position: 'absolute', width: 480, height: 480, bottom: '-22%', right: '-10%', transform: 'translate3d(calc(var(--px, 0) * 20px), calc(var(--py, 0) * 16px), 0)' }}>
+      <div style={{ position: 'absolute', width: 480, height: 480, bottom: '-22%', right: '-10%', transform: 'translate3d(calc(var(--px, 0) * 55px), calc(var(--py, 0) * 42px), 0)' }}>
         <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-confetti-2)', animationDelay: '-9s' }} />
       </div>
-      <div style={{ position: 'absolute', width: 380, height: 380, top: '30%', right: '8%', transform: 'translate3d(calc(var(--px, 0) * -14px), calc(var(--py, 0) * 12px), 0)' }}>
+      <div style={{ position: 'absolute', width: 380, height: 380, top: '30%', right: '8%', transform: 'translate3d(calc(var(--px, 0) * -38px), calc(var(--py, 0) * 32px), 0)' }}>
         <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-confetti-4)', animationDelay: '-17s' }} />
       </div>
     </div>
