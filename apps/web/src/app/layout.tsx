@@ -32,6 +32,22 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
+  // THE real, platform-level fix for the on-screen-keyboard-in-chat class of bug this session
+  // spent two whole rounds chasing in JS (crews/[id]/page.tsx's own useVisualViewportHeight +
+  // position:fixed + translateY dance) — and which STILL wasn't reliable on a real device inside
+  // Gmail's in-app browser (a different WKWebView host than plain Safari, evidently with its own
+  // quirks in exactly how/when it fires visualViewport resize events). `interactive-widget:
+  // resizes-content` (Safari 17.4+/iOS 17.4+, Chrome 108+ — both comfortably old news by now) is
+  // the standards-track instruction that tells the browser itself to genuinely resize the LAYOUT
+  // viewport — and therefore plain `100dvh` — for the on-screen keyboard, the same way it
+  // already does for the address bar collapsing. With this set, the browser does the real work
+  // at the platform level instead of the app trying to reconstruct it from `visualViewport`
+  // events after the fact — no app-level timing/ordering assumption to get subtly wrong per
+  // WebView flavour. The existing JS fallback (useVisualViewportHeight) stays in place for the
+  // rare browser that doesn't understand this yet — it becomes a safe no-op wherever this meta
+  // is honoured (visualViewport.height already equals the resized dvh in that case, offsetTop
+  // stays 0), never a second, conflicting resize on top of this one.
+  interactiveWidget: 'resizes-content',
 };
 
 // Real, well-known problem this avoids: reading the theme choice and applying `data-theme` from
