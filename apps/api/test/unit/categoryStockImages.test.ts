@@ -8,12 +8,12 @@ import { getCategoryStockImage, __resetCategoryStockImageCacheForTests } from '.
  * failure) against a mocked `fetch` built from the search API's real, documented response shape,
  * not a live call.
  */
-function commonsPage(id: number, title: string, width: number, height: number) {
+function commonsPage(id: number, title: string, width: number, height: number, mime = 'image/jpeg') {
   return {
     [id]: {
       pageid: id,
       title,
-      imageinfo: [{ url: `https://upload.wikimedia.org/original-${id}.jpg`, width: width * 2, height: height * 2, thumburl: `https://upload.wikimedia.org/thumb-${id}.jpg`, thumbwidth: width, thumbheight: height }],
+      imageinfo: [{ url: `https://upload.wikimedia.org/original-${id}.jpg`, width: width * 2, height: height * 2, thumburl: `https://upload.wikimedia.org/thumb-${id}.jpg`, thumbwidth: width, thumbheight: height, mime }],
     },
   };
 }
@@ -55,6 +55,33 @@ describe('getCategoryStockImage', () => {
       json: async () => ({ query: { pages: commonsPage(3, 'File:Banner.jpg', 4000, 200) } }),
     });
     const result = await getCategoryStockImage('LIVE_MUSIC', 'Anything');
+    expect(result).toBeNull();
+  });
+
+  /**
+   * Real, production-confirmed bug: Wikimedia Commons stores scanned PDFs (old magazines,
+   * reports) in the same File: namespace as photographs, and CirrusSearch's full-text search can
+   * match a PDF's own OCR'd text — a "nightclub dance floor lights" search genuinely returned a
+   * 1994 naval facility energy-management report and a 1980s university yearbook. Commons renders
+   * a page-1 thumbnail for a PDF too, with a declared width that can clear this file's own
+   * resolution floor even though the actual served file is far smaller — this is the real fix,
+   * not the downstream byte-probe that was merely catching the symptom.
+   */
+  test('a PDF document-scan thumbnail is filtered out, even one whose declared size clears the resolution floor', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ query: { pages: commonsPage(4, 'File:Old Report.pdf', 1920, 1280, 'application/pdf') } }),
+    });
+    const result = await getCategoryStockImage('CLUBBING', 'Anything');
+    expect(result).toBeNull();
+  });
+
+  test('an SVG (a diagram/logo, not a photo) is filtered out the same way', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ query: { pages: commonsPage(5, 'File:Diagram.svg', 1920, 1280, 'image/svg+xml') } }),
+    });
+    const result = await getCategoryStockImage('ART_CULTURE', 'Anything');
     expect(result).toBeNull();
   });
 

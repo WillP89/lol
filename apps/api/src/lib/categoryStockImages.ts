@@ -100,7 +100,22 @@ interface CommonsImageInfo {
   thumburl?: string;
   thumbwidth?: number;
   thumbheight?: number;
+  mime?: string; // see PHOTO_MIME_TYPES's own comment below for why this is checked
 }
+
+// Real, production-confirmed bug this fixes: Wikimedia Commons stores scanned PDFs (old
+// magazines, reports, newsletters) in the exact same File: namespace as photographs, and
+// CirrusSearch's full-text search matches a PDF's own OCR'd text/description — a broad query like
+// "nightclub dance floor lights" genuinely matched things like a 1994 naval facility energy-
+// management report and a 1980s university yearbook, because ONE of those words happened to
+// appear somewhere in the document. Commons renders a page-1 thumbnail for a PDF too, so it passed
+// through as a normal `imageinfo` result — its DECLARED width even cleared this file's own
+// MIN_IMAGE_WIDTH filter below, only for the real byte-probe further downstream (inventorySync.ts)
+// to correctly catch that the actual served file was far smaller than declared and reject it. That
+// safety net was working exactly as designed — but for the CLUBBING category specifically, so many
+// of its top search results were mismatched PDFs that almost nothing real ever got through. The
+// real fix is here, not downstream: only actual photograph file types are ever added to the pool.
+const PHOTO_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 interface CommonsPage { title?: string; imageinfo?: CommonsImageInfo[] }
 interface CommonsSearchResponse { query?: { pages?: Record<string, CommonsPage> } }
 
@@ -115,7 +130,7 @@ async function fetchCandidatePool(query: string): Promise<{ images: EnrichedImag
       gsrnamespace: '6', // File: namespace only
       gsrlimit: String(RESULTS_PER_CATEGORY),
       prop: 'imageinfo',
-      iiprop: 'url|size',
+      iiprop: 'url|size|mime',
       iiurlwidth: '1920', // ask Commons for an already-scaled real photo, not the raw (sometimes 20MB+) original
       format: 'json',
     });
@@ -131,6 +146,10 @@ async function fetchCandidatePool(query: string): Promise<{ images: EnrichedImag
     for (const page of pages) {
       const info = page.imageinfo?.[0];
       if (!info) continue;
+      // The real fix — see PHOTO_MIME_TYPES's own comment above. A missing mime (shouldn't happen
+      // per Commons' own API contract, but never trusted blindly) is treated as "not a photo",
+      // the same fail-closed posture as every other unprovable check in this app.
+      if (!info.mime || !PHOTO_MIME_TYPES.has(info.mime)) continue;
       // Prefer the pre-scaled thumb (a sane real file size to actually serve) — falls back to the
       // full original only for the rare file MediaWiki didn't scale (already smaller than the
       // requested 1920px, so no thumb was generated).
