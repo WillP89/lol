@@ -308,6 +308,15 @@ model CrewMember {
   /// services/crew.ts#crewSummaryExtras for how this turns into an unread count, and
   /// POST /crews/:id/read for the one place this is ever written.
   lastReadAt DateTime?
+  /// Per-member, per-Crew opt-out for the email message-digest sweep (services/
+  /// messageNotifications.ts) — defaults on (a deliberate, explicit product request), but never
+  /// something the recipient can't turn off. See PATCH /crews/:id/notifications.
+  emailNotificationsEnabled Boolean @default(true)
+  /// The `createdAt` of the newest unread message this member has actually been emailed about —
+  /// null means never emailed. Lets the sweep tell "already covered by a previous digest" apart
+  /// from "genuinely new since the last email" without a separate notification-log table, and
+  /// never re-sends for the same backlog twice.
+  lastEmailNotifiedAt DateTime?
 
   @@unique([crewId, userId])
   @@index([userId])

@@ -43,6 +43,11 @@ export const AnalyticsEvents = {
   CrewLeft: 'CrewLeft',
   CrewMemberRemoved: 'CrewMemberRemoved',
   CrewMessageSent: 'CrewMessageSent',
+  // The email half of the message-notification digest (services/messageNotifications.ts) —
+  // distinct from CrewMessageSent (an in-app action) since this is Plot itself sending
+  // something, on its own debounced schedule, worth being able to see in the funnel separately
+  // (e.g. "is the sweep actually running / reaching anyone").
+  CrewMessageDigestEmailSent: 'CrewMessageDigestEmailSent',
   ReactionAdded: 'ReactionAdded',
   PollCreated: 'PollCreated',
   PollVoted: 'PollVoted',
@@ -107,13 +112,14 @@ export interface AnalyticsEventPayloads {
   ContactsSkipped: { userId: string };
 
   CrewCreated: { crewId: string; userId: string; memberCount: number };
-  CrewInviteSent: { crewId: string; channel: 'link' | 'whatsapp' | 'imessage' | 'sms' | 'other' };
+  CrewInviteSent: { crewId: string; channel: 'link' | 'whatsapp' | 'imessage' | 'sms' | 'other' | 'email' };
   InviteOpened: { inviteCode: string; authenticated: boolean };
   InviteAccepted: { crewId: string; userId: string };
   CrewJoined: { crewId: string; userId: string; viaInvite: boolean };
   CrewLeft: { crewId: string; userId: string };
   CrewMemberRemoved: { crewId: string; removedUserId: string; userId: string };
   CrewMessageSent: { crewId: string; userId: string };
+  CrewMessageDigestEmailSent: { crewId: string; userId: string; messageCount: number };
   ReactionAdded: { crewId: string; messageId: string; emoji: string; userId: string };
   PollCreated: { crewId: string; messageId: string; kind: 'GENERAL' | 'AVAILABILITY'; optionCount: number };
   PollVoted: { crewId: string; messageId: string; option: string };

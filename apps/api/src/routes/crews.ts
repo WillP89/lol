@@ -1,18 +1,22 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../middleware/auth';
-import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getCrewPreviewByInviteCode, isCrewMember, removeCrewMember, leaveCrew, markCrewRead, CrewMembershipError } from '../services/crew';
+import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getCrewPreviewByInviteCode, isCrewMember, removeCrewMember, leaveCrew, markCrewRead, setEmailNotificationsEnabled, CrewMembershipError } from '../services/crew';
 import { sendCrewMessage, listCrewMessages, toggleReaction, createPoll, votePoll, ChatError } from '../services/chat';
 import { track } from '../services/analytics';
 import { getOrCreateSettings, updateSettings, respondToRecommendation, generateRecommendationForCrew, RecommendationError } from '../services/crewRecommendations';
 import { computeCrewTasteSummary } from '../services/crewTaste';
 import { interpretTasteDescription, AiTasteSetupUnavailableError } from '../services/aiTasteSetup';
 import { saveUpload, deleteUpload, readMultipartUpload, MediaValidationError, MediaStorageUnavailableError } from '../lib/mediaStorage';
+import { sendEmail, crewInviteBody } from '../lib/email';
+import { providerReadiness } from '../lib/config';
+import { displayNameOf } from '../lib/displayName';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 
 const CreateCrewSchema = z.object({ name: z.string().min(1).max(60), defaultCity: z.string().optional() });
 const JoinCrewSchema = z.object({ inviteCode: z.string().min(1) });
+const InviteByEmailSchema = z.object({ email: z.string().email() });
 
 export async function crewRoutes(app: FastifyInstance): Promise<void> {
   app.post('/crews', async (request, reply) => {
@@ -157,6 +161,49 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ inviteUrl: `${process.env.WEB_APP_URL ?? ''}/crews/join/${crew.inviteCode}` });
   });
 
+  /**
+   * Real, explicit product request: "willproud89@gmail.com goes to add someone to a crew, types
+   * their email, and they get an invite link to join" — a genuine send, not the existing
+   * `/invites` route's "here's a link, share it yourself" flow. Deliberately its own route
+   * rather than a new `channel: 'email'` case on the one above: that route never sends anything
+   * itself (every existing channel is "I'm about to paste this link somewhere myself"), so
+   * folding a real outbound send into the same handler would make one endpoint do two very
+   * different things depending on a body field.
+   *
+   * Same dev-mode fallback as every other email-sending path in this codebase (requestMagicLink,
+   * lib/email.ts) — no provider configured, or a real send fails, returns the link directly in
+   * the response instead of silently doing nothing, so the flow stays fully testable everywhere.
+   */
+  app.post('/crews/:id/invites/email', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    const parsed = InviteByEmailSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+
+    const crew = await getCrewDetail(id, request.user.id);
+    if (!crew) return reply.code(404).send({ error: 'not_found' });
+
+    const inviterName = displayNameOf(request.user.displayName, request.user.email);
+    const joinUrl = `${process.env.WEB_APP_URL ?? ''}/crews/join/${crew.inviteCode}`;
+    const to = parsed.data.email.trim().toLowerCase();
+
+    const emailReady = providerReadiness.resendEmail || providerReadiness.smtpEmail || providerReadiness.postmarkEmail;
+    if (emailReady) {
+      try {
+        await sendEmail(to, crewInviteBody({ crewName: crew.name, inviterName, joinUrl }));
+        await track('CrewInviteSent', { crewId: id, channel: 'email' }, { userId: request.user.id, crewId: id });
+        return reply.send({ ok: true, sentTo: to });
+      } catch (err) {
+        // Same tradeoff as requestMagicLink's own fallback: a real send failing shouldn't leave
+        // the inviter with nothing to actually send — fall through to the dev-link response.
+        logger.error({ err, to }, 'Crew invite email send failed — falling back to dev-mode link in the response');
+      }
+    }
+
+    await track('CrewInviteSent', { crewId: id, channel: 'email' }, { userId: request.user.id, crewId: id });
+    return reply.send({ ok: true, devInviteUrl: joinUrl });
+  });
+
   // Owner-only. Kept as a distinct route from /leave (below) rather than one "remove yourself
   // or someone else" endpoint — the permission check and the "who succeeds the owner" logic are
   // different enough (see services/crew.ts) that folding them together just hides which case is
@@ -213,6 +260,22 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
     await markCrewRead(id, request.user.id);
     return reply.send({ ok: true });
+  });
+
+  // The one real opt-out for the message-digest email sweep (services/messageNotifications.ts)
+  // — on by default per the explicit "bake this in" request, but never something a member can't
+  // turn off for themselves. Always the caller's own membership row; there's no way for one
+  // member to change another's here.
+  app.patch('/crews/:id/notifications', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    const BodySchema = z.object({ emailNotificationsEnabled: z.boolean() });
+    const parsed = BodySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+
+    const updated = await setEmailNotificationsEnabled(id, request.user.id, parsed.data.emailNotificationsEnabled);
+    if (!updated) return reply.code(403).send({ error: 'forbidden' });
+    return reply.send({ ok: true, emailNotificationsEnabled: parsed.data.emailNotificationsEnabled });
   });
 
   app.post('/crews/:id/messages', async (request, reply) => {
