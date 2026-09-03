@@ -104,7 +104,7 @@ interface CommonsImageInfo {
 interface CommonsPage { title?: string; imageinfo?: CommonsImageInfo[] }
 interface CommonsSearchResponse { query?: { pages?: Record<string, CommonsPage> } }
 
-async function fetchCandidatePool(query: string): Promise<EnrichedImage[]> {
+async function fetchCandidatePool(query: string): Promise<{ images: EnrichedImage[]; rawCount: number }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -126,6 +126,7 @@ async function fetchCandidatePool(query: string): Promise<EnrichedImage[]> {
     if (!res.ok) throw new Error(`Wikimedia Commons search returned ${res.status}`);
     const body = (await res.json()) as CommonsSearchResponse;
     const pages = Object.values(body.query?.pages ?? {});
+    const rawCount = pages.length;
     const candidates: EnrichedImage[] = [];
     for (const page of pages) {
       const info = page.imageinfo?.[0];
@@ -145,7 +146,7 @@ async function fetchCandidatePool(query: string): Promise<EnrichedImage[]> {
       if (ratio < MIN_ASPECT_RATIO || ratio > MAX_ASPECT_RATIO) continue;
       candidates.push({ url, sourcePage: page.title ?? query });
     }
-    return candidates;
+    return { images: candidates, rawCount };
   } finally {
     clearTimeout(timer);
   }
@@ -159,10 +160,16 @@ async function getCandidatePool(category: string): Promise<EnrichedImage[]> {
     if (Date.now() - cached.fetchedAt < ttl) return cached.images;
   }
 
-  const images = await fetchCandidatePool(query).catch((err) => {
+  // Real diagnostic gap found live — see pexelsStockImages.ts's own `missingKeyLogged` comment for
+  // the full story: a production run filled 0/288 rows with NO warning logged here either, leaving
+  // no way to tell "the search succeeded but nothing passed the quality filter" apart from "it's
+  // silently broken somehow". Every fresh (non-cached) search now logs its raw/filtered candidate
+  // counts at info level regardless of outcome.
+  const { images, rawCount } = await fetchCandidatePool(query).catch((err) => {
     logger.warn({ err, category, query }, 'Wikimedia Commons category-stock image search failed — continuing without one');
-    return [];
+    return { images: [] as EnrichedImage[], rawCount: 0 };
   });
+  logger.info({ category, query, rawCount, keptCount: images.length }, 'Wikimedia Commons category-stock search complete');
   pool.set(category, { images, fetchedAt: Date.now() });
   return images;
 }
