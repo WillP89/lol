@@ -92,7 +92,13 @@ export default function LandingClient() {
               key={what}
               className="fade-up v2-stagger v2-collage-card v2-collage-drift"
               style={{
-                width: 120, height: 168, borderRadius: 18, padding: '14px 12px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+                // `clamp()`, not a fixed 138/194 — a real, screenshot-caught bug on the way here:
+                // fixed-bigger cards pushed the row past the available width on a narrow phone,
+                // and the hero's own `overflow: hidden` (there to contain the parallax blobs)
+                // silently CLIPPED the third card rather than wrapping or overflowing visibly.
+                // This scales the same slightly-bigger desktop size (138/194, the actual ask)
+                // down smoothly on narrow viewports instead, so three cards always actually fit.
+                width: 'clamp(100px, 26vw, 138px)', height: 'clamp(140px, 36vw, 194px)', borderRadius: 18, padding: '16px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
                 background: `linear-gradient(155deg, ${color}, rgba(12,12,13,0.85))`,
                 boxShadow: 'var(--v2-shadow-lg)',
                 ['--tilt' as string]: `${i === 1 ? 3 : i === 0 ? -6 : 7}deg`,
@@ -103,8 +109,8 @@ export default function LandingClient() {
                 color: '#fff',
               }}
             >
-              <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.85, marginBottom: 3 }}>{when}</div>
-              <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 800, fontSize: 15.5, lineHeight: 1.15 }}>{what}</div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, opacity: 0.85, marginBottom: 4 }}>{when}</div>
+              <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 800, fontSize: 17.5, lineHeight: 1.15 }}>{what}</div>
             </div>
           ))}
         </div>
