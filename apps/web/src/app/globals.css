@@ -18,9 +18,10 @@ body {
      wouldn't resolve here without duplicating the whole token set onto :root as well. */
   background: #f6f6f4;
 }
-@media (prefers-color-scheme: dark) {
-  html:not([data-theme="light"]) body { background: #131316; }
-}
+/* Explicit dark choice ONLY — see lib/theme.ts's own comment. There is deliberately no
+   `@media (prefers-color-scheme: dark)` variant of this rule any more: that auto-switched
+   anyone whose OS happened to be in dark mode into dark mode on first visit, unasked. Real,
+   reported instruction: light is the one, only, never-auto-switched default. */
 html[data-theme="dark"] body { background: #131316; }
 
 ::selection {
@@ -179,35 +180,15 @@ html[data-theme="dark"] body { background: #131316; }
    accent) stays the same pink in both — that's the one colour that's
    supposed to jump out identically regardless of theme.
 
-   Two selectors, not one, per the standard "theme-aware" contract: the
-   `prefers-color-scheme` block covers "system default, no explicit choice
-   made yet" (guarded by `:not([data-theme="light"])` so it never fights an
-   explicit light choice), and the plain `[data-theme="dark"]` block —
-   declared after, so it always wins on a tie — covers an explicit toggle
-   regardless of the OS setting. See components/ThemeToggle.tsx for what
-   actually sets `data-theme` on <html>, and app/layout.tsx for the
-   anti-flash inline script that applies it before first paint. */
-@media (prefers-color-scheme: dark) {
-  html:not([data-theme="light"]) .v2 {
-    --v2-bg: #131316;
-    --v2-bg-deep: #0b0b0d;
-    --v2-surface: #1e1e22;
-    --v2-ink: #f3f2f0;
-    --v2-ink-muted: #a6a4aa;
-    --v2-ink-dim: #706e75;
-
-    --v2-brand: #f3f2f0;
-    --v2-brand-ink: #131316;
-
-    --v2-error: #ff6259;
-    --v2-gold: #e0a940;
-    --v2-green: #3ddc94;
-
-    --v2-line: rgba(255, 255, 255, 0.13);
-    --v2-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 16px -8px rgba(0, 0, 0, 0.6);
-    --v2-shadow-lg: 0 4px 10px rgba(0, 0, 0, 0.4), 0 20px 44px -16px rgba(0, 0, 0, 0.7);
-  }
-}
+   Real, explicit product decision (not an oversight): this used to be TWO selectors — a
+   `prefers-color-scheme` block for "system default, no explicit choice made yet" plus this
+   `[data-theme="dark"]` block for an explicit toggle. Reported directly: "NEVER AUTO SWITCH TO
+   DARK MODE, I want light mode to be default ALWAYS." The `prefers-color-scheme` block is gone —
+   light (the plain, unguarded `.v2` values above) is now the only default, regardless of the
+   OS/browser setting, for anyone who hasn't explicitly tapped Dark. This one selector is the
+   ONLY way dark ever applies. See components/ThemeToggle.tsx for what actually sets `data-theme`
+   on <html> (a real, explicit tap — see lib/theme.ts), and app/layout.tsx for the anti-flash
+   inline script that applies a STORED dark choice before first paint (never an OS one). */
 :root[data-theme="dark"] .v2 {
   --v2-bg: #131316;
   --v2-bg-deep: #0b0b0d;
@@ -503,6 +484,35 @@ html[data-theme="dark"] body { background: #131316; }
   33% { transform: translate(5%, -6%) scale(1.08); }
   66% { transform: translate(-6%, 5%) scale(0.95); }
 }
+/* THE HERO'S "CORE" — a large, soft, breathing glow behind the headline, the landing hero's own
+   stand-in for the reference site's sun: the one steady point of light everything else (particle
+   field, blobs) reads as drifting around. Radial, not a flat blob, and pulses scale+opacity on
+   its own slow cycle independent of the pointer-parallax translate LandingClient sets inline on
+   this same element (parallax owns `translate`, this keyframe owns `scale`+`opacity` — two
+   independent CSS properties, so they compose instead of one clobbering the other, the same
+   reason the blobs above are two nested nodes rather than one element trying to own both). */
+.v2-hero-core {
+  position: absolute;
+  top: 50%;
+  left: 62%;
+  width: 640px;
+  height: 640px;
+  margin: -320px 0 0 -320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--v2-pop) 0%, var(--v2-confetti-2) 45%, transparent 72%);
+  filter: blur(50px);
+  opacity: 0.22;
+  animation: v2HeroCoreBreathe 7s ease-in-out infinite;
+}
+@keyframes v2HeroCoreBreathe {
+  0%, 100% { scale: 1; opacity: 0.18; }
+  50% { scale: 1.12; opacity: 0.3; }
+}
+@media (prefers-reduced-motion: reduce) { .v2-hero-core { animation: none; } }
+@media (max-width: 700px) {
+  .v2-hero-core { width: 420px; height: 420px; margin: -210px 0 0 -210px; left: 50%; top: 30%; }
+}
+
 .v2-auth-drift-card {
   position: absolute;
   border-radius: 18px;

@@ -6,20 +6,21 @@ import { getStoredThemePreference, applyThemePreference, type ThemePreference } 
 const OPTIONS: { label: string; value: ThemePreference }[] = [
   { label: 'Light', value: 'light' },
   { label: 'Dark', value: 'dark' },
-  { label: 'System', value: 'system' },
 ];
 
 /**
- * The real toggle for the "same app, same brand system, dark mode" feature — three explicit
- * states (Light/Dark/System), not a single on/off switch, so someone who wants to just follow
- * their OS's own day/night schedule isn't forced to pick a side. Reads its initial state from
- * localStorage on mount rather than assuming 'system' — the anti-flash script in layout.tsx
+ * The real toggle for the "same app, same brand system, dark mode" feature — a plain two-way
+ * choice, Light or Dark. There used to be a third "System" option that followed the OS's live
+ * `prefers-color-scheme`; removed per explicit product decision (see lib/theme.ts's own comment)
+ * — light is the one, only, never-auto-switched default now, so a "follow the OS" option would
+ * just be a second way to accidentally end up in dark mode. Reads its initial state from
+ * localStorage on mount rather than assuming 'light' — the anti-flash script in layout.tsx
  * already applied the real theme to the DOM before this component ever renders; this just needs
  * to reflect that back into the toggle's own UI state so it doesn't show the wrong option
  * selected for one frame.
  */
 export function ThemeToggle() {
-  const [pref, setPref] = useState<ThemePreference>('system');
+  const [pref, setPref] = useState<ThemePreference>('light');
   useEffect(() => {
     setPref(getStoredThemePreference());
   }, []);

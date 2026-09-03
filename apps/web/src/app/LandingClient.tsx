@@ -1,8 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useScrollReveal } from '@/lib/useScrollReveal';
+import { usePointerParallax } from '@/lib/usePointerParallax';
+import { ParticleField } from '@/components/ParticleField';
 import { IconChat, IconPoll, IconLock } from '@/components/icons';
 
 /**
@@ -20,6 +22,12 @@ import { IconChat, IconPoll, IconLock } from '@/components/icons';
  */
 export default function LandingClient() {
   useScrollReveal();
+  // The hero's own parallax root — see lib/usePointerParallax.ts. Every layer below (blobs,
+  // particle field, the plan-card collage) reads the `--px`/`--py` this writes, each with its
+  // own depth multiplier, so the whole scene shifts together but at different rates as the
+  // pointer moves — the actual "responds to you" depth cue, not just ambient drift on a timer.
+  const heroRef = useRef<HTMLDivElement>(null);
+  usePointerParallax(heroRef);
 
   const cards: [string, string, string][] = [
     ['Sat, 8pm', "Fred's flat", 'var(--v2-confetti-2)'],
@@ -34,7 +42,7 @@ export default function LandingClient() {
         <Link href="/auth" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--v2-ink-muted)' }}>Sign in</Link>
       </div>
 
-      <div style={{ position: 'relative', minHeight: 'calc(100dvh - 76px)' }}>
+      <div ref={heroRef} style={{ position: 'relative', minHeight: 'calc(100dvh - 76px)', overflow: 'hidden' }}>
         <LandingAtmosphere />
         <div
           style={{
@@ -69,8 +77,16 @@ export default function LandingClient() {
             animation that's over in half a second) each tile also idles with its own gentle,
             out-of-phase bob (.v2-collage-drift) so the collage stays visibly alive at rest, not
             just on hover. Hover's own `!important` transform still wins over the idle animation
-            while a pointer's actually on a card. */}
-        <div aria-hidden style={{ flex: '0 0 auto', display: 'flex', gap: 14, margin: '0 auto', transform: 'rotate(-2deg)' }}>
+            while a pointer's actually on a card. This whole collage is also the parallax scene's
+            foreground layer — the biggest depth multiplier of anything on the page (it's meant
+            to read as closest to you), on top of each card's own independent idle bob. */}
+        <div
+          aria-hidden
+          style={{
+            flex: '0 0 auto', display: 'flex', gap: 14, margin: '0 auto',
+            transform: 'rotate(-2deg) translate3d(calc(var(--px, 0) * 22px), calc(var(--py, 0) * 16px), 0)',
+          }}
+        >
           {cards.map(([when, what, color], i) => (
             <div
               key={what}
@@ -144,20 +160,38 @@ export default function LandingClient() {
 }
 
 /**
- * THE HERO'S OWN ATMOSPHERE — real, reported feedback on the entrance screen ("this does not
- * look any different"): the hero used to be flat colour with nothing moving until you actually
- * hovered a card. Same primitive as the sign-in page's own AuthAtmosphere (auth/page.tsx) — soft,
- * large, blurred brand-colour fields drifting slowly behind the content (`.v2-auth-blob`, reused
- * here rather than duplicated) — sized up for the bigger hero canvas. `aria-hidden`, purely
- * decorative, sits behind the hero content (z-index 0 vs. the content's 1) and respects
- * `prefers-reduced-motion` (globals.css guards the animation).
+ * THE HERO'S OWN ATMOSPHERE — second real round of reported feedback: the first pass (slow
+ * blurred colour blobs drifting on a timer) was judged "still no movement at all... more
+ * immersive", pointing at a reference site built around a drifting particle field and real
+ * depth/parallax. This is that: a live `<canvas>` particle field (ParticleField), a large
+ * breathing "core" glow standing in for the reference's sun, and — the actual difference a
+ * parallax scene makes over ambient drift — every layer here reads the shared `--px`/`--py`
+ * pointer-parallax variables (usePointerParallax, set on the hero's own ref above) with its own
+ * depth multiplier: the particle field and core barely move (background), the blobs shift a
+ * little more (midground), the plan-card collage over in the hero content shifts the most
+ * (foreground) — the whole scene visibly responds to the cursor, not just to a clock. Each blob
+ * is two nested nodes on purpose: the outer positions it and owns the parallax `translate3d`, the
+ * inner (`.v2-auth-blob`) owns its size/colour and its own idle drift animation — a CSS animation
+ * replaces the WHOLE `transform` property while running, so parallax and idle-drift need separate
+ * elements to compose rather than fight over one. `aria-hidden` throughout; every animation here
+ * (drift, breathe, particle motion) respects `prefers-reduced-motion`, and the parallax layer is
+ * simply never wired up for reduced-motion or touch-only visitors (see usePointerParallax) — no
+ * broken half-effect, just the plain still/idle version.
  */
 function LandingAtmosphere() {
   return (
     <div aria-hidden className="v2-auth-atmosphere">
-      <div className="v2-auth-blob" style={{ width: 560, height: 560, top: '-20%', left: '-14%', background: 'var(--v2-pop)', animationDelay: '0s' }} />
-      <div className="v2-auth-blob" style={{ width: 480, height: 480, bottom: '-22%', right: '-10%', background: 'var(--v2-confetti-2)', animationDelay: '-9s' }} />
-      <div className="v2-auth-blob" style={{ width: 380, height: 380, top: '30%', right: '8%', background: 'var(--v2-confetti-4)', animationDelay: '-17s' }} />
+      <ParticleField count={54} />
+      <div className="v2-hero-core" style={{ transform: 'translate3d(calc(var(--px, 0) * 8px), calc(var(--py, 0) * 8px), 0)' }} />
+      <div style={{ position: 'absolute', width: 560, height: 560, top: '-20%', left: '-14%', transform: 'translate3d(calc(var(--px, 0) * -18px), calc(var(--py, 0) * -14px), 0)' }}>
+        <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-pop)', animationDelay: '0s' }} />
+      </div>
+      <div style={{ position: 'absolute', width: 480, height: 480, bottom: '-22%', right: '-10%', transform: 'translate3d(calc(var(--px, 0) * 20px), calc(var(--py, 0) * 16px), 0)' }}>
+        <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-confetti-2)', animationDelay: '-9s' }} />
+      </div>
+      <div style={{ position: 'absolute', width: 380, height: 380, top: '30%', right: '8%', transform: 'translate3d(calc(var(--px, 0) * -14px), calc(var(--py, 0) * 12px), 0)' }}>
+        <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-confetti-4)', animationDelay: '-17s' }} />
+      </div>
     </div>
   );
 }
