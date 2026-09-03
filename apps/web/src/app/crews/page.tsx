@@ -74,6 +74,13 @@ export default function CrewsPage() {
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Real, explicit request: let someone type an email right here in the creation flow's own
+  // invite step — a brand-new Crew shouldn't only ever offer "here's a link, go paste it
+  // somewhere yourself". Mirrors crews/[id]/page.tsx's own invite-by-email form/handler exactly.
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteEmailStatus, setInviteEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [inviteEmailError, setInviteEmailError] = useState<string | null>(null);
+
   // "Before creating a crew, one person must fill out the crew's specific preferences... set it
   // at the crew level by the person who created it... no events or things should be done on
   // crew until preference set" — a mandatory step in the creation flow itself (AI setup or the
@@ -128,6 +135,9 @@ export default function CrewsPage() {
     setNewCrewId(null);
     setNewCrewImageUrl(null);
     setInviteUrl(null);
+    setInviteEmail('');
+    setInviteEmailStatus('idle');
+    setInviteEmailError(null);
     setCrewInterestPreferences([]);
     setTasteError(null);
     setShowCreate(true);
@@ -197,6 +207,26 @@ export default function CrewsPage() {
       setTimeout(() => setCopied(false), 1800);
     } catch {
       // clipboard blocked — the link is still visible to copy by hand
+    }
+  }
+
+  async function sendInviteEmail(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newCrewId || !inviteEmail.trim()) return;
+    setInviteEmailStatus('sending');
+    setInviteEmailError(null);
+    try {
+      const res = await api.post<{ ok: true; sentTo?: string; devInviteUrl?: string }>(`/crews/${newCrewId}/invites/email`, {
+        email: inviteEmail.trim(),
+      });
+      setInviteEmailStatus('sent');
+      setInviteEmail('');
+      // No provider configured (dev/local) — same fallback the crew-detail page's own form uses.
+      if (res.devInviteUrl) setInviteUrl(res.devInviteUrl);
+      setTimeout(() => setInviteEmailStatus('idle'), 3000);
+    } catch (err) {
+      setInviteEmailStatus('error');
+      setInviteEmailError(err instanceof ApiError ? err.message : "Couldn't send that invite.");
     }
   }
 
@@ -431,15 +461,40 @@ export default function CrewsPage() {
           <div>
             <div className="v2-eyebrow" style={{ marginBottom: 4 }}>You&rsquo;re ready</div>
             <h2 className="v2-display" style={{ fontSize: 20, marginBottom: 6 }}>Invite your people</h2>
-            <p className="v2-muted" style={{ marginBottom: 12, fontSize: 13.5 }}>{name} is live. Share the link to get everyone in.</p>
+            <p className="v2-muted" style={{ marginBottom: 12, fontSize: 13.5 }}>{name} is live. Share the link, or email someone directly.</p>
             {inviteUrl && (
               <div style={{ background: 'var(--v2-bg-deep)', borderRadius: 14, padding: 12, marginBottom: 12 }}>
                 <span className="v2-muted" style={{ wordBreak: 'break-all', fontSize: 12.5 }}>{inviteUrl}</span>
               </div>
             )}
-            <button className="v2-btn v2-btn-brand" style={{ width: '100%', marginBottom: 8 }} onClick={shareInvite} disabled={!inviteUrl}>
+            <button className="v2-btn v2-btn-brand" style={{ width: '100%', marginBottom: 12 }} onClick={shareInvite} disabled={!inviteUrl}>
               {copied ? '✓ Copied' : 'Share invite link'}
             </button>
+
+            {/* Real, explicit send — type an email and Plot actually emails them a join link,
+                rather than only ever handing you a link to paste somewhere yourself. Same
+                POST /crews/:id/invites/email this Crew's own Members sheet uses (see
+                routes/crews.ts). Mobile-number invites are a later addition — email only for now. */}
+            <form onSubmit={sendInviteEmail} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <input
+                type="email"
+                required
+                placeholder="Or invite by email…"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                style={{ flex: 1, minWidth: 0, padding: '11px 14px', borderRadius: 12, border: 'none', outline: 'none', background: 'var(--v2-bg-deep)', fontSize: 13.5, fontFamily: 'inherit', color: 'var(--v2-ink)' }}
+              />
+              <button
+                type="submit"
+                disabled={inviteEmailStatus === 'sending' || !inviteEmail.trim()}
+                className="v2-btn v2-btn-ghost v2-tap-feedback"
+                style={{ flexShrink: 0, fontSize: 13 }}
+              >
+                {inviteEmailStatus === 'sending' ? 'Sending…' : inviteEmailStatus === 'sent' ? '✓ Sent' : 'Send'}
+              </button>
+            </form>
+            {inviteEmailError && <div style={{ color: 'var(--v2-error)', fontSize: 12, marginBottom: 12 }}>{inviteEmailError}</div>}
+
             <button className="v2-btn v2-btn-ghost" style={{ width: '100%' }} onClick={finishCreate}>
               Done
             </button>
