@@ -1349,18 +1349,30 @@ export default function CrewPage() {
     }
   }
 
+  // Real, live-reported bug this fixes: the composer/message-list card scrolled up so far that
+  // the header (and even part of the top message) rendered off past the top edge of the screen
+  // the moment the on-screen keyboard opened — this comment block's OWN prior claim that
+  // "`100dvh` already tracks the keyboard" turned out to be exactly wrong for iOS Safari, which
+  // is precisely what useVisualViewportHeight.ts's own header comment already documented: `dvh`
+  // tracks the browser TOOLBAR auto-hiding, never the software keyboard. With a static `100dvh`
+  // container, the keyboard opening doesn't shrink this flex column at all — it just covers the
+  // bottom of it — so the browser's own "scroll the focused input into view above the keyboard"
+  // behaviour has no choice but to scroll the WHOLE fixed-height column upward, dragging the
+  // header (and however much message history that requires) up past the visible top edge.
+  // `visualViewportHeight` (this component's own hook, already computed above, but never
+  // actually wired into this element's real height — it only drove the auto-scroll effect)
+  // genuinely shrinks the moment the keyboard appears, so the flex column now shrinks WITH it —
+  // the composer stays the last, always-visible flex child inside a container that already fits
+  // the real visible area, and the browser never needs to scroll the page at all to reveal it.
+  const chatViewportHeight = visualViewportHeight != null ? `${visualViewportHeight}px` : '100dvh';
+
   return (
-    // Real, reported P0 fix: the composer used to fight a hardcoded/measured pixel-height guess
-    // for "how much space is left" — fragile by construction, and it broke again the moment the
-    // header's own height changed. Replaced with the actually-correct way to pin a bottom bar in
-    // a scrollable conversation: ONE flex column filling the real viewport height (`100dvh` —
-    // already tracks the keyboard/toolbar on modern mobile browsers, the same technique
-    // BottomSheet already relies on elsewhere in this file), where the header is a natural
+    // ONE flex column filling the real, keyboard-aware viewport height: the header is a natural
     // flex-shrink:0 child, the message list is the one `flex:1; min-height:0; overflow-y:auto`
     // scroll region, and the composer is just the LAST flex child — inherently always visible at
     // the bottom, because that is what a flex column does, not because of a number anyone
-    // calculated. No JS measurement of anything is needed for this to stay correct.
-    <div className="v2" style={{ height: '100dvh', overflow: 'hidden' }}>
+    // calculated.
+    <div className="v2" style={{ height: chatViewportHeight, overflow: 'hidden' }}>
       <div className="v2-shell-desktop v2-crew-split" style={{ height: '100%' }}>
         {/* Desktop-only Crews rail beside the active conversation — see globals.css's
             .v2-crew-split comment: the conversation column staying a fixed, readable width is
@@ -1397,16 +1409,17 @@ export default function CrewPage() {
             </div>
           </div>
         )}
-      {/* `height: 100dvh` here is correct on mobile (`.v2-crew-split` is a plain block there, so
-          this needs the real viewport unit to fill it) but wrong on desktop: `.v2-crew-split`
-          becomes a flex row with its own `padding-top: 18px` (globals.css) there, and this
-          element re-measuring against the FULL viewport instead of its actual flex-allotted
-          height overflowed the bottom by that padding — the composer, the last flex child,
-          sitting past the visible edge, reading as "the text box isn't locked in place". Fixed
-          with a desktop-scoped `!important` override (globals.css's `.v2-crew-main`, same
-          established pattern as `.v2-sheet-root`'s own height guard) rather than changing this
-          inline value, which would break the exact case `100dvh` exists for on mobile. */}
-      <div className="v2-crew-main" style={{ maxWidth: 1400, width: '100%', height: '100dvh', display: 'flex', flexDirection: 'column' }}>
+      {/* The same keyboard-aware height as the outer wrapper above (chatViewportHeight) — correct
+          on mobile for the same reason (`.v2-crew-split` is a plain block there, so this needs a
+          real, keyboard-shrunk height to fill) but wrong on desktop: `.v2-crew-split` becomes a
+          flex row with its own `padding-top: 18px` (globals.css) there, and this element
+          re-measuring against the FULL viewport instead of its actual flex-allotted height
+          overflowed the bottom by that padding — the composer, the last flex child, sitting past
+          the visible edge, reading as "the text box isn't locked in place". Fixed with a
+          desktop-scoped `!important` override (globals.css's `.v2-crew-main`, same established
+          pattern as `.v2-sheet-root`'s own height guard) rather than changing this inline value,
+          which would break the exact case this exists for on mobile. */}
+      <div className="v2-crew-main" style={{ maxWidth: 1400, width: '100%', height: chatViewportHeight, display: 'flex', flexDirection: 'column' }}>
       <div style={{ flexShrink: 0 }}>
         {/* Header — HARD RESET. Real, reported feedback: "tiny Crew header, tiny social presence".
             This is now a real banner, not a slim top bar: the Crew's own identity wash fills it
