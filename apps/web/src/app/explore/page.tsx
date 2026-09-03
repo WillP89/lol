@@ -36,6 +36,57 @@ function formatPrice(exp: ExploreExperience) {
   return formatPriceRange(exp.priceMinMinor, exp.priceMaxMinor, exp.currency);
 }
 
+// "Meaningful filters without becoming Expedia" — a small, real set (only what this data can
+// actually support: no indoor/outdoor flag exists on Experience, so it's not offered), applied
+// client-side against the already-fetched result set (the same pattern the existing text search
+// already uses) rather than a round trip per filter change — this page's own result sets are
+// small enough (dozens, not thousands) that a server filter endpoint would be real complexity
+// for no perceptible speed gain.
+const CATEGORY_OPTIONS: { value: string; label: string }[] = [
+  { value: 'LIVE_MUSIC', label: 'Live music' }, { value: 'CLUBBING', label: 'Clubbing' },
+  { value: 'RESTAURANT', label: 'Restaurant' }, { value: 'BAR', label: 'Pubs & bars' },
+  { value: 'COMEDY', label: 'Comedy' }, { value: 'THEATRE', label: 'Theatre' },
+  { value: 'CINEMA', label: 'Cinema' }, { value: 'ART_CULTURE', label: 'Art & culture' },
+  { value: 'SPORT', label: 'Sport' }, { value: 'FITNESS', label: 'Fitness' },
+  { value: 'FESTIVAL', label: 'Festival' }, { value: 'DAY_ACTIVITY', label: 'Day out' },
+  { value: 'COMMUNITY', label: 'Community' },
+];
+const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(CATEGORY_OPTIONS.map((o) => [o.value, o.label]));
+
+type DateFilter = 'any' | 'tonight' | 'weekend' | 'week';
+const DATE_OPTIONS: { value: DateFilter; label: string }[] = [
+  { value: 'any', label: 'Any date' }, { value: 'tonight', label: 'Tonight' },
+  { value: 'weekend', label: 'This weekend' }, { value: 'week', label: 'Next 7 days' },
+];
+
+type PriceFilter = 'any' | 'free' | '15' | '30' | '50';
+const PRICE_OPTIONS: { value: PriceFilter; label: string; maxMinor: number | null }[] = [
+  { value: 'any', label: 'Any price', maxMinor: null }, { value: 'free', label: 'Free', maxMinor: 0 },
+  { value: '15', label: 'Under £15', maxMinor: 1500 }, { value: '30', label: 'Under £30', maxMinor: 3000 },
+  { value: '50', label: 'Under £50', maxMinor: 5000 },
+];
+
+function matchesDateFilter(startsAtIso: string, filter: DateFilter): boolean {
+  if (filter === 'any') return true;
+  const startsAt = new Date(startsAtIso);
+  const now = new Date();
+  if (filter === 'tonight') {
+    return startsAt.toDateString() === now.toDateString();
+  }
+  if (filter === 'week') {
+    const weekOut = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    return startsAt >= now && startsAt <= weekOut;
+  }
+  // Weekend — the NEXT (or current, if today is already Fri/Sat/Sun) Friday-through-Sunday
+  // window, never a past weekend. Find this week's Friday 00:00 (or today, if already Fri-Sun).
+  const day = now.getDay(); // 0=Sun..6=Sat
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const offsetToFriday = (5 - day + 7) % 7;
+  const weekendStart = day === 6 || day === 0 ? new Date(base.getTime() - (day === 6 ? 1 : 2) * 86400000) : new Date(base.getTime() + offsetToFriday * 86400000);
+  const weekendEnd = new Date(weekendStart.getTime() + 3 * 86400000); // through end of Sunday
+  return startsAt >= weekendStart && startsAt < weekendEnd;
+}
+
 /** One card, three sizes — a hero (2-col span) up top, then a regular grid. The image (or its
  * category art) is 70%+ of the card; the caption is title/date/price, nothing else. */
 function Card({
@@ -77,7 +128,7 @@ function Card({
         textAlign: 'left',
         cursor: 'pointer',
         boxShadow: selected ? '0 0 0 3px var(--v2-pop), var(--v2-shadow-sm)' : 'var(--v2-shadow-sm)',
-        background: v2Art(exp.imageUrl, exp.category),
+        background: v2Art(exp.imageUrl, exp.category, exp.id),
       }}
     >
       {/* A real live legibility bug, not a taste call: a diagonal scrim alone reads fine over
@@ -181,6 +232,27 @@ export default function ExplorePage() {
   const [filteredToTaste, setFilteredToTaste] = useState(false);
   const [totalBeforeFilter, setTotalBeforeFilter] = useState(0);
 
+  // Category/date/price — mobile-first via one "Filters" sheet (progressive disclosure), never
+  // a row of dropdowns above the results. Applied client-side, chained after the text search —
+  // see CATEGORY_OPTIONS/matchesDateFilter's own comments above.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
+  const [dateFilter, setDateFilter] = useState<DateFilter>('any');
+  const [priceFilter, setPriceFilter] = useState<PriceFilter>('any');
+  const activeFilterCount = selectedCategories.size + (dateFilter !== 'any' ? 1 : 0) + (priceFilter !== 'any' ? 1 : 0);
+  function toggleCategory(value: string) {
+    setSelectedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value); else next.add(value);
+      return next;
+    });
+  }
+  function clearFilters() {
+    setSelectedCategories(new Set());
+    setDateFilter('any');
+    setPriceFilter('any');
+  }
+
   useEffect(() => {
     const base = usingRadius
       ? `/explore/experiences?lat=${pickedCenter!.lat}&lng=${pickedCenter!.lng}&radiusKm=${radiusKm}`
@@ -263,18 +335,36 @@ export default function ExplorePage() {
 
   const searched = useMemo(() => {
     if (!experiences) return [];
+    let list = experiences;
     const q = query.trim().toLowerCase();
-    if (!q) return experiences;
-    // Real gap found typing "Comedy" into this box live: it only ever matched the event NAME or
-    // venue name, so a search for a category word came back "Nothing matched that search" even
-    // with genuine comedy nights on screen a moment earlier — the category itself
-    // (`COMEDY`/`LIVE_MUSIC`/…) was never checked. Matching the human-readable form of it too
-    // (underscores to spaces) makes a category search actually work, the way someone typing it
-    // would expect.
-    return experiences.filter(
-      (e) => e.name.toLowerCase().includes(q) || e.venue.name.toLowerCase().includes(q) || e.category.replace(/_/g, ' ').toLowerCase().includes(q),
-    );
-  }, [experiences, query]);
+    if (q) {
+      // Real gap found typing "Comedy" into this box live: it only ever matched the event NAME
+      // or venue name, so a search for a category word came back "Nothing matched that search"
+      // even with genuine comedy nights on screen a moment earlier — the category itself
+      // (`COMEDY`/`LIVE_MUSIC`/…) was never checked. Matching the human-readable form of it too
+      // (underscores to spaces) makes a category search actually work, the way someone typing it
+      // would expect.
+      list = list.filter(
+        (e) => e.name.toLowerCase().includes(q) || e.venue.name.toLowerCase().includes(q) || e.category.replace(/_/g, ' ').toLowerCase().includes(q),
+      );
+    }
+    if (selectedCategories.size > 0) {
+      list = list.filter((e) => selectedCategories.has(e.category));
+    }
+    if (dateFilter !== 'any') {
+      list = list.filter((e) => matchesDateFilter(e.startsAt, dateFilter));
+    }
+    if (priceFilter !== 'any') {
+      const band = PRICE_OPTIONS.find((p) => p.value === priceFilter);
+      if (band && band.maxMinor !== null) {
+        // Unknown price (null) never silently passes a price filter — "under £X" only ever
+        // means a real, known price at or under that, matching the brief's no-fake-data rule
+        // (an unpriced event isn't provably "free" or "under £15").
+        list = list.filter((e) => e.priceMinMinor !== null && e.priceMinMinor <= band.maxMinor!);
+      }
+    }
+    return list;
+  }, [experiences, query, selectedCategories, dateFilter, priceFilter]);
 
   const hero = searched.length ? [...searched].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())[0] : null;
   const rest = hero ? searched.filter((e) => e.id !== hero.id) : searched;
@@ -330,7 +420,7 @@ export default function ExplorePage() {
   // docs/DECISIONS.md#explore-detail-desktop.
   const detailContent = selected && !pickingCrew ? (
     <div>
-      <div style={{ position: 'relative', margin: '-10px -20px 16px', height: 210, background: v2Art(selected.imageUrl, selected.category) }} />
+      <div style={{ position: 'relative', margin: '-10px -20px 16px', height: 210, background: v2Art(selected.imageUrl, selected.category, selected.id) }} />
       <div className="v2-eyebrow" style={{ marginBottom: 4 }}>{selected.category.replace(/_/g, ' ')}</div>
       <h2 className="v2-display" style={{ fontSize: 23, marginBottom: 6 }}>{selected.name}</h2>
       <div className="v2-muted" style={{ fontSize: 13.5, marginBottom: 14 }}>
@@ -470,13 +560,57 @@ export default function ExplorePage() {
           Also searching {placesSearched.slice(1).map((p) => `${p.name} (${p.distanceKm}km)`).join(', ')}
         </p>
       )}
-      <div className="v2-search" style={{ marginBottom: 22 }}>
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--v2-ink-dim)', flexShrink: 0 }}>
-          <circle cx="11" cy="11" r="7" />
-          <path d="m20 20-3.5-3.5" />
-        </svg>
-        <input placeholder="Search events or venues…" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <div style={{ display: 'flex', gap: 8, marginBottom: activeFilterCount > 0 ? 10 : 22 }}>
+        <div className="v2-search" style={{ flex: 1 }}>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--v2-ink-dim)', flexShrink: 0 }}>
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" />
+          </svg>
+          <input placeholder="Search events or venues…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </div>
+        {/* One "Filters" launch, not a row of dropdowns — category/date/price all live behind
+            it (progressive disclosure, the brief's own mobile-first requirement). The count
+            badge is the at-a-glance "something's filtered" signal even with the sheet closed. */}
+        <button
+          type="button"
+          onClick={() => setFiltersOpen(true)}
+          className="v2-tap-feedback"
+          style={{
+            flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, border: 'none', borderRadius: 14, padding: '0 16px',
+            background: activeFilterCount > 0 ? 'var(--v2-ink)' : 'var(--v2-surface)', color: activeFilterCount > 0 ? 'var(--v2-surface)' : 'var(--v2-ink-muted)',
+            fontSize: 13, fontWeight: 700, cursor: 'pointer', boxShadow: 'var(--v2-shadow-sm)',
+          }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
+          Filters{activeFilterCount > 0 && ` (${activeFilterCount})`}
+        </button>
       </div>
+
+      {/* Active filters, obviously visible and each individually removable — "easy to change/
+          remove", never a silent black-box narrowing of results the way a plain applied filter
+          with no visible trace would be. */}
+      {activeFilterCount > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
+          {[...selectedCategories].map((cat) => (
+            <button key={cat} type="button" onClick={() => toggleCategory(cat)} className="v2-tap-feedback" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', borderRadius: 100, padding: '6px 11px 6px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: 'var(--v2-bg-deep)', color: 'var(--v2-ink)' }}>
+              {CATEGORY_LABEL[cat] ?? cat}<span style={{ fontSize: 14, lineHeight: 1, opacity: 0.5 }}>×</span>
+            </button>
+          ))}
+          {dateFilter !== 'any' && (
+            <button type="button" onClick={() => setDateFilter('any')} className="v2-tap-feedback" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', borderRadius: 100, padding: '6px 11px 6px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: 'var(--v2-bg-deep)', color: 'var(--v2-ink)' }}>
+              {DATE_OPTIONS.find((d) => d.value === dateFilter)?.label}<span style={{ fontSize: 14, lineHeight: 1, opacity: 0.5 }}>×</span>
+            </button>
+          )}
+          {priceFilter !== 'any' && (
+            <button type="button" onClick={() => setPriceFilter('any')} className="v2-tap-feedback" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', borderRadius: 100, padding: '6px 11px 6px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: 'var(--v2-bg-deep)', color: 'var(--v2-ink)' }}>
+              {PRICE_OPTIONS.find((p) => p.value === priceFilter)?.label}<span style={{ fontSize: 14, lineHeight: 1, opacity: 0.5 }}>×</span>
+            </button>
+          )}
+          <button type="button" onClick={clearFilters} className="v2-tap-feedback" style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--v2-ink-dim)', cursor: 'pointer', padding: '6px 4px' }}>
+            Clear all
+          </button>
+        </div>
+      )}
 
       {dataSource === 'mock' && (
         <div style={{ fontSize: 12.5, color: 'var(--v2-ink-muted)', background: 'var(--v2-bg-deep)', borderRadius: 12, padding: '10px 14px', marginBottom: 6 }}>
@@ -586,7 +720,7 @@ export default function ExplorePage() {
             Hide it whenever the full sheet has taken over. */}
         {previewExp && !selected && (
           <div className="v2-explore-preview fade-up">
-            <div style={{ height: 130, background: v2Art(previewExp.imageUrl, previewExp.category) }} />
+            <div style={{ height: 130, background: v2Art(previewExp.imageUrl, previewExp.category, previewExp.id) }} />
             <div style={{ padding: '12px 14px' }}>
               <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>{previewExp.name}</div>
               <div className="v2-muted" style={{ fontSize: 12, marginBottom: 8 }}>
@@ -661,6 +795,73 @@ export default function ExplorePage() {
           crosses the breakpoint while it's open. */}
       <BottomSheet open={!isDesktop && selected !== null} onClose={closeSheet}>
         {detailContent}
+      </BottomSheet>
+
+      {/* The Filters sheet — category (multi-select), date, price. Every control live-applies
+          (no separate "Apply" step to remember) with an immediate result count, matching the
+          rest of the app's own direct-manipulation conventions (Profile's Budget/Travel pills). */}
+      <BottomSheet open={filtersOpen} onClose={() => setFiltersOpen(false)}>
+        <div className="v2-eyebrow" style={{ marginBottom: 4 }}>Filters</div>
+        <h2 className="v2-display" style={{ fontSize: 19, marginBottom: 16 }}>Narrow it down</h2>
+
+        <div className="v2-muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Category</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
+          {CATEGORY_OPTIONS.map((opt) => {
+            const active = selectedCategories.has(opt.value);
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => toggleCategory(opt.value)}
+                className="v2-tap-feedback"
+                style={{ border: 'none', borderRadius: 100, padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', background: active ? 'var(--v2-brand)' : 'var(--v2-bg-deep)', color: active ? '#fff' : 'var(--v2-ink-muted)' }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="v2-muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>When</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
+          {DATE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setDateFilter(opt.value)}
+              className="v2-tap-feedback"
+              style={{ border: 'none', borderRadius: 100, padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', background: dateFilter === opt.value ? 'var(--v2-ink)' : 'var(--v2-bg-deep)', color: dateFilter === opt.value ? 'var(--v2-surface)' : 'var(--v2-ink-muted)' }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="v2-muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Price</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 24 }}>
+          {PRICE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setPriceFilter(opt.value)}
+              className="v2-tap-feedback"
+              style={{ border: 'none', borderRadius: 100, padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', background: priceFilter === opt.value ? 'var(--v2-ink)' : 'var(--v2-bg-deep)', color: priceFilter === opt.value ? 'var(--v2-surface)' : 'var(--v2-ink-muted)' }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          {activeFilterCount > 0 && (
+            <button type="button" className="v2-btn v2-btn-ghost" style={{ flex: '0 0 auto' }} onClick={clearFilters}>
+              Clear all
+            </button>
+          )}
+          <button type="button" className="v2-btn v2-btn-brand" style={{ flex: 1 }} onClick={() => setFiltersOpen(false)}>
+            Show {searched.length} {searched.length === 1 ? 'result' : 'results'}
+          </button>
+        </div>
       </BottomSheet>
 
       <TabBarV2 />

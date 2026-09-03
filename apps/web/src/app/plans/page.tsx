@@ -178,7 +178,7 @@ export default function PlansPage() {
                                   editorial art per category. Never a small thumbnail beside the
                                   real content; here it IS the content, same treatment as the
                                   EventCard this reuses (v2Art). */}
-                              <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: v2Art(plan.imageUrl, plan.category) }}>
+                              <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: v2Art(plan.imageUrl, plan.category, plan.id) }}>
                                 <div
                                   style={{
                                     position: 'absolute', inset: 0,

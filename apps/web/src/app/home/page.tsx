@@ -231,7 +231,8 @@ export default function HomePage() {
   return (
     <div className="v2 v2-app-shell">
       <div className="v2-shell-desktop">
-        <div className="v2-page v2-home-page" style={{ paddingTop: 24 }}>
+        <div className="v2-home-split">
+        <div className="v2-page v2-home-page v2-home-main" style={{ paddingTop: 24 }}>
           {/* Header — small and secondary now; the story rail below it carries the page's real
               opening statement. The avatar here is a mobile-only affordance (desktop already has
               one pinned to the nav rail). */}
@@ -429,7 +430,7 @@ export default function HomePage() {
                   "why this fits" reasoning as the smaller feed cards, so the biggest thing on
                   Home is unmistakably a Plot moment when it is one. */}
               {heroNeedsAttention.activePlan!.isPlotFound ? (
-                <div className="v2-ken-burns" style={{ position: 'absolute', inset: 0, background: v2Art(heroNeedsAttention.activePlan!.imageUrl, heroNeedsAttention.activePlan!.category) }} />
+                <div className="v2-ken-burns" style={{ position: 'absolute', inset: 0, background: v2Art(heroNeedsAttention.activePlan!.imageUrl, heroNeedsAttention.activePlan!.category, heroNeedsAttention.activePlan!.id) }} />
               ) : (
                 <div className="v2-ken-burns" style={{ position: 'absolute', inset: 0, background: identityGradient(heroNeedsAttention.id, 155) }} />
               )}
@@ -483,7 +484,7 @@ export default function HomePage() {
                         boxShadow: 'var(--v2-shadow-sm)',
                       }}
                     >
-                      <div className="v2-ken-burns" style={{ position: 'absolute', inset: 0, background: v2Art(plan.imageUrl, plan.category) }} />
+                      <div className="v2-ken-burns" style={{ position: 'absolute', inset: 0, background: v2Art(plan.imageUrl, plan.category, plan.id) }} />
                       <div
                         style={{
                           position: 'absolute', left: 0, right: 0, bottom: 0, height: '80%',
@@ -627,9 +628,11 @@ export default function HomePage() {
           )}
 
           {/* FOR YOUR CREWS — a few genuinely useful suggestions, deliberately small and last:
-              discovery feeds the social loop, it doesn't lead the page. */}
+              discovery feeds the social loop, it doesn't lead the page. Desktop ≥1280px hides
+              this in favour of the persistent vertical rail (see .v2-home-discover-rail below,
+              and globals.css's own comment on why) — mobile/tablet/narrow-desktop keep it. */}
           {ideas && ideas.length > 0 && (
-            <div style={{ marginTop: 8 }}>
+            <div className="v2-home-ideas-inline" style={{ marginTop: 8 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
                 <div className="v2-eyebrow" style={{ marginBottom: 0 }}>{crews && crews.length > 0 ? 'For your Crews' : 'Worth a look nearby'}</div>
                 <Link href="/explore" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>Discover</Link>
@@ -644,7 +647,7 @@ export default function HomePage() {
                       className="v2-reveal v2-hoverable"
                       style={{ flex: '0 0 auto', width: 172, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', ['--reveal-i' as string]: i }}
                     >
-                      <div style={{ position: 'relative', height: 110, background: v2Art(exp.imageUrl, exp.category) }}>
+                      <div style={{ position: 'relative', height: 110, background: v2Art(exp.imageUrl, exp.category, exp.id) }}>
                         {CATEGORY_TAG[exp.category] && (
                           <span style={{ position: 'absolute', top: 8, left: 8, fontSize: 9.5, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase', color: '#fff', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', padding: '4px 8px', borderRadius: 100 }}>
                             {CATEGORY_TAG[exp.category]}
@@ -664,6 +667,48 @@ export default function HomePage() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* THE DESKTOP DISCOVER RAIL — real content under the "Discover" header, not empty
+            margin (see globals.css's own comment on the bug this fixes). Same `ideas` data the
+            mobile row already fetched; a real vertical list, not a second horizontal strip
+            squeezed into a narrow column. Only rendered ≥1280px (globals.css), so this never
+            shows twice. */}
+        {ideas && ideas.length > 0 && (
+          <aside className="v2-home-discover-rail">
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
+              <div className="v2-eyebrow" style={{ marginBottom: 0 }}>{crews && crews.length > 0 ? 'For your Crews' : 'Worth a look nearby'}</div>
+              <Link href="/explore" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>See all</Link>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {ideas.slice(0, 6).map((exp) => {
+                const price = formatPriceFrom(exp.priceMinMinor, exp.currency);
+                return (
+                  <Link
+                    key={exp.id}
+                    href="/explore"
+                    className="v2-hoverable"
+                    style={{ display: 'flex', gap: 12, alignItems: 'center', borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', background: 'var(--v2-surface)' }}
+                  >
+                    <div style={{ flexShrink: 0, width: 72, height: 72, background: v2Art(exp.imageUrl, exp.category, exp.id) }} />
+                    <div style={{ minWidth: 0, flex: 1, padding: '8px 12px 8px 0' }}>
+                      {CATEGORY_TAG[exp.category] && (
+                        <div className="v2-dim" style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', marginBottom: 3 }}>
+                          {CATEGORY_TAG[exp.category]}
+                        </div>
+                      )}
+                      <div style={{ fontWeight: 700, fontSize: 13, lineHeight: 1.3, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
+                      <div className="v2-dim" style={{ fontSize: 11 }}>
+                        {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
+                        {price && ` · ${price}`}
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </aside>
+        )}
         </div>
       </div>
       <TabBarV2 />

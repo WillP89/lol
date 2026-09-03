@@ -105,7 +105,7 @@ export default async function PlanCardPage({ params }: { params: { slug: string 
           with a form bolted underneath it. */}
       <div className="v2-page" style={{ paddingTop: 0, paddingBottom: 40, maxWidth: 480 }}>
         <div style={{ position: 'relative', height: 340, margin: '0 -20px', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', inset: 0, background: v2Art(plan.experience?.imageUrl, plan.experience?.category) }} />
+          <div style={{ position: 'absolute', inset: 0, background: v2Art(plan.experience?.imageUrl, plan.experience?.category, plan.id) }} />
           <div
             style={{
               position: 'absolute', left: 0, right: 0, bottom: 0, height: '62%',
