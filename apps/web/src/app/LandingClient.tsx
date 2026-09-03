@@ -34,12 +34,15 @@ export default function LandingClient() {
         <Link href="/auth" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--v2-ink-muted)' }}>Sign in</Link>
       </div>
 
-      <div
-        style={{
-          minHeight: 'calc(100dvh - 76px)', display: 'flex', alignItems: 'center', gap: 48, flexWrap: 'wrap',
-          padding: '24px 28px 60px', maxWidth: 1080, margin: '0 auto', width: '100%',
-        }}
-      >
+      <div style={{ position: 'relative', minHeight: 'calc(100dvh - 76px)' }}>
+        <LandingAtmosphere />
+        <div
+          style={{
+            position: 'relative', zIndex: 1,
+            minHeight: 'calc(100dvh - 76px)', display: 'flex', alignItems: 'center', gap: 48, flexWrap: 'wrap',
+            padding: '24px 28px 60px', maxWidth: 1080, margin: '0 auto', width: '100%',
+          }}
+        >
         <div className="fade-up" style={{ flex: '1 1 420px', minWidth: 300 }}>
           <h1 style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 900, fontSize: 'clamp(40px, 6.5vw, 72px)', lineHeight: 0.96, letterSpacing: '-0.03em', marginBottom: 22 }}>
             Actually<br />
@@ -60,13 +63,18 @@ export default function LandingClient() {
 
         {/* A small collage of rotated "plan card" tiles — Partiful's own invite-card device,
             scaled down: colour and personality living in content, not in the chrome around it.
-            Each tile straightens and lifts on hover/tap (pure CSS — see .v2-collage-card) and
-            the whole collage staggers in on load. */}
+            Each tile straightens and lifts on hover/tap (pure CSS — see .v2-collage-card), the
+            whole collage staggers in on load, and now (real, reported feedback: the page "does
+            not look any different" — needed real, continuous motion, not just an entrance
+            animation that's over in half a second) each tile also idles with its own gentle,
+            out-of-phase bob (.v2-collage-drift) so the collage stays visibly alive at rest, not
+            just on hover. Hover's own `!important` transform still wins over the idle animation
+            while a pointer's actually on a card. */}
         <div aria-hidden style={{ flex: '0 0 auto', display: 'flex', gap: 14, margin: '0 auto', transform: 'rotate(-2deg)' }}>
           {cards.map(([when, what, color], i) => (
             <div
               key={what}
-              className="fade-up v2-stagger v2-collage-card"
+              className="fade-up v2-stagger v2-collage-card v2-collage-drift"
               style={{
                 width: 120, height: 168, borderRadius: 18, padding: '14px 12px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
                 background: `linear-gradient(155deg, ${color}, rgba(12,12,13,0.85))`,
@@ -74,6 +82,7 @@ export default function LandingClient() {
                 ['--tilt' as string]: `${i === 1 ? 3 : i === 0 ? -6 : 7}deg`,
                 ['--lift' as string]: `${i === 1 ? -10 : 6}px`,
                 ['--stagger-i' as string]: i,
+                ['--drift-delay' as string]: `${i * -1.7}s`,
                 transform: 'rotate(var(--tilt)) translateY(var(--lift))',
                 color: '#fff',
               }}
@@ -82,6 +91,7 @@ export default function LandingClient() {
               <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 800, fontSize: 15.5, lineHeight: 1.15 }}>{what}</div>
             </div>
           ))}
+        </div>
         </div>
       </div>
 
@@ -129,6 +139,25 @@ export default function LandingClient() {
           </Link>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * THE HERO'S OWN ATMOSPHERE — real, reported feedback on the entrance screen ("this does not
+ * look any different"): the hero used to be flat colour with nothing moving until you actually
+ * hovered a card. Same primitive as the sign-in page's own AuthAtmosphere (auth/page.tsx) — soft,
+ * large, blurred brand-colour fields drifting slowly behind the content (`.v2-auth-blob`, reused
+ * here rather than duplicated) — sized up for the bigger hero canvas. `aria-hidden`, purely
+ * decorative, sits behind the hero content (z-index 0 vs. the content's 1) and respects
+ * `prefers-reduced-motion` (globals.css guards the animation).
+ */
+function LandingAtmosphere() {
+  return (
+    <div aria-hidden className="v2-auth-atmosphere">
+      <div className="v2-auth-blob" style={{ width: 560, height: 560, top: '-20%', left: '-14%', background: 'var(--v2-pop)', animationDelay: '0s' }} />
+      <div className="v2-auth-blob" style={{ width: 480, height: 480, bottom: '-22%', right: '-10%', background: 'var(--v2-confetti-2)', animationDelay: '-9s' }} />
+      <div className="v2-auth-blob" style={{ width: 380, height: 380, top: '30%', right: '8%', background: 'var(--v2-confetti-4)', animationDelay: '-17s' }} />
     </div>
   );
 }
