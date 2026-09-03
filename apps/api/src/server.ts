@@ -2,6 +2,7 @@ import { buildApp } from './app';
 import { config } from './lib/config';
 import { runSweepIfDue, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from './services/crewRecommendations';
 import { runImageQualityBackfillIfDue, runMissingImageBackfillIfDue } from './services/inventorySync';
+import { runMessageNotificationSweepIfDue, MESSAGE_NOTIFICATION_SWEEP_DUE_INTERVAL_MS } from './services/messageNotifications';
 
 const app = buildApp();
 
@@ -106,6 +107,26 @@ const checkMissingImageBackfill = () => {
 if (config.NODE_ENV !== 'test') {
   setTimeout(checkMissingImageBackfill, 30_000);
   setInterval(checkMissingImageBackfill, MISSING_IMAGE_BACKFILL_CHECK_INTERVAL_MS);
+}
+
+// "Notifications of messages in crews that you're in" — see services/messageNotifications.ts's
+// own comment for the full "why a debounced digest, not one email per message" reasoning. Same
+// due/check split, same DB-backed claim, as every sweep above — but a much shorter DUE interval
+// (3 minutes vs. hours) since this is a near-real-time digest, not a periodic batch job; CHECK
+// stays short for the same fast-recovery-after-restart reason the others use it for. Staggered a
+// further 10s so it doesn't compete with the other three for the same startup window; also
+// triggerable on demand via POST /admin/message-notifications/sweep.
+const MESSAGE_NOTIFICATION_CHECK_INTERVAL_MS = 60 * 1000; // 1 minute — needs to be short given the 3-minute due interval
+const checkMessageNotifications = () => {
+  runMessageNotificationSweepIfDue(MESSAGE_NOTIFICATION_SWEEP_DUE_INTERVAL_MS)
+    .then((outcome) => {
+      if (outcome.ran) app.log.info(outcome.result, 'Message notification sweep ran (database confirmed it was due)');
+    })
+    .catch((err) => app.log.error({ err }, 'Message notification sweep check failed'));
+};
+if (config.NODE_ENV !== 'test') {
+  setTimeout(checkMessageNotifications, 40_000);
+  setInterval(checkMessageNotifications, MESSAGE_NOTIFICATION_CHECK_INTERVAL_MS);
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

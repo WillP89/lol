@@ -311,7 +311,15 @@ export async function getCrewDetail(crewId: string, requestingUserId: string) {
   ]);
   if (!crew) return null;
 
-  return { ...crew, recentMessages: recentMessages.reverse() };
+  return {
+    ...crew,
+    recentMessages: recentMessages.reverse(),
+    // The caller's OWN per-Crew email-digest preference (see PATCH /crews/:id/notifications) —
+    // exposed here (not a separate GET) since every Crew-page load already fetches this same
+    // membership row to gate the whole response; a second round-trip just to read one boolean
+    // would be a real, avoidable request the frontend doesn't need.
+    myEmailNotificationsEnabled: membership.emailNotificationsEnabled,
+  };
 }
 
 export async function isCrewMember(crewId: string, userId: string): Promise<boolean> {
@@ -332,6 +340,17 @@ export async function markCrewRead(crewId: string, userId: string): Promise<void
     where: { crewId, userId, status: 'ACTIVE' },
     data: { lastReadAt: new Date() },
   });
+}
+
+/** The one real opt-out for the message-digest email sweep (services/messageNotifications.ts)
+ * — always the CALLER'S OWN membership row (see PATCH /crews/:id/notifications), never
+ * something one member can set for another. */
+export async function setEmailNotificationsEnabled(crewId: string, userId: string, enabled: boolean): Promise<boolean> {
+  const result = await prisma.crewMember.updateMany({
+    where: { crewId, userId, status: 'ACTIVE' },
+    data: { emailNotificationsEnabled: enabled },
+  });
+  return result.count > 0;
 }
 
 export class CrewMembershipError extends Error {

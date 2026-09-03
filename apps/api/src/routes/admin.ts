@@ -8,6 +8,7 @@ import { buildCanonicalKey } from '../services/entityResolution';
 import { computeQualityScore } from '../services/qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, getOrCreateSettings, explainCrewRecommendation, PLOT_SYSTEM_EMAIL, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from '../services/crewRecommendations';
+import { runMessageNotificationSweep, runMessageNotificationSweepIfDue, MESSAGE_NOTIFICATION_SWEEP_DUE_INTERVAL_MS } from '../services/messageNotifications';
 
 /**
  * Internal operator tooling (brief §29 admin console, §64 operating dashboard). Gated by a
@@ -269,6 +270,25 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     }
     const outcome = await runSweepIfDue(RECOMMENDATION_SWEEP_DUE_INTERVAL_MS);
     return reply.send({ ran: outcome.ran, forced: false, ...(outcome.result ?? { crewsEvaluated: 0, delivered: 0, errors: 0 }) });
+  });
+
+  /**
+   * The email message-digest sweep's manual trigger — same shape as /recommendations/sweep
+   * above (`force: true` bypasses the due-check for real testing/ops use, the default path goes
+   * through the same database-backed "is this actually due" check the in-process poll in
+   * server.ts uses). See services/messageNotifications.ts for what actually runs.
+   */
+  app.post('/message-notifications/sweep', async (request, reply) => {
+    const BodySchema = z.object({ force: z.boolean().optional() });
+    const parsed = BodySchema.safeParse(request.body ?? {});
+    const force = parsed.success ? Boolean(parsed.data.force) : false;
+
+    if (force) {
+      const result = await runMessageNotificationSweep();
+      return reply.send({ ...result, ran: true, forced: true });
+    }
+    const outcome = await runMessageNotificationSweepIfDue(MESSAGE_NOTIFICATION_SWEEP_DUE_INTERVAL_MS);
+    return reply.send({ ran: outcome.ran, forced: false, ...(outcome.result ?? { crewsScanned: 0, membersConsidered: 0, emailsSent: 0, errors: 0 }) });
   });
 
   /**

@@ -136,6 +136,10 @@ interface CrewDetail {
   members: { role: string; user: { id: string; displayName: string | null; email: string; avatarUrl?: string | null } }[];
   dna: { confidence: string; topCategories: string[]; medianSpendMinor: number; bestNights: string[]; usualAreas: string[] } | null;
   plans: Plan[];
+  // The caller's OWN per-Crew email-digest preference (PATCH /crews/:id/notifications) — see
+  // that route's own comment for why this rides along on the same GET rather than a second
+  // round-trip.
+  myEmailNotificationsEnabled: boolean;
 }
 
 interface DayAvailability {
@@ -664,6 +668,12 @@ export default function CrewPage() {
   const [leavingCrew, setLeavingCrew] = useState(false);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // Real, explicit product request: type someone's email right here and Plot sends them a real
+  // invite, rather than only ever handing you a link to paste somewhere yourself.
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteEmailStatus, setInviteEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [inviteEmailError, setInviteEmailError] = useState<string | null>(null);
+  const [notifSaving, setNotifSaving] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const lastIdRef = useRef<string | undefined>(undefined);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
@@ -1264,6 +1274,40 @@ export default function CrewPage() {
   async function getInviteLink() {
     const res = await api.post<{ inviteUrl: string }>(`/crews/${crewId}/invites`, { channel: 'link' });
     setInviteUrl(res.inviteUrl);
+  }
+
+  async function sendInviteEmail(e: React.FormEvent) {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    setInviteEmailStatus('sending');
+    setInviteEmailError(null);
+    try {
+      const res = await api.post<{ ok: true; sentTo?: string; devInviteUrl?: string }>(`/crews/${crewId}/invites/email`, { email: inviteEmail.trim() });
+      setInviteEmailStatus('sent');
+      setInviteEmail('');
+      // No email provider configured (local/dev) — same dev-mode fallback every other
+      // email-sending flow in this app uses, so testing this stays possible without real
+      // credentials: surface the real link directly instead of a "sent" message that lied.
+      if (res.devInviteUrl) setInviteUrl(res.devInviteUrl);
+      setTimeout(() => setInviteEmailStatus('idle'), 3000);
+    } catch (err) {
+      setInviteEmailStatus('error');
+      setInviteEmailError(err instanceof ApiError ? err.message : "Couldn't send that invite.");
+    }
+  }
+
+  async function toggleEmailNotifications() {
+    if (!crew) return;
+    const next = !crew.myEmailNotificationsEnabled;
+    setCrew({ ...crew, myEmailNotificationsEnabled: next }); // optimistic — this is a plain on/off, nothing to reconcile
+    setNotifSaving(true);
+    try {
+      await api.patch(`/crews/${crewId}/notifications`, { emailNotificationsEnabled: next });
+    } catch {
+      setCrew((prev) => (prev ? { ...prev, myEmailNotificationsEnabled: !next } : prev)); // revert on a genuine failure
+    } finally {
+      setNotifSaving(false);
+    }
   }
 
   /** Fetched lazily the first time the Crew info sheet opens, not on every Crew page load -
@@ -2257,11 +2301,33 @@ export default function CrewPage() {
         <button
           onClick={inviteUrl ? copyInvite : getInviteLink}
           className="v2-btn v2-btn-brand v2-tap-feedback"
-          style={{ width: '100%', justifyContent: 'center', gap: 8, marginBottom: 20 }}
+          style={{ width: '100%', justifyContent: 'center', gap: 8, marginBottom: 10 }}
         >
           <IconAddPerson size={15} />
           {inviteUrl ? (copied ? 'Copied — send it on' : 'Copy invite link') : 'Add people'}
         </button>
+
+        {/* Real, explicit request: type someone's email right here and Plot actually sends them
+            an invite, rather than only ever handing you a link to paste somewhere yourself. */}
+        <form onSubmit={sendInviteEmail} style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+          <input
+            type="email"
+            required
+            placeholder="Or invite by email…"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            style={{ flex: 1, minWidth: 0, padding: '11px 14px', borderRadius: 12, border: 'none', outline: 'none', background: 'var(--v2-bg-deep)', fontSize: 13.5, fontFamily: 'inherit', color: 'var(--v2-ink)' }}
+          />
+          <button
+            type="submit"
+            disabled={inviteEmailStatus === 'sending' || !inviteEmail.trim()}
+            className="v2-btn v2-btn-ghost v2-tap-feedback"
+            style={{ flexShrink: 0, fontSize: 13 }}
+          >
+            {inviteEmailStatus === 'sending' ? 'Sending…' : inviteEmailStatus === 'sent' ? '✓ Sent' : 'Send'}
+          </button>
+        </form>
+        {inviteEmailError && <div style={{ color: 'var(--v2-error)', fontSize: 12, marginTop: -12, marginBottom: 16 }}>{inviteEmailError}</div>}
 
         <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Members</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 20 }}>
@@ -2304,6 +2370,37 @@ export default function CrewPage() {
               </div>
             );
           })}
+        </div>
+
+        {/* The one real opt-out for the message-digest email sweep — on by default per the
+            explicit request to bake this in, but never something you can't turn off for
+            yourself. A plain on/off, not buried in the separate "Crew settings" sheet, since
+            this is a personal preference about this Crew, not something that changes the Crew
+            itself the way recommendation settings do. */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', marginBottom: 8, borderTop: '1px solid var(--v2-line)', borderBottom: '1px solid var(--v2-line)' }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700 }}>Email me about new messages</div>
+            <p className="v2-dim" style={{ fontSize: 11.5, margin: 0 }}>A quiet digest if you miss something here — never one email per message.</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={crew.myEmailNotificationsEnabled}
+            onClick={toggleEmailNotifications}
+            disabled={notifSaving}
+            className="v2-tap-feedback"
+            style={{
+              flexShrink: 0, width: 42, height: 25, borderRadius: 100, border: 'none', cursor: 'pointer', position: 'relative',
+              background: crew.myEmailNotificationsEnabled ? 'var(--v2-brand)' : 'var(--v2-bg-deep)', transition: 'background 0.15s ease',
+            }}
+          >
+            <span
+              style={{
+                position: 'absolute', top: 3, left: crew.myEmailNotificationsEnabled ? 20 : 3, width: 19, height: 19, borderRadius: '50%',
+                background: crew.myEmailNotificationsEnabled ? 'var(--v2-brand-ink)' : 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)', transition: 'left 0.15s ease',
+              }}
+            />
+          </button>
         </div>
 
         {confirmLeave ? (
