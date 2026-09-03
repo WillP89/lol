@@ -76,6 +76,11 @@ const DEFAULT_QUERY = CATEGORY_SEARCH_QUERY.CUSTOM;
 interface PoolEntry { images: EnrichedImage[]; fetchedAt: number }
 const pool = new Map<string, PoolEntry>();
 const POOL_TTL_MS = 30 * 60 * 1000; // 30 minutes — long enough to not re-query mid-sync, short enough that a transient miss self-heals well within one day's sync cadence
+// Real, production-confirmed bug this fixes — see pexelsStockImages.ts's own EMPTY_POOL_TTL_MS
+// comment for the full story (a live backfill run filled only 144/432 rows, a category-shaped
+// miss pattern that a same-TTL-for-failures cache exactly produces). A failed/empty search now
+// expires in 30 seconds, not 30 minutes, so it self-heals within a single run.
+const EMPTY_POOL_TTL_MS = 30 * 1000;
 
 function hashString(s: string): number {
   let h = 0x811c9dc5;
@@ -149,7 +154,10 @@ async function fetchCandidatePool(query: string): Promise<EnrichedImage[]> {
 async function getCandidatePool(category: string): Promise<EnrichedImage[]> {
   const query = CATEGORY_SEARCH_QUERY[category] ?? DEFAULT_QUERY;
   const cached = pool.get(category);
-  if (cached && Date.now() - cached.fetchedAt < POOL_TTL_MS) return cached.images;
+  if (cached) {
+    const ttl = cached.images.length > 0 ? POOL_TTL_MS : EMPTY_POOL_TTL_MS;
+    if (Date.now() - cached.fetchedAt < ttl) return cached.images;
+  }
 
   const images = await fetchCandidatePool(query).catch((err) => {
     logger.warn({ err, category, query }, 'Wikimedia Commons category-stock image search failed — continuing without one');

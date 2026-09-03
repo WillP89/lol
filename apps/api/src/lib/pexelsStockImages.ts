@@ -68,6 +68,17 @@ const DEFAULT_QUERY = CATEGORY_SEARCH_QUERY.CUSTOM;
 interface PoolEntry { images: EnrichedImage[]; fetchedAt: number }
 const pool = new Map<string, PoolEntry>();
 const POOL_TTL_MS = 30 * 60 * 1000; // same rationale as categoryStockImages.ts's own pool TTL
+// Real, production-confirmed bug this fixes: a transient failure (a timeout, a slow cold-start
+// response) on a category's FIRST search was being cached as an empty pool for the SAME 30-minute
+// TTL as a genuine success — meaning one bad attempt silently starved every other listing in that
+// category of a real photo for the rest of that backfill run and the next half hour, even though a
+// retry moments later would very likely have worked. Confirmed live: a production backfill run
+// filled only 144/432 rows — a partial, category-shaped miss pattern, not a uniform "some photos
+// just don't exist" spread, exactly what a poisoned per-category cache produces. A failed/empty
+// result now expires in 30 SECONDS, not 30 minutes, so the very next listing in that category (a
+// few hundred ms later in the same batch loop) gets a fresh attempt instead of inheriting a stale
+// failure — self-healing within a single run, not just across separate runs.
+const EMPTY_POOL_TTL_MS = 30 * 1000;
 
 function hashString(s: string): number {
   let h = 0x811c9dc5;
@@ -125,7 +136,10 @@ async function getCandidatePool(category: string): Promise<EnrichedImage[]> {
 
   const query = CATEGORY_SEARCH_QUERY[category] ?? DEFAULT_QUERY;
   const cached = pool.get(category);
-  if (cached && Date.now() - cached.fetchedAt < POOL_TTL_MS) return cached.images;
+  if (cached) {
+    const ttl = cached.images.length > 0 ? POOL_TTL_MS : EMPTY_POOL_TTL_MS;
+    if (Date.now() - cached.fetchedAt < ttl) return cached.images;
+  }
 
   const images = await fetchCandidatePool(query, apiKey).catch((err) => {
     logger.warn({ err, category, query }, 'Pexels category-stock image search failed — continuing without one');

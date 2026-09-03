@@ -114,4 +114,39 @@ describe('getCategoryStockImage', () => {
     await getCategoryStockImage('RESTAURANT', 'Diner Three');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  /**
+   * Real, production-confirmed bug: a live backfill run filled only 144 of 432 rows — a
+   * category-shaped miss pattern, not a uniform "some photos just don't exist" spread. Root cause:
+   * a transient failure on a category's FIRST search (a timeout, a slow cold-start response) was
+   * being cached as an empty pool for the SAME 30-minute TTL as a genuine success, silently
+   * starving every other listing in that category for the rest of the run. Fixed with a much
+   * shorter negative-cache TTL (EMPTY_POOL_TTL_MS) — this proves it self-heals within one run.
+   */
+  test('a failed/empty search retries quickly, not stuck for the full 30-minute positive-cache window', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    let clock = 1_000_000;
+    nowSpy.mockImplementation(() => clock);
+
+    fetchMock.mockRejectedValueOnce(new Error('transient network blip'));
+    const first = await getCategoryStockImage('THEATRE', 'Some Show');
+    expect(first).toBeNull();
+
+    // Only 5 seconds later — well inside the old 30-minute TTL, but past the new short one is what
+    // we're about to prove: a SECOND call this soon must NOT re-fetch (still within EMPTY_POOL_TTL_MS).
+    clock += 5_000;
+    const stillCached = await getCategoryStockImage('THEATRE', 'Another Show');
+    expect(stillCached).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no retry yet — too soon
+
+    // Past the short negative-cache window (30s) — the real fix: a retry now, not stuck until the
+    // full 30 minutes the old code would have required.
+    clock += 30_000;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ query: { pages: commonsPage(11, 'File:Recovered.jpg', 1920, 1280) } }) });
+    const recovered = await getCategoryStockImage('THEATRE', 'A Third Show');
+    expect(recovered).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    nowSpy.mockRestore();
+  });
 });

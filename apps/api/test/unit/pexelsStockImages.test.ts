@@ -110,4 +110,33 @@ describe('getPexelsStockImage', () => {
     expect(urls.every((u) => u !== null)).toBe(true);
     expect(new Set(urls.map((u) => u?.url)).size).toBeGreaterThan(1);
   });
+
+  /**
+   * Real, production-confirmed bug — see categoryStockImages.test.ts's own matching test for the
+   * full story (a live backfill run filled only 144/432 rows, a category-shaped miss pattern from
+   * a transient failure poisoning a category's cache for the full 30-minute positive-cache TTL).
+   */
+  test('a failed/empty search retries quickly, not stuck for the full 30-minute positive-cache window', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    let clock = 1_000_000;
+    nowSpy.mockImplementation(() => clock);
+
+    fetchMock.mockRejectedValueOnce(new Error('transient network blip'));
+    const { getPexelsStockImage } = await loadWithKey('test-key');
+    const first = await getPexelsStockImage('THEATRE', 'Some Show');
+    expect(first).toBeNull();
+
+    clock += 5_000; // well inside the new short negative-cache window — must NOT re-fetch yet
+    const stillCached = await getPexelsStockImage('THEATRE', 'Another Show');
+    expect(stillCached).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    clock += 30_000; // past it — the real fix: a retry now, not stuck for the full 30 minutes
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ photos: [pexelsPhoto(1920, 1280, 'Recovered')] }) });
+    const recovered = await getPexelsStockImage('THEATRE', 'A Third Show');
+    expect(recovered).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    nowSpy.mockRestore();
+  });
 });
