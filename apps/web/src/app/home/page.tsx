@@ -454,7 +454,15 @@ export default function HomePage() {
                     ? heroNeedsAttention.activePlan!.plotReasonText
                     : `${heroNeedsAttention.name} · ${heroNeedsAttention.activePlan!.inCount}/${heroNeedsAttention.activePlan!.totalMembers} have voted`}
                 </div>
-                <span style={{ display: 'inline-block', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand-ink)', background: '#fff', padding: '9px 18px', borderRadius: 100 }}>
+                {/* Real, live-reported bug this fixes: "the random white box below A-Z event" —
+                    the pill's own background was hardcoded to literal white ('#fff') while its
+                    text used `--v2-brand-ink`, the token meant to sit ON TOP OF `--v2-brand`
+                    (near-black in light mode) — pairing them here meant white text on a white
+                    background, an invisible pill with no visible label. `--v2-brand` is the
+                    correct background for `--v2-brand-ink` text; it's also what the identical
+                    "Plot found this for {name}" tag earlier in this same file (line ~396)
+                    already correctly uses — one consistent, theme-aware pairing, not two. */}
+                <span style={{ display: 'inline-block', fontSize: 12.5, fontWeight: 800, color: 'var(--v2-brand-ink)', background: 'var(--v2-brand)', padding: '9px 18px', borderRadius: 100 }}>
                   {heroNeedsAttention.activePlan!.isPlotFound ? 'Respond →' : 'Cast your vote →'}
                 </span>
               </div>

@@ -1,6 +1,25 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { buildApp } from '../src/app';
 import { resetDatabase } from './helpers/resetDb';
+
+// Same mock shape as missingImageBackfill.test.ts's own header — proves
+// enrichMissingImageForExperience (crewRecommendations.ts's new synchronous call, see its own
+// comment) without touching the real network.
+vi.mock('../src/lib/imageEnrichment', async () => {
+  const actual = await vi.importActual<typeof import('../src/lib/imageEnrichment')>('../src/lib/imageEnrichment');
+  return { ...actual, enrichImageFromTheSportsDb: vi.fn(async () => null), enrichImageFromWikipedia: vi.fn(async () => null) };
+});
+vi.mock('../src/lib/categoryStockImages', async () => {
+  const actual = await vi.importActual<typeof import('../src/lib/categoryStockImages')>('../src/lib/categoryStockImages');
+  return {
+    ...actual,
+    getCategoryStockImage: vi.fn(async (category: string) => (category === 'COMEDY' ? { url: 'https://upload.wikimedia.org/comedy-stock.jpg', sourcePage: 'File:Comedy.jpg' } : null)),
+  };
+});
+vi.mock('../src/lib/pexelsStockImages', async () => {
+  const actual = await vi.importActual<typeof import('../src/lib/pexelsStockImages')>('../src/lib/pexelsStockImages');
+  return { ...actual, getPexelsStockImage: vi.fn(async () => null) };
+});
 
 /**
  * "still no live feed pulling through into new crews created, it should immediately hit them
@@ -156,6 +175,39 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('The Crew\'s Actual Preference Gig');
     expect(announcement!.body).not.toContain('Untailored Comedy Night');
+  });
+
+  /**
+   * Real, live-reported bug: "I just created a crew... STOCK IMAGES" — a first Plot
+   * recommendation could land on a freshly-synced Experience that hadn't had its turn in the
+   * periodic missing-image backfill sweep yet (up to 6 hours away — see server.ts), so the
+   * single most scrutinised card in the product rendered the generic fallback graphic instead of
+   * a real photo. generateRecommendationForCrew now runs the same enrichment chain synchronously,
+   * right before delivery, for exactly the chosen experience — proven here end-to-end through the
+   * real crew-join trigger, not by calling the enrichment function directly.
+   */
+  test('a delivered first recommendation gets a real photo synchronously, not just on the next sweep', async () => {
+    await resetDatabase();
+    await seedExperience('Stock Image Bug Comedy Night', 'COMEDY', 'The Sugarmill');
+
+    const owner = await setUpMemberNoTaste('imagefix-owner@plot-test.invalid');
+    const mate = await setUpMemberNoTaste('imagefix-mate@plot-test.invalid');
+    const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name: 'Image Fix Test Crew', defaultCity: STAFFORD.city } });
+    const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crew.id}/recommendation-settings`,
+      headers: { cookie: owner.cookie },
+      payload: { categoryPreferences: ['COMEDY'] },
+    });
+    await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const { prisma } = await import('../src/lib/prisma');
+    const row = await prisma.experience.findFirst({ where: { name: 'Stock Image Bug Comedy Night' } });
+    expect(row!.imageUrl).toBe('https://upload.wikimedia.org/comedy-stock.jpg');
+    expect(row!.imageSource).toBe('CATEGORY_STOCK');
   });
 
   test('genuinely zero candidates (nothing in radius) still honestly delivers nothing — never fabricated', async () => {
