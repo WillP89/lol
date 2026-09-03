@@ -348,7 +348,7 @@ export default function ProfilePage() {
             <div style={{ marginBottom: 22 }}>
               <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Next up</div>
               <Link href={`/plans/${nextPlan.publicSlug}`} className="v2-card v2-tap-feedback" style={{ display: 'flex', gap: 12, padding: 10, alignItems: 'center' }}>
-                <div style={{ flexShrink: 0, width: 52, height: 52, borderRadius: 12, background: v2Art(nextPlan.imageUrl, nextPlan.category) }} />
+                <div style={{ flexShrink: 0, width: 52, height: 52, borderRadius: 12, background: v2Art(nextPlan.imageUrl, nextPlan.category, nextPlan.id) }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="v2-display" style={{ fontSize: 14.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nextPlan.title}</div>
                   <div className="v2-muted" style={{ fontSize: 12 }}>{nextPlan.crew.name}{nextPlan.venueName && ` · ${nextPlan.venueName}`}{formatPriceFrom(nextPlan.priceMinMinor, nextPlan.currency) && ` · ${formatPriceFrom(nextPlan.priceMinMinor, nextPlan.currency)}`}</div>

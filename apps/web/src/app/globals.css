@@ -841,6 +841,54 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   .v2-home-page { max-width: 720px; padding-top: 12px; }
 }
 
+/* Real, reported bug (the brief's own named failure mode): Home capped at 720px and centred,
+   full stop, at every desktop width — on a genuinely wide monitor that's a mobile feed floating
+   in a sea of dead grey either side, and the page's own "Discover" section header had nothing
+   under it (its horizontally-scrolling row of cards sat far to the right of a right-aligned
+   label, reading as an empty column). Same fix already proven on the Crew chat page (its own
+   `.v2-crew-split`/`.v2-crew-rail`, 1280px breakpoint) — a genuine second column, not a wider
+   single one: the main feed stays exactly the width it already was tuned at (720px is a real,
+   deliberate readability ceiling, not the bug), and the newly-freed width earns a real, live,
+   sticky "Discover" rail instead of empty margin. Below 1280px this is a no-op — same single
+   column as before, the existing horizontally-scrolling "For your Crews" row still carries
+   discovery on mobile/tablet/narrow-desktop, exactly as it does today. */
+.v2-home-split { display: block; }
+.v2-home-discover-rail { display: none; }
+@media (min-width: 1280px) {
+  .v2-home-split {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 28px;
+    padding-top: 18px;
+  }
+  /* Real bug found screenshotting this: `.v2-home-page`'s own `margin: 0 auto` (correct when
+     it's the page's only column, centring it under the nav rail) becomes a FLEX auto-margin the
+     moment it's a flex item in `.v2-home-split` — auto-margins on a flex child absorb the row's
+     leftover space, which shoved the whole column (and the rail after it) hard right instead of
+     sitting flush after the nav the way `.v2-crew-split`'s own column does. `margin: 0` cancels
+     it; alignment is `justify-content: flex-start` on the row itself now, not this child. */
+  .v2-home-main { flex: 0 0 auto; margin: 0; }
+  .v2-home-discover-rail {
+    display: flex;
+    flex-direction: column;
+    width: 320px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 18px;
+    max-height: calc(100dvh - 36px);
+    overflow-y: auto;
+    /* Unlike the Crew chat rail (deliberately flush, one continuous panel), this one is a
+       floating card list — it needs its own breathing room, not to sit glued to the physical
+       screen edge with its "See all" link clipped by the viewport boundary. */
+    padding: 0 24px 24px 0;
+  }
+  /* The row-form "For your Crews"/"Worth a look nearby" strip is a mobile/tablet affordance
+     (horizontal scroll only makes sense where there's no room for a real vertical list) — the
+     rail above is its desktop replacement, not a second copy of the same content. */
+  .v2-home-ideas-inline { display: none; }
+}
+
 /* The desktop Crews rail — a persistent, glanceable list beside the feed (Slack/Discord-shaped,
    not a stretched mobile column with dead space next to it — the exact "tiny central strip"
    failure mode the brief calls out). */

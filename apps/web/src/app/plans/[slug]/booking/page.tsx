@@ -147,7 +147,7 @@ export default function BookingPage() {
       <div className="v2-page" style={{ paddingTop: 12, maxWidth: 480 }}>
         {/* Same real bug as the Plan Card page (plans/[slug]/page.tsx) — a real photo existed
             for this experience and simply never reached this screen. */}
-        <div style={{ height: 140, margin: '0 -20px 22px', background: v2Art(plan.experience?.imageUrl ?? null, plan.experience?.category), borderRadius: 0 }} />
+        <div style={{ height: 140, margin: '0 -20px 22px', background: v2Art(plan.experience?.imageUrl ?? null, plan.experience?.category, plan.id), borderRadius: 0 }} />
 
         <div className="v2-eyebrow">{hasRealTicket && !reallyBooked ? 'Book for the Crew' : 'The plan'}</div>
         <h1 className="v2-display" style={{ fontSize: 24, marginBottom: 8 }}>{plan.title}</h1>

@@ -268,7 +268,7 @@ function EventCard({
       }}
     >
       <Link href={`/plans/${data.plan.publicSlug}`} style={{ display: 'block' }}>
-        <div className={locked ? `v2-event-art-locked${justLocked ? ' v2-just-locked' : ''}` : undefined} style={{ height: 120, background: v2Art(exp?.imageUrl, exp?.category), position: 'relative', overflow: 'hidden' }}>
+        <div className={locked ? `v2-event-art-locked${justLocked ? ' v2-just-locked' : ''}` : undefined} style={{ height: 120, background: v2Art(exp?.imageUrl, exp?.category, data.plan.id), position: 'relative', overflow: 'hidden' }}>
           {/* The mark lives ON the image itself now, not only in a text line beneath it — large,
               faint, watermark-scale (the same treatment the category fallback art already uses
               for its own icon), so even glancing past the card at speed, the shape registers as
@@ -1815,7 +1815,7 @@ export default function CrewPage() {
         {previewOption && (
           <div>
             <button onClick={() => setPreviewOption(null)} className="v2-muted" style={{ background: 'none', border: 'none', fontSize: 13, marginBottom: 10, cursor: 'pointer', padding: 0 }}>← Back to results</button>
-            <div style={{ height: 150, margin: '0 0 14px', borderRadius: 16, background: v2Art(previewOption.imageUrl, previewOption.category) }} />
+            <div style={{ height: 150, margin: '0 0 14px', borderRadius: 16, background: v2Art(previewOption.imageUrl, previewOption.category, previewOption.id) }} />
             <div className="v2-eyebrow" style={{ marginBottom: 4 }}>{previewOption.category.replace(/_/g, ' ')}</div>
             <div className="v2-display" style={{ fontSize: 19, marginBottom: 6 }}>{previewOption.name}</div>
             <div className="v2-muted" style={{ fontSize: 13.5, marginBottom: 10 }}>
@@ -1883,7 +1883,7 @@ export default function CrewPage() {
                     className="v2-hoverable"
                     style={{ display: 'block', textAlign: 'left', border: 'none', background: 'var(--v2-bg-deep)', borderRadius: 14, padding: 0, overflow: 'hidden', cursor: 'pointer' }}
                   >
-                    <div style={{ height: 84, background: v2Art(exp.imageUrl, exp.category) }} />
+                    <div style={{ height: 84, background: v2Art(exp.imageUrl, exp.category, exp.id) }} />
                     <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 800, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
@@ -1913,7 +1913,7 @@ export default function CrewPage() {
                   onClick={() => setPreviewOption(exp)}
                   style={{ display: 'flex', alignItems: 'center', gap: 12, border: 'none', background: 'var(--v2-bg-deep)', borderRadius: 14, padding: 10, cursor: 'pointer', textAlign: 'left' }}
                 >
-                  <div style={{ width: 52, height: 52, borderRadius: 10, flexShrink: 0, background: v2Art(exp.imageUrl, exp.category) }} />
+                  <div style={{ width: 52, height: 52, borderRadius: 10, flexShrink: 0, background: v2Art(exp.imageUrl, exp.category, exp.id) }} />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontWeight: 700, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
                     <div className="v2-muted" style={{ fontSize: 11.5 }}>{exp.venue.name}{exp.venue.city && `, ${exp.venue.city}`}</div>
