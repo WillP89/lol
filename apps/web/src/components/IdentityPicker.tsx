@@ -251,34 +251,64 @@ export function IdentityPicker({
         >
           {slides.map((slide, i) => {
             const active = i === activeIndex;
-            // A person's badge must stay a true circle regardless of the carousel's own
-            // portrait-ish aspect ratio — sized off width with aspectRatio:1 rather than
-            // stretched to fill the track's height, which a plain height:68% would do. Crew art
-            // stays a tall poster-shaped card (its actual finished look everywhere else in the
-            // app), so it keeps filling the available height.
-            const commonStyle: React.CSSProperties = isCircle
+            const label = slide.kind === 'photo' ? 'Your photo' : slide.kind === 'classic' ? 'Classic' : slide.label;
+
+            // Real, reported bug this fixes ("the words/names of the avatars need aligning
+            // properly"): the label used to be `position: absolute` INSIDE the circular,
+            // `overflow: hidden`-clipped button itself — centred via `left:0;right:0;text-align:
+            // center` against the button's own square bounding box, which is correct in theory,
+            // but sits the text right at the circle's lower edge, where a circle's actual round
+            // silhouette is far narrower than that square box (a chord near the bottom of a
+            // circle, not the full diameter) — long labels ("Championship", theme names) or a
+            // character's own art reaching low in the badge (a chin, a mouth) could sit close
+            // enough to that edge for the label to read as crowded/off against the round shape
+            // it's clipped into, not a clean caption under it. Rebuilt as two real, separate
+            // elements instead of one clipped circle wearing an overlaid caption: the round
+            // badge (still clipped to a circle, unchanged visually) and the label as an
+            // ordinary block of text BELOW it, both centred by their shared flex-column parent
+            // — the same construction the rest of the app already uses everywhere else a photo/
+            // mark sits above a name (Home's story rail, Profile's Crew strip), just not
+            // previously applied here. Guaranteed correct centring by simple flex alignment,
+            // not by replicating text-align math against a shape that isn't actually a square.
+            const wrapperStyle: React.CSSProperties = isCircle
               ? {
-                  flex: '0 0 68%', maxWidth: 280, aspectRatio: '1', scrollSnapAlign: 'center', borderRadius: '50%',
-                  position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flex: '0 0 68%', maxWidth: 280, scrollSnapAlign: 'center',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+                  border: 'none', background: 'none', padding: 0, cursor: 'pointer',
                   transform: active ? 'scale(1)' : 'scale(0.82)', opacity: active ? 1 : 0.45,
                   transition: 'transform 0.3s cubic-bezier(.2,.8,.2,1), opacity 0.3s ease',
-                  boxShadow: active ? '0 20px 44px rgba(20,16,12,0.28)' : 'none', cursor: 'pointer',
                 }
               : {
                   flex: '0 0 76%', maxWidth: 340, height: '68%', scrollSnapAlign: 'center', borderRadius: 28,
                   position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center',
                   transform: active ? 'scale(1)' : 'scale(0.84)', opacity: active ? 1 : 0.45,
                   transition: 'transform 0.3s cubic-bezier(.2,.8,.2,1), opacity 0.3s ease',
-                  boxShadow: active ? '0 20px 44px rgba(20,16,12,0.28)' : 'none', cursor: 'pointer',
+                  boxShadow: active ? '0 20px 44px rgba(20,16,12,0.28)' : 'none', cursor: 'pointer', border: 'none',
                 };
+            // Only the circular (avatar) case gets the new badge+caption split — crew art's tall
+            // poster card keeps its own proven "caption overlaid on the finished artwork" look,
+            // which was never the reported problem.
+            const badgeStyle: React.CSSProperties = {
+              width: '100%', aspectRatio: '1', borderRadius: '50%', overflow: 'hidden', position: 'relative',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: active ? '0 20px 44px rgba(20,16,12,0.28)' : 'none',
+            };
+            const captionStyle: React.CSSProperties = { fontSize: 13, fontWeight: 800, color: 'var(--v2-ink)', textAlign: 'center' };
+
             if (slide.kind === 'photo') {
-              return (
-                <button
-                  key="photo"
-                  type="button"
-                  onClick={() => (active ? inputRef.current?.click() : scrollTo(i))}
-                  style={{ ...commonStyle, border: 'none', background: hasRealPhoto && value ? `url("${value}") center/cover` : 'var(--v2-bg-deep)' }}
-                >
+              return isCircle ? (
+                <button key="photo" type="button" onClick={() => (active ? inputRef.current?.click() : scrollTo(i))} style={wrapperStyle}>
+                  <div style={{ ...badgeStyle, background: hasRealPhoto && value ? `url("${value}") center/cover` : 'var(--v2-bg-deep)' }}>
+                    {!(hasRealPhoto && value) && (
+                      <svg width="20%" height="20%" viewBox="0 0 24 24" fill="none" stroke="var(--v2-ink-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="5" width="18" height="14" rx="3" /><circle cx="12" cy="12" r="3.4" /><path d="M8 5l1.5-2h5L16 5" />
+                      </svg>
+                    )}
+                  </div>
+                  <span style={captionStyle}>Your photo</span>
+                </button>
+              ) : (
+                <button key="photo" type="button" onClick={() => (active ? inputRef.current?.click() : scrollTo(i))} style={{ ...wrapperStyle, background: hasRealPhoto && value ? `url("${value}") center/cover` : 'var(--v2-bg-deep)' }}>
                   {!(hasRealPhoto && value) && (
                     <svg width="20%" height="20%" viewBox="0 0 24 24" fill="none" stroke="var(--v2-ink-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="3" y="5" width="18" height="14" rx="3" /><circle cx="12" cy="12" r="3.4" /><path d="M8 5l1.5-2h5L16 5" />
@@ -289,31 +319,32 @@ export function IdentityPicker({
               );
             }
             if (slide.kind === 'classic') {
-              return (
-                <button
-                  key="classic"
-                  type="button"
-                  onClick={() => (active ? commitActive() : scrollTo(i))}
-                  style={{ ...commonStyle, border: 'none', background: identityGradient(email || name || 'plot') }}
-                >
+              return isCircle ? (
+                <button key="classic" type="button" onClick={() => (active ? commitActive() : scrollTo(i))} style={wrapperStyle}>
+                  <div style={{ ...badgeStyle, background: identityGradient(email || name || 'plot') }}>
+                    <span style={{ fontFamily: "'Archivo', sans-serif", fontWeight: 800, fontSize: 56, color: 'rgba(255,255,255,0.95)' }}>{initials}</span>
+                  </div>
+                  <span style={captionStyle}>Classic</span>
+                </button>
+              ) : (
+                <button key="classic" type="button" onClick={() => (active ? commitActive() : scrollTo(i))} style={{ ...wrapperStyle, background: identityGradient(email || name || 'plot') }}>
                   <span style={{ fontFamily: "'Archivo', sans-serif", fontWeight: 800, fontSize: 56, color: 'rgba(255,255,255,0.95)' }}>{initials}</span>
                   <span style={{ position: 'absolute', bottom: 16, left: 0, right: 0, textAlign: 'center', fontSize: 13, fontWeight: 800, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>Classic</span>
                 </button>
               );
             }
             // preset
-            return (
-              <button
-                key={slide.id}
-                type="button"
-                onClick={() => (active ? commitActive() : scrollTo(i))}
-                style={{ ...commonStyle, border: 'none', background: kind === 'crew' ? crewArtStyle(slide.id) : 'transparent', backgroundSize: 'cover' }}
-              >
-                {kind === 'avatar' && (
+            return isCircle ? (
+              <button key={slide.id} type="button" onClick={() => (active ? commitActive() : scrollTo(i))} style={wrapperStyle}>
+                <div style={badgeStyle}>
                   <svg width="100%" height="100%" viewBox="0 0 40 40">{PLOT_AVATARS.find((a) => a.id === slide.id)?.render()}</svg>
-                )}
-                <span style={{ position: 'absolute', bottom: 16, left: 0, right: 0, textAlign: 'center', fontSize: 13, fontWeight: 800, color: kind === 'crew' ? '#fff' : 'var(--v2-ink)', textShadow: kind === 'crew' ? '0 1px 4px rgba(0,0,0,0.4)' : 'none' }}>
-                  {slide.label}
+                </div>
+                <span style={captionStyle}>{label}</span>
+              </button>
+            ) : (
+              <button key={slide.id} type="button" onClick={() => (active ? commitActive() : scrollTo(i))} style={{ ...wrapperStyle, background: crewArtStyle(slide.id), backgroundSize: 'cover' }}>
+                <span style={{ position: 'absolute', bottom: 16, left: 0, right: 0, textAlign: 'center', fontSize: 13, fontWeight: 800, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
+                  {label}
                 </span>
               </button>
             );
