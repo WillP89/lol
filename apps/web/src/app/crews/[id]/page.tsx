@@ -1422,7 +1422,7 @@ export default function CrewPage() {
                 availability/recommendation settings live one step further in, off the sheet this
                 opens, not here. */}
             <button onClick={() => setMembersOpen(true)} aria-label="Crew members" style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 13, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-              <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={54} allowThemeArt />
+              <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={68} allowThemeArt />
               <div style={{ textAlign: 'left', minWidth: 0 }}>
                 <div className="v2-display" style={{ fontSize: 21, lineHeight: 1.08 }}>{crew.name}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
@@ -1963,13 +1963,13 @@ export default function CrewPage() {
             uploadPath={`/crews/${crew.id}/image`}
             deletePath={`/crews/${crew.id}/image`}
             shape="squircle"
-            size={72}
+            size={104}
             presetKind="crew"
             value={crew.imageUrl}
             name={crew.name}
             onChange={(url) => setCrew((prev) => (prev ? { ...prev, imageUrl: url } : prev))}
           >
-            <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={72} allowThemeArt />
+            <CrewMark name={crew.name} imageUrl={crew.imageUrl} size={104} allowThemeArt />
           </MediaUploadButton>
           <div className="v2-display" style={{ fontSize: 18, marginTop: 10 }}>{crew.name}</div>
           <button
