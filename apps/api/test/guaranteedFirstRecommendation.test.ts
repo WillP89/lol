@@ -94,6 +94,70 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
     expect(announcement!.body).toContain('Stafford Open Mic Comedy');
   });
 
+  /**
+   * Real, live-reported bug: "I just created a crew, I did not select comedy as a preference, at
+   * ALL. The first event Plot sent into that crew, was a comedy event... you have ONE shot to
+   * make a good impression, DO NOT waste it on something that crew doesn't care about." The
+   * guarantee's own fallback used to sort from EVERY in-radius candidate (`inRadius`), not just
+   * taste-matched ones (`withTaste`) — so a taste-blind event could out-score a real
+   * taste-matched one on logistics alone (price/distance/freshness) and win the Crew's very
+   * first, highest-stakes recommendation. Both events here share an identical logistics profile
+   * (same price band, same venue coordinates, same date) so the ONLY thing that can decide the
+   * winner is the +20 crew_preference bonus the LIVE_MUSIC one gets and the COMEDY one doesn't —
+   * a fair, deterministic proof that taste now wins over logistics for this guarantee, not a
+   * coincidence of one candidate happening to be cheaper or closer.
+   */
+  test('never sends an untailored event when a real taste-matched one also exists — the "one shot" bug', async () => {
+    await resetDatabase();
+    const SAME_VENUE = 'The Sugarmill';
+    const SAME_STARTS_AT = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+    async function seedTwin(name: string, category: string) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/admin/experiences/manual',
+        headers: { 'x-admin-key': ADMIN_KEY },
+        payload: {
+          name,
+          description: `${name} — a real test fixture with enough description to pass quality scoring.`,
+          category,
+          venueName: SAME_VENUE,
+          city: STAFFORD.city,
+          latitude: STAFFORD.lat,
+          longitude: STAFFORD.lng,
+          startsAt: SAME_STARTS_AT,
+          priceMinMinor: 1500,
+          priceMaxMinor: 3000,
+          externalUrl: `https://example.invalid/${encodeURIComponent(name)}`,
+        },
+      });
+      expect(res.statusCode).toBe(201);
+    }
+    await seedTwin('Untailored Comedy Night', 'COMEDY');
+    await seedTwin('The Crew\'s Actual Preference Gig', 'LIVE_MUSIC');
+
+    const owner = await setUpMemberNoTaste('oneshot-owner@plot-test.invalid');
+    const mate = await setUpMemberNoTaste('oneshot-mate@plot-test.invalid');
+    const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name: 'One Shot Test Crew', defaultCity: STAFFORD.city } });
+    const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
+
+    // The Crew explicitly selects LIVE_MUSIC only — comedy is never chosen, at all.
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crew.id}/recommendation-settings`,
+      headers: { cookie: owner.cookie },
+      payload: { categoryPreferences: ['LIVE_MUSIC'] },
+    });
+    await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
+    const { messages } = messagesRes.json() as { messages: { body: string }[] };
+    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    expect(announcement).toBeDefined();
+    expect(announcement!.body).toContain('The Crew\'s Actual Preference Gig');
+    expect(announcement!.body).not.toContain('Untailored Comedy Night');
+  });
+
   test('genuinely zero candidates (nothing in radius) still honestly delivers nothing — never fabricated', async () => {
     await resetDatabase();
     // No experience seeded at all this time — and Truro has no coverage in any of the three

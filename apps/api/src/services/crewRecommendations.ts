@@ -54,6 +54,16 @@ export const RECOMMENDATION_SWEEP_DUE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hou
 // vote pulses, or "who's in this Crew" anywhere in the product. Self-heals on first use, same
 // pattern as ensureInventory's city seeding.
 export const PLOT_SYSTEM_EMAIL = 'system+plot-recommendations@plot.internal';
+// Process-lifetime cache — one upsert per process, not one per call, since this is looked up on
+// every single recommendation delivery. Safe in real production use (nothing ever truncates a
+// live database's users table out from under a running process), but a REAL test-isolation
+// hazard found live while adding a new test to this exact file: a test file with multiple tests
+// that each call resetDatabase() (truncates every table, including this cached user's own row)
+// and ALSO exercise real message delivery in more than one of those tests hits a stale id — the
+// row the cache still points to no longer exists, so every FK referencing it (IntentSignal,
+// CrewMessage) fails, and the recommendation silently fails to deliver (caught, logged, not
+// crashed) with no visible reason from the test's own assertions alone. `__resetSystemUserCacheForTests`
+// exists so the test helper (resetDb.ts) can clear this alongside the tables it truncates.
 let cachedSystemUserId: string | null = null;
 export async function getPlotSystemUserId(): Promise<string> {
   if (cachedSystemUserId) return cachedSystemUserId;
@@ -64,6 +74,10 @@ export async function getPlotSystemUserId(): Promise<string> {
   });
   cachedSystemUserId = user.id;
   return user.id;
+}
+/** Test-only: see the cache's own comment above for why this needs to exist at all. */
+export function __resetSystemUserCacheForTests(): void {
+  cachedSystemUserId = null;
 }
 
 export interface RecommendationSettingsDTO {
@@ -325,13 +339,28 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     // Real, live product requirement: a brand-new Crew's very first moment must not come up
     // empty — "it should immediately hit them with at LEAST 1 event line with the preferences"
     // — even when nothing yet clears the periodic sweep's deliberately conservative confidence
-    // bar (a fresh Crew's members often haven't swiped enough for real affinity/DNA signal, and
-    // may not have set a crew_preference yet either). The candidate pool itself is never
-    // relaxed — still real, in-radius, quality-checked, not already shown/recommended — only
-    // the confidence bar is skipped for this one moment, ranked by whatever score IS there
-    // (taste signal, if any, still sorts first via match.ts's own scoring).
-    const bestAvailable = [...inRadius].sort((a, b) => b.matchScore - a.matchScore)[0];
-    return { outcome: 'eligible', details: { ...details, guaranteedFirst: true }, best: bestAvailable };
+    // bar (a fresh Crew's members often haven't swiped enough for real affinity/DNA signal).
+    // The candidate pool itself is never relaxed — still real, in-radius, quality-checked, not
+    // already shown/recommended — only the confidence bar is skipped for this one moment.
+    //
+    // REAL, LIVE-REPORTED BUG this fixes ("I did not select comedy as a preference, AT ALL...
+    // this is not tailored... you have ONE shot to make a good impression"): this used to sort
+    // from `inRadius` — EVERY in-radius candidate, not `withTaste` — meaning the doc comment
+    // above ("taste signal, if any, still sorts first") was aspirational, not what the code
+    // actually did. A comedy event with ZERO taste signal (no crew_preference, no affinity, no
+    // DNA match — nothing the Crew ever indicated wanting) can easily out-score a real
+    // taste-matched candidate on budget+distance+freshness alone (exactly the same "close, cheap
+    // and everyone's free beats real taste" gap the withTaste/eligible filters above exist to
+    // close for the periodic sweep) — and this guarantee path was bypassing that protection
+    // completely for precisely the ONE recommendation where being wrong matters most: the
+    // Crew's first-ever impression of Plot. Sourcing from `withTaste` instead means a taste-
+    // matched candidate — even one that doesn't clear the normal confidence threshold — always
+    // wins over a taste-blind one. Only when NOTHING in radius has any taste signal at all (the
+    // Crew's stated preferences genuinely have zero matching inventory right now) does this fall
+    // back to `inRadius`, an honest last resort rather than the default behaviour.
+    const tasteMatchedPool = withTaste.length > 0 ? withTaste : inRadius;
+    const bestAvailable = [...tasteMatchedPool].sort((a, b) => b.matchScore - a.matchScore)[0];
+    return { outcome: 'eligible', details: { ...details, guaranteedFirst: true, guaranteedFirstHadTasteSignal: withTaste.length > 0 }, best: bestAvailable };
   }
 
   if (eligible.length === 0) {
