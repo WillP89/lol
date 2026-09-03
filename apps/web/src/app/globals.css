@@ -471,6 +471,51 @@ html[data-theme="dark"] body { background: #131316; }
 }
 .v2-collage-card:active { transform: rotate(var(--tilt, 0deg)) translateY(var(--lift, 0px)) scale(0.97); }
 
+/* THE SIGN-IN PAGE'S OWN ATMOSPHERE — see auth/page.tsx's own AuthAtmosphere comment for the
+   full "why". Three large, softly blurred colour fields drifting slowly (v2AuthDrift) behind the
+   card, plus a faint, blurred, dimmed echo of the landing page's own tilted plan-card collage
+   (v2AuthCardDrift) — both layers sit well below the card in stacking order and opacity so they
+   read as ambient life, never compete with the form. */
+.v2-auth-atmosphere { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+.v2-auth-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.28;
+  animation: v2AuthDrift 26s ease-in-out infinite;
+}
+@keyframes v2AuthDrift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(5%, -6%) scale(1.08); }
+  66% { transform: translate(-6%, 5%) scale(0.95); }
+}
+.v2-auth-drift-card {
+  position: absolute;
+  border-radius: 18px;
+  opacity: 0.16;
+  filter: blur(1.5px);
+  box-shadow: var(--v2-shadow-lg);
+  animation: v2AuthCardDrift 30s ease-in-out infinite;
+}
+@keyframes v2AuthCardDrift {
+  0%, 100% { transform: rotate(var(--tilt, 0deg)) translateY(0); }
+  50% { transform: rotate(var(--tilt, 0deg)) translateY(-16px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v2-auth-blob, .v2-auth-drift-card { animation: none; }
+}
+/* Below ~480px there isn't room for the collage echo without it crowding right up against the
+   card — the blobs alone still carry the atmosphere there. */
+@media (max-width: 480px) {
+  .v2-auth-drift-card { display: none; }
+}
+
+/* The instant-login "you're in" beat (see auth/page.tsx's `welcomingBack`) — same pop-in
+   language as everywhere else a Plot moment arrives, not a new animation invented for one screen. */
+.v2-auth-welcome-in { animation: v2WelcomeIn 0.4s cubic-bezier(.2,.8,.2,1.05) both; }
+@keyframes v2WelcomeIn { 0% { opacity: 0; transform: scale(0.94) translateY(6px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .v2-auth-welcome-in { animation: none; } }
+
 .v2-card {
   background: var(--v2-surface);
   border-radius: var(--v2-r-lg);

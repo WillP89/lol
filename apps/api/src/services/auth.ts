@@ -160,6 +160,50 @@ export async function consumeMagicLink(
   return { user: created.user, cookieValue: created.cookieValue, expiresAt: created.expiresAt };
 }
 
+/**
+ * Pilot-scale instant login — real, deliberate product decision (not the security default):
+ * a RETURNING user who has already proven they own this inbox once (a real magic-link click,
+ * `emailVerifiedAt` set) skips the round-trip entirely and is logged straight in off the email
+ * alone. A first-time email — no account yet, or one that exists but has never actually clicked
+ * a link — still goes through the real `requestMagicLink` flow below; this only ever
+ * short-circuits *repeat* logins for an address that's already proven itself, never account
+ * creation or the one-time proof that an address really belongs to whoever's typing it.
+ *
+ * The tradeoff, plainly: for a returning user, knowing their email is now sufficient to open
+ * their session — there's no second factor. That's an accepted cost for a small, trusted pilot
+ * group where a real link click on every device was reported as pure friction; it should be
+ * revisited (a real password, a "trust this device" cookie, or similar) before any wider,
+ * less-trusted rollout.
+ */
+export async function loginOrRequestLink(
+  email: string,
+  requestIp: string | undefined,
+  context: { userAgent?: string; ipAddress?: string },
+  next?: string,
+): Promise<
+  | { mode: 'logged_in'; user: User; cookieValue: string; expiresAt: Date }
+  | { mode: 'link_sent'; devMagicLinkUrl?: string }
+> {
+  const normalisedEmail = email.trim().toLowerCase();
+
+  if (isRateLimited(`login:${normalisedEmail}`, 8, 15 * 60 * 1000)) {
+    throw new AuthError('Too many sign-in attempts for this email. Try again shortly.', 'rate_limited');
+  }
+  if (requestIp && isRateLimited(`login-ip:${requestIp}`, 30, 15 * 60 * 1000)) {
+    throw new AuthError('Too many sign-in attempts from this network. Try again shortly.', 'rate_limited');
+  }
+
+  const user = await prisma.user.findUnique({ where: { email: normalisedEmail } });
+
+  if (user && user.emailVerifiedAt && user.status === 'ACTIVE') {
+    const created = await createSession(user.id, context);
+    return { mode: 'logged_in', user: created.user, cookieValue: created.cookieValue, expiresAt: created.expiresAt };
+  }
+
+  const linkResult = await requestMagicLink(email, requestIp, next);
+  return { mode: 'link_sent', ...linkResult };
+}
+
 async function isFirstEverSession(userId: string, currentSessionId: string): Promise<boolean> {
   const count = await prisma.session.count({ where: { userId, NOT: { id: currentSessionId } } });
   return count === 0;
