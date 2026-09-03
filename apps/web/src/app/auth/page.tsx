@@ -1,9 +1,11 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
+import { usePointerParallax } from '@/lib/usePointerParallax';
+import { ParticleField } from '@/components/ParticleField';
 
 type LoginResponse =
   | { mode: 'logged_in'; user: { id: string; email: string; displayName: string | null } }
@@ -13,6 +15,12 @@ function AuthForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get('next') ?? undefined;
+
+  // Same shared parallax root as the landing page's own hero (lib/usePointerParallax.ts) — the
+  // atmosphere behind the card genuinely responds to the cursor here too, not just drifting on a
+  // timer. See AuthAtmosphere below for how each layer reads it.
+  const rootRef = useRef<HTMLDivElement>(null);
+  usePointerParallax(rootRef);
 
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState<{ devMagicLinkUrl?: string } | null>(null);
@@ -64,7 +72,7 @@ function AuthForm() {
   }
 
   return (
-    <div className="v2" style={{ minHeight: '100dvh', position: 'relative', display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' }}>
+    <div ref={rootRef} className="v2" style={{ minHeight: '100dvh', position: 'relative', display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' }}>
       <AuthAtmosphere />
 
       <div className="v2-page" style={{ position: 'relative', zIndex: 1, paddingTop: 0, paddingBottom: 0 }}>
@@ -135,25 +143,44 @@ function AuthForm() {
 }
 
 /**
- * THE SIGN-IN PAGE'S OWN ATMOSPHERE — real, reported feedback: the one screen every single
- * person has to sit on before they can do anything else was flat and static — a plain card on a
- * blank ground — while the rest of the product (Home's hero, the Crew art system, the landing
- * page's own drifting collage) all carry real colour and motion. This gives the entrance the same
- * life without touching the form itself: soft, slowly drifting colour fields plus a faint echo of
- * the landing page's own tilted plan-card collage, both blurred and dimmed well behind the card so
- * they read as atmosphere, never compete with the one thing that matters here — typing an email
- * and hitting Continue. `aria-hidden` throughout; purely decorative, never focusable. Respects
- * `prefers-reduced-motion` (globals.css guards `.v2-auth-blob`/`.v2-auth-drift-card`'s animations).
+ * THE SIGN-IN PAGE'S OWN ATMOSPHERE — second real round of reported feedback ("still no movement
+ * at all... more immersive", citing a reference site built on a drifting particle field and real
+ * parallax depth) — the first pass (slow blurred blobs on a timer) wasn't enough. Same primitives
+ * as the landing page's own hero atmosphere (LandingClient.tsx — a live particle field, a
+ * breathing "core" glow, and every layer reading the shared `--px`/`--py` pointer-parallax
+ * variables with its own depth multiplier, set on the page's own root ref above) so the two
+ * entrance screens genuinely match rather than one feeling like an afterthought. Still never
+ * competes with the one thing that matters here — typing an email and hitting Continue: every
+ * layer sits well behind the card in opacity/blur/z-index, `aria-hidden` throughout. Each blob is
+ * two nested nodes (outer owns position + parallax `translate3d`, inner `.v2-auth-blob` owns its
+ * size/colour + its own independent idle-drift animation) since a running CSS animation replaces
+ * the whole `transform` property and would otherwise clobber the parallax offset. Respects
+ * `prefers-reduced-motion` throughout (ParticleField freezes to one still frame; the drift/breathe
+ * animations turn off; the parallax layer is simply never wired up at all — see
+ * usePointerParallax's own comment).
  */
 function AuthAtmosphere() {
   return (
     <div aria-hidden className="v2-auth-atmosphere">
-      <div className="v2-auth-blob" style={{ width: 480, height: 480, top: '-14%', left: '-10%', background: 'var(--v2-pop)', animationDelay: '0s' }} />
-      <div className="v2-auth-blob" style={{ width: 420, height: 420, bottom: '-16%', right: '-8%', background: 'var(--v2-confetti-2)', animationDelay: '-7s' }} />
-      <div className="v2-auth-blob" style={{ width: 360, height: 360, top: '38%', right: '18%', background: 'var(--v2-confetti-4)', animationDelay: '-14s' }} />
+      <ParticleField count={34} />
+      <div className="v2-hero-core" style={{ top: '38%', left: '50%', width: 460, height: 460, margin: '-230px 0 0 -230px', opacity: 0.16, transform: 'translate3d(calc(var(--px, 0) * 7px), calc(var(--py, 0) * 7px), 0)' }} />
 
-      <div className="v2-auth-drift-card" style={{ width: 108, height: 150, top: '14%', right: '10%', background: `linear-gradient(155deg, var(--v2-confetti-1), rgba(12,12,13,0.85))`, transform: 'rotate(-8deg)' }} />
-      <div className="v2-auth-drift-card" style={{ width: 96, height: 132, bottom: '10%', left: '8%', background: `linear-gradient(155deg, var(--v2-confetti-3), rgba(12,12,13,0.85))`, transform: 'rotate(10deg)', animationDelay: '-10s' }} />
+      <div style={{ position: 'absolute', width: 480, height: 480, top: '-14%', left: '-10%', transform: 'translate3d(calc(var(--px, 0) * -16px), calc(var(--py, 0) * -12px), 0)' }}>
+        <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-pop)', animationDelay: '0s' }} />
+      </div>
+      <div style={{ position: 'absolute', width: 420, height: 420, bottom: '-16%', right: '-8%', transform: 'translate3d(calc(var(--px, 0) * 18px), calc(var(--py, 0) * 14px), 0)' }}>
+        <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-confetti-2)', animationDelay: '-7s' }} />
+      </div>
+      <div style={{ position: 'absolute', width: 360, height: 360, top: '38%', right: '18%', transform: 'translate3d(calc(var(--px, 0) * -12px), calc(var(--py, 0) * 10px), 0)' }}>
+        <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-confetti-4)', animationDelay: '-14s' }} />
+      </div>
+
+      <div style={{ position: 'absolute', width: 108, height: 150, top: '14%', right: '10%', transform: 'translate3d(calc(var(--px, 0) * 26px), calc(var(--py, 0) * 20px), 0)' }}>
+        <div className="v2-auth-drift-card" style={{ position: 'absolute', inset: 0, background: `linear-gradient(155deg, var(--v2-confetti-1), rgba(12,12,13,0.85))`, ['--tilt' as string]: '-8deg' }} />
+      </div>
+      <div style={{ position: 'absolute', width: 96, height: 132, bottom: '10%', left: '8%', transform: 'translate3d(calc(var(--px, 0) * -24px), calc(var(--py, 0) * -18px), 0)' }}>
+        <div className="v2-auth-drift-card" style={{ position: 'absolute', inset: 0, background: `linear-gradient(155deg, var(--v2-confetti-3), rgba(12,12,13,0.85))`, ['--tilt' as string]: '10deg', animationDelay: '-10s' }} />
+      </div>
     </div>
   );
 }
