@@ -50,6 +50,45 @@ export function BottomSheet({
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // Real, live-reported complaint this fixes: "I should be able to swipe it down, not just tap
+  // ... I hate the feel of it right now" — the sheet had no drag gesture at all, only a tap
+  // target (the handle bar) styled to LOOK like a drag handle without behaving like one. This
+  // makes the handle a genuine one — the whole panel follows the finger in real time while
+  // dragging down, snaps closed past a real distance threshold, or springs back if released
+  // short of it — the actual native bottom-sheet feel, not a static button pretending to be one.
+  // Scoped to the handle strip specifically (not the whole panel/content below it) so it can
+  // never fight a tap on a button or a scroll inside the sheet's own content.
+  const [dragY, setDragY] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragStartYRef = useRef<number | null>(null);
+  const DISMISS_DISTANCE = 90; // px dragged down before release counts as "let go to close"
+  const TAP_DISTANCE = 6; // barely-moved drags are treated as a plain tap on the handle, not a swipe
+
+  function handleDragStart(e: React.PointerEvent<HTMLDivElement>) {
+    dragStartYRef.current = e.clientY;
+    setDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function handleDragMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (dragStartYRef.current === null) return;
+    // Only ever follows the finger DOWNWARD — dragging up has nothing to reveal above a sheet
+    // that's already fully open, so clamping at 0 avoids an odd "rubber-band past the top" feel.
+    setDragY(Math.max(0, e.clientY - dragStartYRef.current));
+  }
+  function handleDragEnd() {
+    if (dragStartYRef.current === null) return;
+    dragStartYRef.current = null;
+    setDragging(false);
+    // A real swipe past the threshold, OR a plain tap (barely moved) — both close, matching the
+    // handle's own dual job as a drag grip AND a one-tap "minimise" affordance. Anything in
+    // between (started a swipe, didn't commit to it) springs back open instead of closing on a
+    // gesture the person may not have intended to complete.
+    if (dragY > DISMISS_DISTANCE || dragY < TAP_DISTANCE) {
+      onClose();
+    }
+    setDragY(0);
+  }
+
   // Prevents the page behind the sheet from scrolling while it's open — otherwise a drag on
   // the sheet can scroll the page underneath it, which reads as broken on mobile.
   useEffect(() => {
@@ -159,20 +198,51 @@ export function BottomSheet({
           maxHeight: 'calc(100dvh - 40px)',
           overflowY: 'auto',
           padding: '10px 20px calc(env(safe-area-inset-bottom, 0px) + 20px)',
-          transform: open ? 'translateY(0)' : 'translateY(100%)',
-          transition: 'transform 0.25s cubic-bezier(.32,.72,0,1)',
+          // While actively dragging, the panel follows the finger exactly (dragY, no easing —
+          // any transition lag here would read as laggy/disconnected from the touch); once
+          // released, the normal eased transition takes back over for both the "spring back
+          // open" and the "finish sliding closed" cases.
+          transform: open ? `translateY(${dragY}px)` : 'translateY(100%)',
+          transition: dragging ? 'none' : 'transform 0.25s cubic-bezier(.32,.72,0,1)',
           boxShadow: 'var(--v2-shadow-lg)',
           outline: 'none',
         }}
       >
+        {/* The drag handle — now an actual one, not just a button styled to look like one (the
+            live complaint this fixes: "I hate the feel of it right now"). Also still a one-tap
+            close: handleDragEnd treats a barely-moved press the same as a real swipe past the
+            threshold. `touchAction: 'none'` stops the browser's own pull-to-refresh/scroll
+            gesture from competing with the drag on mobile. */}
+        <div
+          onPointerDown={handleDragStart}
+          onPointerMove={handleDragMove}
+          onPointerUp={handleDragEnd}
+          onPointerCancel={handleDragEnd}
+          role="button"
+          aria-label="Drag down or tap to close"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%',
+            padding: '14px 0 10px', margin: '-10px 0 4px', position: 'sticky', top: 0, zIndex: 2,
+            background: 'var(--v2-surface)', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none',
+          }}
+        >
+          <span style={{ width: 36, height: 4, borderRadius: 4, background: 'var(--v2-ink-dim)', opacity: 0.4 }} />
+        </div>
+        {/* A second, unmistakable close affordance — the live complaint this fixes: "show a
+            minimise button". The handle above does the same job, but reads as a passive visual
+            indicator rather than a button; this is never ambiguous. */}
         <button
           type="button"
           onClick={onClose}
           aria-label="Close"
           className="v2-tap-feedback"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', padding: '10px 0 8px', margin: '-6px 0 8px', position: 'sticky', top: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+          style={{
+            position: 'absolute', top: 10, right: 16, zIndex: 3, width: 30, height: 30, borderRadius: '50%',
+            border: 'none', background: 'var(--v2-bg-deep)', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', cursor: 'pointer', color: 'var(--v2-ink)',
+          }}
         >
-          <span style={{ width: 36, height: 4, borderRadius: 4, background: 'var(--v2-ink-dim)', opacity: 0.4 }} />
+          <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 4l12 12M16 4 4 16" /></svg>
         </button>
         {children}
       </div>
