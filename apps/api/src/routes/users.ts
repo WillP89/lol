@@ -7,7 +7,7 @@ import { interpretTasteDescription, AiTasteSetupUnavailableError } from '../serv
 import { track } from '../services/analytics';
 import { prisma } from '../lib/prisma';
 import { revokeAllSessionsForUser } from '../services/auth';
-import { saveUpload, deleteUpload, MediaValidationError, MediaStorageUnavailableError } from '../lib/mediaStorage';
+import { saveUpload, deleteUpload, readMultipartUpload, MediaValidationError, MediaStorageUnavailableError } from '../lib/mediaStorage';
 
 const SwipeSchema = z.object({
   swipes: z.array(z.object({ category: z.string(), choice: z.enum(['yes', 'maybe', 'no']) })).min(1),
@@ -87,11 +87,15 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
   // reaches the (comparatively expensive) file-read.
   app.post('/users/me/avatar', async (request, reply) => {
     if (!requireUser(request, reply)) return;
-    const file = await request.file();
-    if (!file) return reply.code(400).send({ error: 'invalid_request', message: 'No image provided.' });
-    const buffer = await file.toBuffer();
     try {
-      const avatarUrl = await saveUpload({ buffer, mimeType: file.mimetype, kind: 'avatar' });
+      // Real, live-reported bug this fixes: reading the upload used to happen OUTSIDE this
+      // try/catch — a real phone photo picked from the library is routinely several MB, easily
+      // over the 6MB cap @fastify/multipart enforces at the stream level, and that failure threw
+      // straight past every one of this app's own clean messages into a generic "Something went
+      // wrong." See lib/mediaStorage.ts#readMultipartUpload's own comment for the full story.
+      const upload = await readMultipartUpload(request);
+      if (!upload) return reply.code(400).send({ error: 'invalid_request', message: 'No image provided.' });
+      const avatarUrl = await saveUpload({ ...upload, kind: 'avatar' });
       const previous = await prisma.user.findUnique({ where: { id: request.user.id }, select: { avatarUrl: true } });
       await prisma.user.update({ where: { id: request.user.id }, data: { avatarUrl } });
       await deleteUpload(previous?.avatarUrl);

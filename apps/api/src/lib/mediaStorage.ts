@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import type { FastifyRequest } from 'fastify';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { config, s3Configured, PUBLIC_API_URL } from './config';
 
@@ -81,6 +82,49 @@ async function withUploadTimeout<T>(promise: Promise<T>): Promise<T> {
   } finally {
     clearTimeout(timer!);
   }
+}
+
+/**
+ * Real, live-reported bug this closes: every upload route called `request.file()` and
+ * `file.toBuffer()` directly, OUTSIDE the try/catch that handles `saveUpload`'s own errors —
+ * meaning any error @fastify/multipart itself throws while READING the upload (most commonly
+ * `FST_REQ_FILE_TOO_LARGE` when a real phone photo — a photo-library pick is routinely several
+ * MB, easily over the app's own 6MB cap — exceeds the size limit registered in app.ts) bypassed
+ * every one of this app's own clean error messages entirely and fell straight through to
+ * Fastify's generic 500 handler: "Something went wrong." — with zero indication of what
+ * actually happened, even though the app already has the exact right message for this ("Image
+ * must be under 6MB.", MediaValidationError, already shown correctly for the SMALLER case this
+ * function's own client-side pre-check catches before ever uploading). Centralising the read
+ * here, with every route calling this instead of `request.file()`/`.toBuffer()` directly, means
+ * every failure mode gets the SAME translation to a real MediaValidationError once, not
+ * re-implemented (or missed) per route.
+ */
+export async function readMultipartUpload(request: FastifyRequest): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  let file;
+  try {
+    file = await request.file();
+  } catch (err) {
+    throw translateMultipartError(err);
+  }
+  if (!file) return null;
+  try {
+    const buffer = await file.toBuffer();
+    return { buffer, mimeType: file.mimetype };
+  } catch (err) {
+    throw translateMultipartError(err);
+  }
+}
+
+function translateMultipartError(err: unknown): Error {
+  const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+  if (code === 'FST_REQ_FILE_TOO_LARGE') {
+    return new MediaValidationError('Image must be under 6MB.');
+  }
+  // Anything else here is a genuinely unexpected multipart failure (a malformed/truncated
+  // stream, a dropped connection mid-upload) — not one of THIS app's own known validation
+  // cases, so it's rethrown as-is rather than mislabelled; the route's own catch-all still
+  // logs it, this just guarantees it's never silently swallowed by a wrong error type either.
+  return err instanceof Error ? err : new Error(String(err));
 }
 
 export async function saveUpload(params: { buffer: Buffer; mimeType: string; kind: 'avatar' | 'crew' }): Promise<string> {

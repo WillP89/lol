@@ -7,7 +7,7 @@ import { track } from '../services/analytics';
 import { getOrCreateSettings, updateSettings, respondToRecommendation, generateRecommendationForCrew, RecommendationError } from '../services/crewRecommendations';
 import { computeCrewTasteSummary } from '../services/crewTaste';
 import { interpretTasteDescription, AiTasteSetupUnavailableError } from '../services/aiTasteSetup';
-import { saveUpload, deleteUpload, MediaValidationError, MediaStorageUnavailableError } from '../lib/mediaStorage';
+import { saveUpload, deleteUpload, readMultipartUpload, MediaValidationError, MediaStorageUnavailableError } from '../lib/mediaStorage';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 
@@ -47,11 +47,13 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     if (!requireUser(request, reply)) return;
     const { id } = request.params as { id: string };
     if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
-    const file = await request.file();
-    if (!file) return reply.code(400).send({ error: 'invalid_request', message: 'No image provided.' });
-    const buffer = await file.toBuffer();
     try {
-      const imageUrl = await saveUpload({ buffer, mimeType: file.mimetype, kind: 'crew' });
+      // See lib/mediaStorage.ts#readMultipartUpload's own comment — the real, live-reported bug
+      // (a generic "Something went wrong." on a real phone photo from the library) this fixes by
+      // reading the upload INSIDE the same try/catch that already handles saveUpload's errors.
+      const upload = await readMultipartUpload(request);
+      if (!upload) return reply.code(400).send({ error: 'invalid_request', message: 'No image provided.' });
+      const imageUrl = await saveUpload({ ...upload, kind: 'crew' });
       const previous = await prisma.crew.findUnique({ where: { id }, select: { imageUrl: true } });
       await prisma.crew.update({ where: { id }, data: { imageUrl } });
       await deleteUpload(previous?.imageUrl);
