@@ -20,15 +20,14 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  // A real, not cosmetic, pair — Safari colours the status-bar/notch area from this, so a
-  // static light value left it visibly wrong (a bright bar over dark content) the moment dark
-  // mode is active. `media` is the browser's own live prefers-color-scheme read; the explicit
-  // toggle (ThemeProvider below) additionally forces the matching one on <meta name=theme-color>
-  // directly, since this static list alone can't see the in-app override, only the OS setting.
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f6f6f4' },
-    { media: '(prefers-color-scheme: dark)', color: '#131316' },
-  ],
+  // Real, not cosmetic: Safari colours the status-bar/notch area from this. Used to be a
+  // `prefers-color-scheme`-keyed pair so the OS's own dark setting alone could flip it — removed
+  // per the same explicit "never auto-switch to dark" decision as lib/theme.ts (light is the one,
+  // only default regardless of the OS setting). A single, unconditional light value now; THEME_
+  // INIT_SCRIPT below overwrites this tag's `content` directly, synchronously before first paint,
+  // on the one path that's allowed to make it dark — a real, explicitly stored `data-theme=dark`
+  // choice from the toggle, never the OS.
+  themeColor: '#f6f6f4',
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
@@ -55,13 +54,20 @@ export const viewport: Viewport = {
 // one visible frame, then flip, on every load. This runs synchronously in <head>, before any
 // content paints, so there's never a flash. `try/catch` because `localStorage` can throw in a
 // locked-down context (private browsing in some older Safari versions) — falling through to
-// system preference (or nothing at all, i.e. light) is the correct fail-safe, not a crash.
+// light (the only default now — see lib/theme.ts) is the correct fail-safe, not a crash. Only
+// ever reacts to a genuinely STORED 'dark' — never reads prefers-color-scheme, so there is no
+// code path left anywhere that lets the OS's own setting pick dark for someone who never chose
+// it themselves. Also fixes up the `<meta name="theme-color">` tag Next's static metadata
+// already rendered (always the light value — see the `viewport` export above) so a real, stored
+// dark choice colours the status bar correctly too, without needing a live OS media query for it.
 const THEME_INIT_SCRIPT = `
 (function() {
   try {
     var stored = localStorage.getItem('plot-theme');
-    if (stored === 'light' || stored === 'dark') {
-      document.documentElement.setAttribute('data-theme', stored);
+    if (stored === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', '#131316');
     }
   } catch (e) {}
 })();
