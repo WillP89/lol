@@ -80,6 +80,6 @@ describe('Explore radius search', () => {
     const res = await app.inject({ method: 'GET', url: `/explore/experiences?lat=${STAFFORD.lat}&lng=${STAFFORD.lng}&radiusKm=99999`, headers: { cookie } });
     expect(res.statusCode).toBe(200);
     const body = res.json() as ExploreResponse;
-    expect(body.radius!.radiusKm).toBeLessThanOrEqual(120);
+    expect(body.radius!.radiusKm).toBeLessThanOrEqual(250);
   });
 });

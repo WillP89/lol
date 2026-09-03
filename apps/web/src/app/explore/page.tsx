@@ -159,6 +159,13 @@ export default function ExplorePage() {
   const [pickedCenter, setPickedCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [areaLabel, setAreaLabel] = useState<string | null>(null);
   const [placesSearched, setPlacesSearched] = useState<{ name: string; distanceKm: number }[] | null>(null);
+  // "Way more filters on the ability to pick location" — a real "near me" control alongside the
+  // existing named-place search, using the browser's own location rather than making someone
+  // type their own town/postcode back to themselves. `locatingMe` is its own loading flag (not
+  // reusing the page's main `error`/loading state) since this is a small, local action inside an
+  // already-loaded page, not a full page reload.
+  const [locatingMe, setLocatingMe] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   const usingRadius = radiusKm !== null && pickedCenter !== null;
 
@@ -218,7 +225,41 @@ export default function ExplorePage() {
     // it too would be redundant, not incorrect.
   }, [city, radiusKm, pickedCenter, tasteFilterOn]);
 
-  const RADIUS_OPTIONS_KM = [10, 25, 50, 100];
+  // More granularity than the original 4 — real request: "way more filters on the ability to
+  // pick location". 5/200 are new floor/ceiling options (a genuine walking-distance search, and
+  // a genuine "chase something rare, anywhere reasonably reachable" search), the rest fill in
+  // the gaps a jump from 25 straight to 50 used to skip over.
+  const RADIUS_OPTIONS_KM = [5, 10, 25, 50, 100, 200];
+
+  /** The browser's own location, not a typed-in place — real distance search centred on
+   *  wherever the person actually is right now. Same radius-mode machinery as picking a
+   *  postcode (`pickedCenter` + `radiusKm`); the only new thing is where the centre comes from. */
+  function useMyLocation() {
+    setLocationError(null);
+    if (!('geolocation' in navigator)) {
+      setLocationError('Location isn’t available in this browser.');
+      return;
+    }
+    setLocatingMe(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocatingMe(false);
+        setCity(null);
+        setAreaLabel('your location');
+        setPickedCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setRadiusKm((current) => current ?? 25);
+      },
+      (err) => {
+        setLocatingMe(false);
+        setLocationError(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location access was declined — allow it in your browser settings, or search a town/postcode instead.'
+            : 'Could not get your location — try searching a town or postcode instead.',
+        );
+      },
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 5 * 60 * 1000 },
+    );
+  }
 
   const searched = useMemo(() => {
     if (!experiences) return [];
@@ -408,7 +449,22 @@ export default function ExplorePage() {
             {km}km
           </button>
         ))}
+        <button
+          onClick={useMyLocation}
+          disabled={locatingMe}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            border: 'none', borderRadius: 100, padding: '6px 13px', fontSize: 12, fontWeight: 700,
+            cursor: locatingMe ? 'default' : 'pointer',
+            background: 'var(--v2-bg-deep)', color: 'var(--v2-ink-muted)', opacity: locatingMe ? 0.6 : 1,
+          }}
+        >
+          <IconPlace size={12} />{locatingMe ? 'Finding you…' : 'Use my location'}
+        </button>
       </div>
+      {locationError && (
+        <p style={{ fontSize: 12, color: 'var(--v2-error)', marginBottom: 14 }}>{locationError}</p>
+      )}
       {usingRadius && placesSearched && placesSearched.length > 1 && (
         <p className="v2-muted" style={{ fontSize: 12, marginBottom: 18 }}>
           Also searching {placesSearched.slice(1).map((p) => `${p.name} (${p.distanceKm}km)`).join(', ')}

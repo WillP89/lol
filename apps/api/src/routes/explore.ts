@@ -5,14 +5,20 @@ import { hasLiveTicketedProvider, hasSkiddleProvider } from '../providers/regist
 import { prisma } from '../lib/prisma';
 import { UK_FALLBACK_CENTER, UK_PLACES } from '../data/ukPlaces';
 
-// Bounds on the radius control (directive: "extend the map radius") — floor keeps a request
-// from syncing zero real distance's worth of anything useful, ceiling keeps a single request
-// from fanning out across a huge share of the whole gazetteer (data/ukPlaces.ts's
-// placesWithinRadiusKm already caps the place COUNT too; this caps the requested distance
-// itself, since a very large radius from a densely-covered area could otherwise still resolve
-// to many genuinely-within-range places before that count cap kicks in).
+// Bounds on the radius control (directive: "extend the map radius", then "way more filters on
+// the ability to pick location") — floor keeps a request from syncing zero real distance's worth
+// of anything useful, ceiling keeps a single request from fanning out across a huge share of the
+// whole gazetteer (data/ukPlaces.ts's placesWithinRadiusKm already caps the place COUNT too;
+// this caps the requested distance itself, since a very large radius from a densely-covered area
+// could otherwise still resolve to many genuinely-within-range places before that count cap
+// kicks in). Raised alongside the web app's own widest radius chip (200km, apps/web/src/app/
+// explore/page.tsx's RADIUS_OPTIONS_KM) so that option is never silently clamped down to
+// something smaller than what it claims — genuinely reachable now that each individual synced
+// place's own live-provider search radius was widened to ~100km (see providers/live/skiddle.ts
+// and ticketmaster.ts's own comments): several ~100km-radius circles from nearby gazetteer
+// places, still each real and distance-checked, can genuinely blanket a 200km ask.
 const MIN_RADIUS_KM = 1;
-const MAX_RADIUS_KM = 120;
+const MAX_RADIUS_KM = 250;
 
 export async function exploreRoutes(app: FastifyInstance): Promise<void> {
   app.get('/explore/experiences', async (request, reply) => {

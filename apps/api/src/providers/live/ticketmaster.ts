@@ -3,7 +3,7 @@ import type { ProviderAdapter, RawListing, CanonicalListingInput, FetchListingsP
 import { withRetry } from '../../lib/retry';
 import { config } from '../../lib/config';
 import { logger } from '../../lib/logger';
-import { UK_FALLBACK_CENTER } from '../../data/ukPlaces';
+import { UK_FALLBACK_CENTER, resolveCityCenter } from '../../data/ukPlaces';
 
 /**
  * Real Ticketmaster Discovery API v2 adapter — see docs/providers/ticketing.md for access
@@ -17,6 +17,18 @@ import { UK_FALLBACK_CENTER } from '../../data/ukPlaces';
 
 const DISCOVERY_BASE = 'https://app.ticketmaster.com/discovery/v2/events.json';
 const PAGE_SIZE = 100;
+// Real, live-reported bug this fixes: extending Explore's own radius from 10km to 25km barely
+// surfaced anything new. Root cause — this adapter searched by Ticketmaster's `city` parameter,
+// a literal text match against however THEY tag a venue's city, not a real distance search. A
+// small town like "Stone" or "Rugeley" (see data/ukPlaces.ts) has no city bucket of its own in
+// Ticketmaster's own data at all — real events physically nearby get tagged under whichever
+// larger town Ticketmaster itself associates them with (usually "Stafford" or "Stoke-on-Trent"),
+// so searching `city=Stone` genuinely, honestly returned nothing, no matter how close real events
+// actually were. `latlong`+`radius` searches real distance from a real point instead — the same
+// fix, same reasoning, as skiddle.ts's own RADIUS_MILES comment. Explore's own already-correct
+// haversine filter (services/explore.ts) does the actual narrowing back down to whatever radius
+// the user picked; this just needs to be wide enough to feed that filter a real candidate pool.
+const SEARCH_RADIUS_KM = 100; // covers Explore's own largest radius preset from one sync
 
 // Ticketmaster's own docs list 5 req/s / 5000 req/day on the free tier. withRetry's backoff
 // handles a stray 429; this cap keeps a single sync from blowing through the daily quota by
@@ -137,9 +149,12 @@ function bestImage(images: TmImage[] | undefined): string | null {
 }
 
 async function fetchPage(params: FetchListingsParams, page: number, signal: AbortSignal): Promise<TmSearchResponse> {
+  const center = resolveCityCenter(params.city);
   const url = new URL(DISCOVERY_BASE);
   url.searchParams.set('apikey', config.TICKETMASTER_API_KEY ?? '');
-  url.searchParams.set('city', params.city);
+  url.searchParams.set('latlong', `${center.lat},${center.lng}`);
+  url.searchParams.set('radius', String(SEARCH_RADIUS_KM));
+  url.searchParams.set('unit', 'km');
   url.searchParams.set('countryCode', 'GB');
   url.searchParams.set('startDateTime', params.fromDate.toISOString().replace(/\.\d{3}Z$/, 'Z'));
   url.searchParams.set('endDateTime', params.toDate.toISOString().replace(/\.\d{3}Z$/, 'Z'));
