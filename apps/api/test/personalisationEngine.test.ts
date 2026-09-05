@@ -52,15 +52,21 @@ async function createCrewWith(owner: { cookie: string }, mate: { cookie: string 
   const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name, defaultCity: STAFFORD.city } });
   const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
   // "no events or things should be done on crew until preference set" — required before
-  // find-us-something will do anything (services/crewPreferencesGate.ts). BAR is deliberately
-  // unrelated to every category this suite's shared inventory pool uses (LIVE_MUSIC/SPORT/
-  // RESTAURANT), so it satisfies the gate without adding a crew_preference boost that would
-  // confound what these tests are actually proving (member-derived specific-interest matching).
+  // find-us-something will do anything (services/crewPreferencesGate.ts). Lists every category
+  // this suite's shared inventory pool actually uses (LIVE_MUSIC/SPORT/RESTAURANT) rather than one
+  // deliberately-unrelated category (the old 'BAR' placeholder): scoreExperiencesForCrew now hard-
+  // filters the candidate pool to the Crew's own explicit categoryPreferences when set (real,
+  // live-reported bug — see match.ts#scoreExperiencesForCrew), so a placeholder that matches
+  // nothing in the pool would now wrongly exclude every candidate instead of just satisfying the
+  // gate. Listing all three still satisfies the gate, still excludes nothing (every seeded
+  // experience is one of these three), and the identical flat crew_preference bonus applies
+  // equally to all of them — so it can't confound what these tests are actually proving
+  // (member-derived specific-interest matching deciding the winner within/across categories).
   await app.inject({
     method: 'PATCH',
     url: `/crews/${crew.id}/recommendation-settings`,
     headers: { cookie: owner.cookie },
-    payload: { categoryPreferences: ['BAR'] },
+    payload: { categoryPreferences: ['LIVE_MUSIC', 'SPORT', 'RESTAURANT'] },
   });
   await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
   return crew.id;

@@ -772,16 +772,19 @@ model CrewRecommendationSettings {
   // The Crew's own explicit picks (ExperienceCategory values, stored as strings rather than the
   // enum type so a member's still-Draft selection in the UI never has to round-trip a full enum
   // validation) — e.g. a Crew that's explicitly "our comedy/food group" regardless of what any
-  // one member's individual TasteProfile swipes say. Blends with (boosts on top of) member-
-  // derived taste in services/match.ts#scoreExperiencesForCrew rather than replacing it — a
-  // Crew is still made of the people in it. Empty = no crew-level preference set, the original,
-  // fully member-derived behaviour.
+  // one member's individual TasteProfile swipes say. A HARD FILTER in
+  // services/match.ts#scoreExperiencesForCrew when non-empty — real, live-reported bug: a Crew
+  // set to food only was still sent a comedy event as its very first recommendation, because an
+  // earlier version of this only ever added bonus score on top of whatever a member's own
+  // personal taste already favoured, never actually excluding anything. Member-derived taste
+  // still ranks candidates WITHIN whatever this restricts to — a Crew is still made of the
+  // people in it — it just can never again override the restriction itself. Empty = no
+  // crew-level preference set, the original, fully member-derived behaviour.
   categoryPreferences String[] @default([])
   /// The same idea one level more specific — taxonomy interest ids (see TasteProfile.
   /// interestAffinity's comment) the Crew has explicitly said it's about, e.g. a Crew that's
-  /// "our UK garage crew" specifically, not just "our music crew". Blends with member-derived
-  /// interest affinity in services/match.ts exactly like categoryPreferences already does for
-  /// categories.
+  /// "our UK garage crew" specifically, not just "our music crew". Same hard-filter behaviour as
+  /// categoryPreferences above (services/match.ts#scoreExperiencesForCrew) when non-empty.
   interestPreferences String[] @default([])
   /// Real, live product requirement: "no events or things should be done on crew until
   /// preference set" — the creator must set THIS Crew's own explicit preferences (via the AI
