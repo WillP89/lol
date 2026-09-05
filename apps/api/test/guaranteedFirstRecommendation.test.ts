@@ -266,7 +266,7 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
     expect(announcement!.body).not.toContain('Personal-Taste Comedy Night');
   });
 
-  test('genuinely zero candidates (nothing in radius) still honestly delivers nothing — never fabricated', async () => {
+  test('genuinely zero candidates (nothing in radius) still honestly delivers nothing fabricated — but never silence either', async () => {
     await resetDatabase();
     // No experience seeded at all this time — and Truro has no coverage in any of the three
     // mock providers' own CITY_* maps (see providers/mock/{ticketingProvider,restaurantProvider,
@@ -290,6 +290,47 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
 
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
+    // Never a fabricated event card...
     expect(messages.some((m) => m.body.includes('Plot found something'))).toBe(false);
+    // ...but real, live-reported gap this closes: "I made a new crew... nothing has been sent to
+    // the crew yet. Why? It should be immediately" — a genuinely empty candidate pool (the Crew's
+    // own explicit preference is now a hard filter, services/match.ts) used to mean total,
+    // permanent silence instead of an honest "nothing yet" — indistinguishable from the product
+    // being broken. Plot now says so, honestly naming the category it looked for.
+    const honestMessage = messages.find((m) => m.body.includes("don't have any comedy"));
+    expect(honestMessage).toBeDefined();
+  });
+
+  /**
+   * Real, live-reported bug: "I made a new crew... nothing has been sent to the crew yet. Why?
+   * It should be immediately" — reproduced directly here (unlike the test above, which proves
+   * the honest-message CONTENT, this proves it never double-sends under the two independent
+   * guaranteeFirst triggers routes/crews.ts and updateSettings both own).
+   */
+  test('the honest "nothing yet" message is sent exactly once, never duplicated across the two guaranteeFirst triggers', async () => {
+    await resetDatabase();
+    const owner = await setUpMemberNoTaste('honest-once-owner@plot-test.invalid');
+    const mate = await setUpMemberNoTaste('honest-once-mate@plot-test.invalid');
+    const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name: 'Honest Once Crew', defaultCity: 'Truro' } });
+    const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crew.id}/recommendation-settings`,
+      headers: { cookie: owner.cookie },
+      payload: { categoryPreferences: ['COMEDY'] },
+    });
+    await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Calling the underlying generator directly, guaranteeFirst again, simulates a second
+    // concurrent/duplicate trigger without relying on timing a real race between the two routes.
+    const { generateRecommendationForCrew } = await import('../src/services/crewRecommendations');
+    await generateRecommendationForCrew(crew.id, { guaranteeFirst: true });
+
+    const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
+    const { messages } = messagesRes.json() as { messages: { body: string }[] };
+    const honestMessages = messages.filter((m) => m.body.includes("don't have any comedy"));
+    expect(honestMessages).toHaveLength(1);
   });
 });
