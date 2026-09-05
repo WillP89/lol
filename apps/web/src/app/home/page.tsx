@@ -2,16 +2,22 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 import { TabBarV2 } from '@/components/TabBarV2';
+import { BottomSheet } from '@/components/BottomSheet';
 import { v2Art } from '@/lib/v2Art';
 import { formatPriceFrom } from '@/lib/formatPrice';
 import { displayNameOf } from '@/lib/displayName';
 import { messagePreview } from '@/lib/messagePreview';
-import { IconGathering, IconLock, IconCalendar, IconPoll } from '@/components/icons';
+import { IconGathering, IconLock, IconCalendar, IconPoll, IconChat } from '@/components/icons';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { identityGradient } from '@/lib/identity';
 import { useScrollReveal } from '@/lib/useScrollReveal';
+
+function formatWhen(iso: string) {
+  return new Date(iso).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
 
 // A small local label map, not a shared helper — this is the one place Home shows a category as
 // a short tag chip; Explore has its own richer category treatment.
@@ -61,11 +67,16 @@ interface Experience {
   id: string;
   name: string;
   category: string;
+  description: string | null;
   startsAt: string;
   priceMinMinor: number | null;
   currency: string;
   imageUrl: string | null;
   venue: { name: string };
+  // Same escape hatch Explore's own detail view already carries — the real source page for
+  // whatever Plot's own normalized fields don't (full price tiers, seating, terms). See
+  // services/personalHome.ts's own ExperienceWithVenue comment.
+  listings?: { externalUrl: string }[];
 }
 
 // HOME = ME (docs/DECISIONS.md#personal-home) — the shape GET /home/personalized returns.
@@ -173,16 +184,22 @@ function pulseLine(crews: CrewSummary[], nextPlan: UpcomingPlan | null, needsCou
  * (exploration) never show a reason at all, since nothing there was actually matched to taste.
  * The × is a real "not for me" tap, optimistically removed from view and reported to
  * `/home/personalized/:id/feedback` — see `sendHomeFeedback` above.
+ *
+ * Real, reported bug this fixes: tapping a card used to send you to the generic /explore page —
+ * not this event, not any event, just Explore's own unfiltered list. `onOpen` now opens THIS
+ * card's own detail (see the sheet built in HomePage below), same as tapping a result in Explore
+ * already does.
  */
-function DiscoveryCard({ item, index, muted, onNotForMe }: { item: HomeItem; index: number; muted?: boolean; onNotForMe: () => void }) {
+function DiscoveryCard({ item, index, muted, onOpen, onNotForMe }: { item: HomeItem; index: number; muted?: boolean; onOpen: () => void; onNotForMe: () => void }) {
   const { experience } = item;
   const price = formatPriceFrom(experience.priceMinMinor, experience.currency);
   const reason = item.reasons[0]?.label;
   return (
-    <Link
-      href="/explore"
+    <button
+      type="button"
+      onClick={onOpen}
       className="v2-reveal v2-hoverable"
-      style={{ flex: '0 0 auto', width: 172, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', ['--reveal-i' as string]: index, opacity: muted ? 0.85 : 1, position: 'relative' }}
+      style={{ flex: '0 0 auto', width: 172, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', ['--reveal-i' as string]: index, opacity: muted ? 0.85 : 1, position: 'relative', border: 'none', padding: 0, textAlign: 'left', font: 'inherit', color: 'inherit', cursor: 'pointer' }}
     >
       <div style={{ position: 'relative', height: 110, background: v2Art(experience.imageUrl, experience.category, experience.id) }}>
         {CATEGORY_TAG[experience.category] && (
@@ -190,15 +207,14 @@ function DiscoveryCard({ item, index, muted, onNotForMe }: { item: HomeItem; ind
             {CATEGORY_TAG[experience.category]}
           </span>
         )}
-        <button
-          type="button"
+        <span
+          role="button"
           aria-label="Not for me"
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onNotForMe(); }}
-          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => { e.stopPropagation(); onNotForMe(); }}
           style={{ position: 'absolute', top: 8, right: 8, width: 22, height: 22, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', color: '#fff', fontSize: 13, lineHeight: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
           ×
-        </button>
+        </span>
       </div>
       <div style={{ padding: '10px 12px', background: 'var(--v2-surface)' }}>
         <div style={{ fontWeight: 700, fontSize: 12.5, lineHeight: 1.3, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{experience.name}</div>
@@ -208,7 +224,7 @@ function DiscoveryCard({ item, index, muted, onNotForMe }: { item: HomeItem; ind
         </div>
         {reason && !muted && <div className="v2-muted" style={{ fontSize: 10, marginTop: 3, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{reason}</div>}
       </div>
-    </Link>
+    </button>
   );
 }
 
@@ -223,6 +239,7 @@ function DiscoveryCard({ item, index, muted, onNotForMe }: { item: HomeItem; ind
  * decision genuinely waiting on you), then a plain editorial feed with no card chrome.
  */
 export default function HomePage() {
+  const router = useRouter();
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
   const [upcoming, setUpcoming] = useState<UpcomingPlan[] | null>(null);
   const [home, setHome] = useState<PersonalHome | null>(null);
@@ -231,6 +248,15 @@ export default function HomePage() {
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [me, setMe] = useState<{ displayName: string | null; email: string; avatarUrl: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The event detail sheet — real, reported bug this fixes: tapping a Home card used to send
+  // you to the generic /explore page, not the event itself, with no way to act on it at all.
+  // Same "open detail -> Share to Crew -> pick a Crew" flow Explore's own detail sheet already
+  // proved out, reused here rather than reinvented, backed by the same real
+  // POST /crews/:id/plans/send endpoint.
+  const [selected, setSelected] = useState<Experience | null>(null);
+  const [pickingCrew, setPickingCrew] = useState(false);
+  const [sending, setSending] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   useScrollReveal();
 
   // A one-off fetch on mount would mean a crewmate's vote, message, or newly-locked plan never
@@ -343,6 +369,33 @@ export default function HomePage() {
   function sendHomeFeedback(experienceId: string, action: 'save' | 'not_for_me') {
     setDismissedIds((prev) => new Set(prev).add(experienceId));
     api.post(`/home/personalized/${experienceId}/feedback`, { action }).catch(() => {});
+  }
+
+  // Opening a card also counts as a real, positive signal — someone stopping to actually look at
+  // an event is a stronger taste signal than it merely appearing in a scroll. Fire-and-forget,
+  // same as Explore's own `save` action: never blocks the sheet opening on the network round trip.
+  function openDetail(experience: Experience) {
+    setSelected(experience);
+    setSendError(null);
+    api.post(`/home/personalized/${experience.id}/feedback`, { action: 'view' }).catch(() => {});
+  }
+  function closeDetail() {
+    if (sending !== null) return;
+    setSelected(null);
+    setPickingCrew(false);
+    setSendError(null);
+  }
+  async function sendToCrew(crewId: string) {
+    if (!selected) return;
+    setSending(crewId);
+    try {
+      const res = await api.post<{ plan: { publicSlug: string } }>(`/crews/${crewId}/plans/send`, { experienceId: selected.id });
+      router.push(`/plans/${res.plan.publicSlug}`);
+    } catch (err) {
+      setSendError(err instanceof ApiError ? err.message : 'Could not send to Crew.');
+      setSending(null);
+      setPickingCrew(false);
+    }
   }
 
   const loading = crews === null && !error;
@@ -770,7 +823,14 @@ export default function HomePage() {
               </div>
               <div style={{ display: 'flex', gap: 12, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
                 {section.items.slice(0, 6).map((item, i) => (
-                  <DiscoveryCard key={item.experience.id} item={item} index={i} muted={section.isExploration} onNotForMe={() => sendHomeFeedback(item.experience.id, 'not_for_me')} />
+                  <DiscoveryCard
+                    key={item.experience.id}
+                    item={item}
+                    index={i}
+                    muted={section.isExploration}
+                    onOpen={() => openDetail(item.experience)}
+                    onNotForMe={() => sendHomeFeedback(item.experience.id, 'not_for_me')}
+                  />
                 ))}
               </div>
             </div>
@@ -828,11 +888,12 @@ export default function HomePage() {
                     const price = formatPriceFrom(experience.priceMinMinor, experience.currency);
                     const reason = item.reasons[0]?.label;
                     return (
-                      <Link
+                      <button
                         key={experience.id}
-                        href="/explore"
+                        type="button"
+                        onClick={() => openDetail(experience)}
                         className="v2-hoverable"
-                        style={{ display: 'flex', gap: 12, alignItems: 'center', borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', background: 'var(--v2-surface)', opacity: section.isExploration ? 0.85 : 1 }}
+                        style={{ display: 'flex', gap: 12, alignItems: 'center', borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', background: 'var(--v2-surface)', opacity: section.isExploration ? 0.85 : 1, border: 'none', padding: 0, width: '100%', textAlign: 'left', font: 'inherit', color: 'inherit', cursor: 'pointer' }}
                       >
                         <div style={{ flexShrink: 0, width: 72, height: 72, background: v2Art(experience.imageUrl, experience.category, experience.id) }} />
                         <div style={{ minWidth: 0, flex: 1, padding: '8px 12px 8px 0' }}>
@@ -852,7 +913,7 @@ export default function HomePage() {
                             <div className="v2-muted" style={{ fontSize: 10.5, marginTop: 2, fontStyle: 'italic' }}>{reason}</div>
                           )}
                         </div>
-                      </Link>
+                      </button>
                     );
                   })}
                 </div>
@@ -862,6 +923,60 @@ export default function HomePage() {
         )}
         </div>
       </div>
+
+      {/* THE EVENT DETAIL SHEET — real, reported bug this fixes: tapping any Home card used to
+          navigate to /explore's own generic list, not the event you actually tapped, with no way
+          to act on it. This is the same "see the real thing -> Share to Crew -> pick a Crew" flow
+          Explore's own detail sheet already proved out (see app/explore/page.tsx), reused here
+          rather than reinvented — one real POST /crews/:id/plans/send endpoint, one mental model,
+          wherever an event appears in the product. */}
+      <BottomSheet open={selected !== null} onClose={closeDetail}>
+        {selected && !pickingCrew ? (
+          <div>
+            <div style={{ position: 'relative', margin: '-10px -20px 16px', height: 260, background: v2Art(selected.imageUrl, selected.category, selected.id) }}>
+              <span style={{ position: 'absolute', top: 14, left: 14, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#fff', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', padding: '5px 10px', borderRadius: 100 }}>
+                {selected.category.replace(/_/g, ' ')}
+              </span>
+            </div>
+            <h2 className="v2-display" style={{ fontSize: 22, marginBottom: 6 }}>{selected.name}</h2>
+            <div className="v2-muted" style={{ fontSize: 13.5, marginBottom: 14 }}>
+              {selected.venue.name} · {formatWhen(selected.startsAt)} ·{' '}
+              {formatPriceFrom(selected.priceMinMinor, selected.currency) || 'Price not listed here'}
+            </div>
+            {selected.description && <p style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--v2-ink-muted)', marginBottom: 16 }}>{selected.description}</p>}
+            {selected.listings?.[0]?.externalUrl && (
+              <a
+                href={selected.listings[0].externalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="v2-btn v2-btn-ghost v2-tap-feedback"
+                style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                View full details &amp; pricing ↗
+              </a>
+            )}
+            {sendError && <div style={{ color: 'var(--v2-error)', fontSize: 13, marginBottom: 12 }}>{sendError}</div>}
+            <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={() => setPickingCrew(true)}>
+              Share to Crew →
+            </button>
+          </div>
+        ) : selected && pickingCrew ? (
+          <div>
+            <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Send &ldquo;{selected.name}&rdquo; to…</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {crews === null && <p className="v2-muted">Loading your Crews…</p>}
+              {crews?.length === 0 && <p className="v2-muted">You&rsquo;re not in a Crew yet — <Link href="/crews">create one first</Link>.</p>}
+              {crews?.map((crew) => (
+                <button key={crew.id} className="v2-btn v2-btn-ghost" disabled={sending !== null} onClick={() => sendToCrew(crew.id)} style={{ justifyContent: 'flex-start', gap: 8 }}>
+                  {sending === crew.id ? 'Sending…' : (<><IconChat size={15} />{crew.name}</>)}
+                </button>
+              ))}
+              <button className="v2-btn v2-btn-ghost" onClick={() => setPickingCrew(false)} disabled={sending !== null}>← Back</button>
+            </div>
+          </div>
+        ) : null}
+      </BottomSheet>
+
       <TabBarV2 />
     </div>
   );
