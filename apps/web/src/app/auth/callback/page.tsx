@@ -31,8 +31,15 @@ function CallbackInner() {
       setError('Missing token.');
       return;
     }
+    // Same real bug/fix as /auth's own submit (see that page's comment): no timeout here meant a
+    // cold Render backend on the first request of the day left this page reading "Signing you
+    // in…" forever, with no way out short of a manual refresh. A bounded timeout turns a
+    // genuinely stuck request into the same honest, retry-able error state a real failure
+    // already gets — a slow-but-working cold start still succeeds well inside 40s.
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 40_000);
     api
-      .post('/auth/callback', { token })
+      .post('/auth/callback', { token }, { signal: controller.signal })
       .then(async () => {
         const destination = next || '/home';
         // A brand-new user (no profile yet) always completes onboarding first — including
@@ -56,7 +63,14 @@ function CallbackInner() {
           router.replace(`/onboarding?next=${encodeURIComponent(destination)}`);
         }
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'Sign-in failed.'));
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          setError("That's taking longer than it should — check your connection and try again.");
+        } else {
+          setError(err instanceof ApiError ? err.message : 'Sign-in failed.');
+        }
+      })
+      .finally(() => clearTimeout(abortTimer));
   }, [params, router]);
 
   return (

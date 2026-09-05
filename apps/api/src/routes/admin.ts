@@ -239,8 +239,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
    * in this file, so it's safe to expose to an external pinger.
    *
    * Default behaviour goes through the exact same database-backed "is a sweep actually due"
-   * check server.ts's own poll uses (`runSweepIfDue`) — calling this every 30 minutes from an
-   * external cron does NOT mean a sweep actually runs every 30 minutes; it means "check every 30
+   * check server.ts's own poll uses (`runSweepIfDue`) — calling this every 10 minutes from an
+   * external cron (this repo's own `.github/workflows/wake-scheduler.yml` — 10 minutes
+   * specifically to stay under Render's 15-minute idle-sleep timeout, see that file's own
+   * comment) does NOT mean a sweep actually runs every 10 minutes; it means "check every 10
    * minutes, actually run whenever the real 6-hour cadence says it's due". `force: true` bypasses
    * that check for real one-off ops/pilot-testing use ("run generation for these Crews right now
    * and show me the outputs") — a deliberate human override, not the normal path a scheduler

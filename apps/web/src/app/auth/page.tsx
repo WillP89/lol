@@ -30,17 +30,33 @@ function AuthForm() {
   const [welcomingBack, setWelcomingBack] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Real, live-reported bug this fixes: "first login of the day just spins forever after typing
+  // the email — I have to refresh and do it again for it to work." Root cause is Render's free
+  // tier putting the API to sleep after 15 minutes idle — the very first request of the day has
+  // to wait for a genuine cold boot (routinely 30-50s), and this call had NO timeout at all, so
+  // the button just sat on "Checking…" with zero feedback for however long that took. A refresh
+  // "fixing it" was never really a fix — it just meant the backend had woken up in the meantime,
+  // so the SECOND attempt hit an already-warm server and returned instantly. Two real changes:
+  // an actual timeout (so a genuinely broken request fails honestly instead of hanging forever),
+  // and progressive copy once it's taking a while, so a slow-but-working cold start doesn't read
+  // as a frozen page. See docs/DEPLOYMENT.md for the other half of this — keeping the backend
+  // warm so this almost never has to be waited out at all.
+  const [slow, setSlow] = useState(false);
   const [resent, setResent] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
+    setSlow(false);
+    const slowTimer = setTimeout(() => setSlow(true), 5000);
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 40_000); // a genuine Render cold boot, not a hair-trigger
     try {
       // `next` (e.g. /crews/join/abc123 from an invite link) rides along so signing in lands
       // you back where you meant to go — same for the instant-login path below and the emailed
       // link's own callback.
-      const result = await api.post<LoginResponse>('/auth/login', { email, next });
+      const result = await api.post<LoginResponse>('/auth/login', { email, next }, { signal: controller.signal });
       if (result.mode === 'logged_in') {
         setWelcomingBack(true);
         setTimeout(() => router.push(next && next.startsWith('/') ? next : '/home'), 650);
@@ -48,16 +64,25 @@ function AuthForm() {
       }
       setSent(result);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't send that — check the address and try again.");
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setError("That's taking longer than it should — check your connection and try again.");
+      } else {
+        setError(err instanceof ApiError ? err.message : "Couldn't send that — check the address and try again.");
+      }
     } finally {
+      clearTimeout(slowTimer);
+      clearTimeout(abortTimer);
+      setSlow(false);
       setLoading(false);
     }
   }
 
   async function resend() {
     setResent(false);
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 40_000);
     try {
-      const result = await api.post<LoginResponse>('/auth/login', { email, next });
+      const result = await api.post<LoginResponse>('/auth/login', { email, next }, { signal: controller.signal });
       if (result.mode === 'logged_in') {
         setWelcomingBack(true);
         setTimeout(() => router.push(next && next.startsWith('/') ? next : '/home'), 650);
@@ -68,6 +93,8 @@ function AuthForm() {
       setTimeout(() => setResent(false), 2500);
     } catch {
       // the original "check your email" state is still accurate — quietly retry-able
+    } finally {
+      clearTimeout(abortTimer);
     }
   }
 
@@ -104,7 +131,7 @@ function AuthForm() {
                 onChange={(e) => setEmail(e.target.value)}
               />
               <button className="v2-btn v2-btn-brand v2-tap-feedback" disabled={loading || !email} type="submit" style={{ padding: '16px 22px', fontSize: 15.5 }}>
-                {loading ? 'Checking…' : 'Continue'}
+                {loading ? (slow ? 'Still checking — first login of the day can take a moment…' : 'Checking…') : 'Continue'}
               </button>
               {error && <div style={{ color: 'var(--v2-error)', fontSize: 13 }}>{error}</div>}
             </form>
