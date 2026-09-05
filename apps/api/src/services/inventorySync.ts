@@ -5,7 +5,7 @@ import { providerRegistry } from '../providers/registry';
 import type { ProviderAdapter } from '../providers/types';
 import { buildCanonicalKey } from './entityResolution';
 import { computeQualityScore } from './qualityScoring';
-import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
+import { UK_FALLBACK_CENTER, nearestPlaceName, resolveCityCenter, placesWithinRadiusKm, type UkPlace } from '../data/ukPlaces';
 import { enrichImageFromWikipedia, enrichImageFromTheSportsDb } from '../lib/imageEnrichment';
 import { getCategoryStockImage } from '../lib/categoryStockImages';
 import { getPexelsStockImage } from '../lib/pexelsStockImages';
@@ -115,8 +115,23 @@ export async function syncProvider(
       // Venue has no natural unique key in the schema beyond id (two venues can share a name
       // in different cities), so we look up by name+city and create on miss rather than
       // misusing `upsert` against a synthetic id — see docs/DECISIONS.md#venue-identity.
+      //
+      // Real, live-reported bug this closes: "I'm in Birmingham, filtered to this area, and it's
+      // showing me events in Sheffield and Chester." Every live ticketed-events provider
+      // deliberately searches well beyond the requested city (Ticketmaster 100km, Skiddle
+      // ~104km, PredictHQ 40km — see each adapter's own SEARCH_RADIUS comment, all sized so
+      // Explore's own radius-widening UI has real inventory to reveal from one sync), so a
+      // `city: "Birmingham"` sync can genuinely, validly return a real venue that's actually in
+      // Sheffield. This used to label that real venue's `city` field with `params.city` — the
+      // SYNCED city — regardless of where it really is. `nearestPlaceName` derives the label from
+      // the venue's own real coordinates instead, so a venue is only ever filed under the city
+      // it's actually in — never the city whose sync happened to discover it. This is the
+      // ingestion half of the fix; `ensureLocalAreaInventory` below is the query-time half every
+      // "This area" caller (explore.ts, personalHome.ts) now goes through instead of a bare exact
+      // match — belt-and-braces, so even a row some other path left mislabelled can't slip in.
+      const venueCity = nearestPlaceName(canonicalInput.latitude, canonicalInput.longitude);
       const existingVenue = await prisma.venue.findFirst({
-        where: { name: canonicalInput.venueName, city: params.city },
+        where: { name: canonicalInput.venueName, city: venueCity },
       });
       const venue =
         existingVenue ??
@@ -125,7 +140,7 @@ export async function syncProvider(
             name: canonicalInput.venueName,
             latitude: canonicalInput.latitude,
             longitude: canonicalInput.longitude,
-            city: params.city,
+            city: venueCity,
           },
         }));
 
@@ -474,6 +489,31 @@ export async function ensureInventory(city: string): Promise<void> {
   await ensureInventoryProduction(city);
 }
 
+// "This area" (a viewer's own home city on Home, a Crew's own default city, Explore's exact-city
+// default) has always honestly meant "here, plus the real neighbouring towns anyone here would
+// still call local" — not a bare string match against whatever a venue's own `city` column
+// happens to say. Real, live-reported bug this exists to fix: "I'm in Birmingham... it's showing
+// me events in Sheffield and Chester" — see syncProvider's own comment for the ingestion half.
+// Shared by every caller that used to do a plain `venue: { city }` exact match (services/
+// explore.ts, services/personalHome.ts) so all three ever mean the same real-world radius, not
+// three independently-tuned definitions of "local" drifting apart.
+export const LOCAL_AREA_RADIUS_KM = 30;
+
+/**
+ * Resolves a named city to its real gazetteer centre, syncs every genuinely nearby real place
+ * (Explore's own radius search already proved this pattern out — see
+ * services/explore.ts#listExploreExperiencesByRadius), and hands back both so the caller can
+ * build a `venue: { city: { in: places } }` where-clause and then apply the actual real-distance
+ * check against `center` — the same belt-and-braces the radius search already does, so even a
+ * still-mislabelled row can never again reach "This area" unless it's genuinely close.
+ */
+export async function ensureLocalAreaInventory(city: string, radiusKm: number = LOCAL_AREA_RADIUS_KM): Promise<{ center: UkPlace; places: UkPlace[] }> {
+  const center = resolveCityCenter(city);
+  const places = placesWithinRadiusKm(center.lat, center.lng, radiusKm);
+  await Promise.all(places.map((p) => ensureInventory(p.name)));
+  return { center, places };
+}
+
 export interface ImageQualityBackfillResult {
   checked: number;
   cleared: number;
@@ -763,5 +803,100 @@ export async function runMissingImageBackfillIfDue(
     data: { lastRunAt: new Date(), lastResult: result as unknown as Prisma.InputJsonValue },
   });
   logger.info({ event: 'missing_image_backfill_ran', ...result }, 'Missing-image backfill: ran (database confirmed it was due)');
+  return { ran: true, result };
+}
+
+export interface VenueCityBackfillResult {
+  checked: number;
+  corrected: number;
+  merged: number;
+}
+
+/**
+ * The retroactive half of syncProvider's own venue-city fix above — corrects every Venue row
+ * already mislabelled with the SYNCED city instead of the city it's actually in (see that
+ * function's own comment for the full "why": a live provider's own search radius genuinely
+ * reaches neighbouring cities, and this used to stamp every one of those real, farther-out
+ * results with the wrong city name). The code fix alone only stops NEW mislabelling — production
+ * already has real rows sitting under the wrong city from before this shipped, which is exactly
+ * what a live report ("I'm in Birmingham... it's showing me events in Sheffield and Chester")
+ * was actually seeing. Idempotent and safe to run repeatedly: a venue already labelled correctly
+ * is left untouched, so once the existing backlog is corrected this becomes a fast no-op scan on
+ * every later run rather than something that ever needs disabling again.
+ */
+export async function backfillVenueCities(maxToCheck?: number): Promise<VenueCityBackfillResult> {
+  const venues = await prisma.venue.findMany({
+    select: { id: true, name: true, city: true, latitude: true, longitude: true },
+    orderBy: { id: 'asc' },
+    ...(maxToCheck !== undefined ? { take: maxToCheck } : {}),
+  });
+
+  let corrected = 0;
+  let merged = 0;
+  for (const venue of venues) {
+    const correctCity = nearestPlaceName(venue.latitude, venue.longitude);
+    if (correctCity === venue.city) continue;
+
+    // A correctly-labelled venue of the same name may already exist under the real city (e.g. a
+    // native Sheffield sync already created "The Foo" there, before a separate Birmingham sync's
+    // own wider radius independently mislabelled the same real place under "Birmingham") —
+    // repoint its Experiences to the real one and drop the now-empty duplicate, rather than
+    // leaving two rows for one real venue.
+    const canonical = await prisma.venue.findFirst({ where: { name: venue.name, city: correctCity, NOT: { id: venue.id } } });
+    if (canonical) {
+      await prisma.experience.updateMany({ where: { venueId: venue.id }, data: { venueId: canonical.id } });
+      await prisma.venue.delete({ where: { id: venue.id } });
+      merged += 1;
+    } else {
+      await prisma.venue.update({ where: { id: venue.id }, data: { city: correctCity } });
+    }
+    corrected += 1;
+  }
+
+  const checked = venues.length;
+  logger.info({ checked, corrected, merged }, 'Venue-city backfill complete');
+  return { checked, corrected, merged };
+}
+
+export const VENUE_CITY_BACKFILL_JOB_NAME = 'venue_city_backfill';
+
+/** Same DB-backed "is a run actually due" atomic claim as the other backfills above — see
+ *  claimImageQualityBackfillIfDue's own comment for the full reasoning. */
+async function claimVenueCityBackfillIfDue(dueIntervalMs: number): Promise<boolean> {
+  const cutoff = new Date(Date.now() - dueIntervalMs);
+  const now = new Date();
+
+  await prisma.schedulerState.upsert({
+    where: { jobName: VENUE_CITY_BACKFILL_JOB_NAME },
+    update: {},
+    create: { jobName: VENUE_CITY_BACKFILL_JOB_NAME },
+  });
+
+  const claim = await prisma.schedulerState.updateMany({
+    where: { jobName: VENUE_CITY_BACKFILL_JOB_NAME, OR: [{ lastClaimedAt: null }, { lastClaimedAt: { lt: cutoff } }] },
+    data: { lastClaimedAt: now },
+  });
+
+  return claim.count === 1;
+}
+
+/**
+ * The one function server.ts (and, in principle, an external cron hitting
+ * `POST /admin/venue-city-backfill`) should call — see runImageQualityBackfillIfDue above for the
+ * full "why not a bare setInterval/one-shot boot call" reasoning; identical shape here. Once
+ * production's existing backlog is corrected, every later "due" run finds nothing left to fix and
+ * returns quickly — this never needs to be turned off again.
+ */
+export async function runVenueCityBackfillIfDue(dueIntervalMs: number): Promise<{ ran: boolean; result?: VenueCityBackfillResult }> {
+  const claimed = await claimVenueCityBackfillIfDue(dueIntervalMs);
+  if (!claimed) {
+    return { ran: false };
+  }
+  const result = await backfillVenueCities();
+  await prisma.schedulerState.update({
+    where: { jobName: VENUE_CITY_BACKFILL_JOB_NAME },
+    data: { lastRunAt: new Date(), lastResult: result as unknown as Prisma.InputJsonValue },
+  });
+  logger.info({ event: 'venue_city_backfill_ran', ...result }, 'Venue-city backfill: ran (database confirmed it was due)');
   return { ran: true, result };
 }

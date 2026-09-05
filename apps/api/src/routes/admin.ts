@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { config } from '../lib/config';
-import { syncAllProviders, backfillImageQuality, backfillMissingImages } from '../services/inventorySync';
+import { syncAllProviders, backfillImageQuality, backfillMissingImages, backfillVenueCities } from '../services/inventorySync';
 import { buildCanonicalKey } from '../services/entityResolution';
 import { computeQualityScore } from '../services/qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
@@ -67,6 +67,18 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const Schema = z.object({ limit: z.number().int().positive().max(2000).optional() });
     const parsed = Schema.safeParse(request.body ?? {});
     const result = await backfillMissingImages(parsed.success ? parsed.data.limit : undefined);
+    return reply.send({ result });
+  });
+
+  // Manual re-trigger for the retroactive venue-city correction (also runs once automatically on
+  // boot, then on the same due cadence as the two image backfills — see server.ts). Real,
+  // live-reported bug this exists for: "I'm in Birmingham... it's showing me events in Sheffield
+  // and Chester" — see services/inventorySync.ts#backfillVenueCities's own comment for the full
+  // "why". For re-running it on demand rather than waiting for the next due check.
+  app.post('/venue-city-backfill', async (request, reply) => {
+    const Schema = z.object({ limit: z.number().int().positive().max(5000).optional() });
+    const parsed = Schema.safeParse(request.body ?? {});
+    const result = await backfillVenueCities(parsed.success ? parsed.data.limit : undefined);
     return reply.send({ result });
   });
 

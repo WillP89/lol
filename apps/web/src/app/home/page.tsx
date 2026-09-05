@@ -288,23 +288,45 @@ export default function HomePage() {
         .then((res) => { if (!cancelled) setUpcoming(res.plans); })
         .catch(() => {});
     }
-    loadCrews();
-    loadUpcoming();
     // HOME = ME — a genuinely personal, sectioned feed (see PersonalHome above), not the same
     // flat/unfiltered list Explore shows. Real, live-reported bug this replaces: this used to
     // call Explore's own endpoint and just take the first few results — someone's explicit taste
     // (rap, street food, museums) had no way to produce a Home that looked any different from
     // anyone else's, since nothing here ever asked for anything grouped or reasoned about.
-    api
-      .get<PersonalHome>('/home/personalized')
-      .then((res) => { if (!cancelled) setHome(res); })
-      .catch(() => {});
+    //
+    // Real, reported bug this closes: changing preferences on Profile and coming straight back
+    // to Home used to keep showing the old feed. Root cause was never the backend (it recomputes
+    // from the current TasteProfile on every call) — it's that Next's client-side router cache
+    // can reuse an already-visited page's React tree on a soft navigation, so the mount-only
+    // fetch below never re-ran. `loadHome` is now a named function (like `loadCrews`/
+    // `loadUpcoming`) folded into the same 8s poll AND re-run the instant this tab/page becomes
+    // visible again — the second part is what makes "I changed my prefs, flipped back to Home"
+    // feel immediate rather than waiting out the poll interval.
+    function loadHome() {
+      api
+        .get<PersonalHome>('/home/personalized')
+        .then((res) => { if (!cancelled) setHome(res); })
+        .catch(() => {});
+    }
+    loadCrews();
+    loadUpcoming();
+    loadHome();
     api
       .get<{ user: { displayName: string | null; email: string; avatarUrl: string | null } }>('/users/me')
       .then((res) => { if (!cancelled) setMe(res.user); })
       .catch(() => {});
-    const interval = setInterval(() => { loadCrews(); loadUpcoming(); }, 8000);
-    return () => { cancelled = true; clearInterval(interval); };
+    const interval = setInterval(() => { loadCrews(); loadUpcoming(); loadHome(); }, 8000);
+    function handleVisible() {
+      if (document.visibilityState === 'visible') loadHome();
+    }
+    document.addEventListener('visibilitychange', handleVisible);
+    window.addEventListener('focus', handleVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisible);
+      window.removeEventListener('focus', handleVisible);
+    };
   }, []);
 
   const nextPlan = upcoming?.find((p) => p.startsAt && new Date(p.startsAt).getTime() > Date.now()) ?? upcoming?.[0] ?? null;

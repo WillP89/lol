@@ -1,7 +1,7 @@
 import { buildApp } from './app';
 import { config } from './lib/config';
 import { runSweepIfDue, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from './services/crewRecommendations';
-import { runImageQualityBackfillIfDue, runMissingImageBackfillIfDue } from './services/inventorySync';
+import { runImageQualityBackfillIfDue, runMissingImageBackfillIfDue, runVenueCityBackfillIfDue } from './services/inventorySync';
 import { runMessageNotificationSweepIfDue, MESSAGE_NOTIFICATION_SWEEP_DUE_INTERVAL_MS } from './services/messageNotifications';
 
 const app = buildApp();
@@ -107,6 +107,29 @@ const checkMissingImageBackfill = () => {
 if (config.NODE_ENV !== 'test') {
   setTimeout(checkMissingImageBackfill, 30_000);
   setInterval(checkMissingImageBackfill, MISSING_IMAGE_BACKFILL_CHECK_INTERVAL_MS);
+}
+
+// The retroactive half of the venue-city fix (services/inventorySync.ts#backfillVenueCities's own
+// comment has the full "why": a live provider's own search radius genuinely reaches neighbouring
+// cities, and every one of those real, farther-out venues used to get mislabelled with the SYNCED
+// city instead of the city it's actually in — real, live-reported bug: "I'm in Birmingham...
+// it's showing me events in Sheffield and Chester"). The code fix in syncProvider only stops NEW
+// mislabelling; this is what corrects production's existing backlog without a manual admin call.
+// Same due/check split as the two image backfills above, staggered a further 10s; also
+// triggerable on demand via POST /admin/venue-city-backfill. Idempotent — once the backlog is
+// corrected, every later "due" run finds nothing left to fix and this never needs disabling.
+const VENUE_CITY_BACKFILL_DUE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const VENUE_CITY_BACKFILL_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+const checkVenueCityBackfill = () => {
+  runVenueCityBackfillIfDue(VENUE_CITY_BACKFILL_DUE_INTERVAL_MS)
+    .then((outcome) => {
+      if (outcome.ran) app.log.info(outcome.result, 'Venue-city backfill ran (database confirmed it was due)');
+    })
+    .catch((err) => app.log.error({ err }, 'Venue-city backfill check failed'));
+};
+if (config.NODE_ENV !== 'test') {
+  setTimeout(checkVenueCityBackfill, 40_000);
+  setInterval(checkVenueCityBackfill, VENUE_CITY_BACKFILL_CHECK_INTERVAL_MS);
 }
 
 // "Notifications of messages in crews that you're in" — see services/messageNotifications.ts's

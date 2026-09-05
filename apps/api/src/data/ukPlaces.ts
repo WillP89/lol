@@ -115,6 +115,31 @@ export function searchUkPlaces(query: string, limit = 8): UkPlace[] {
 }
 
 /**
+ * The real place a set of coordinates actually falls in — the nearest named gazetteer town/city
+ * by straight-line distance. Real, live-reported bug this exists to close (see
+ * inventorySync.ts's own comment on the venue-city fix): every live ticketed-events provider
+ * deliberately searches well beyond the requested city's own boundary (Ticketmaster 100km,
+ * Skiddle ~104km, PredictHQ 40km — see each adapter's own SEARCH_RADIUS comment) specifically so
+ * Explore's own "widen the radius" feature has real inventory to reveal from a single sync. A
+ * genuine Sheffield venue turned up by a Birmingham-centred search is real, correctly-located
+ * data — the bug was ever stamping it with the SYNCED city's name instead of asking where it
+ * actually is. This is that "where it actually is" — used to label a Venue's own `city` field by
+ * real geography, never by which city's sync happened to fetch it.
+ */
+export function nearestPlaceName(lat: number, lng: number): string {
+  let best = UK_FALLBACK_CENTER;
+  let bestDistKm = haversineKm(lat, lng, best.lat, best.lng);
+  for (const place of UK_PLACES) {
+    const distKm = haversineKm(lat, lng, place.lat, place.lng);
+    if (distKm < bestDistKm) {
+      best = place;
+      bestDistKm = distKm;
+    }
+  }
+  return best.name;
+}
+
+/**
  * The single closest gazetteer town/city to an arbitrary point — used to anchor a radius search
  * centred somewhere that isn't itself one of our named places (a postcode, in particular:
  * provider inventory is synced per named city — see mock/ticketingProvider.ts's CITY_VENUES and
