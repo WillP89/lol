@@ -1,9 +1,9 @@
 import { prisma } from '../lib/prisma';
 import { MIN_PUBLISHABLE_QUALITY_SCORE } from './qualityScoring';
-import { ensureInventory } from './inventorySync';
+import { ensureLocalAreaInventory, LOCAL_AREA_RADIUS_KM } from './inventorySync';
 import { evaluateTasteRelevance, experienceInterestTags, categoryToTasteKey, type FreeTextSignal, type TasteRelevance } from './tasteSignals';
 import { dedupeNearDuplicates } from './entityResolution';
-import { haversineMiles } from '../lib/geo';
+import { haversineMiles, haversineKm } from '../lib/geo';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { interestLabel } from '@plot/shared';
 import type { Experience, Venue } from '@prisma/client';
@@ -253,7 +253,15 @@ export async function buildPersonalHome(userId: string, opts: { debug?: boolean 
   ]);
 
   const city = profile?.homeCity ?? UK_FALLBACK_CENTER.name;
-  await ensureInventory(city);
+  // Real, live-reported bug this closes (same fix as explore.ts#listExploreExperiences, shared
+  // via the one `ensureLocalAreaInventory` helper so both mean the same real-world radius): a
+  // bare `venue: { city }` string match trusted whatever city label a venue happened to get from
+  // whichever sync discovered it, and every live ticketed-events provider deliberately searches
+  // well beyond the requested city (100km+ in Ticketmaster's case) so Explore's own radius-
+  // widening has real inventory from one sync. That legitimately reached a real, correctly-
+  // located venue in a different city entirely — Home would have shown it exactly like Explore
+  // did before this fix. See inventorySync.ts#ensureLocalAreaInventory's own comment.
+  const { center: homeCenter, places: localPlaces } = await ensureLocalAreaInventory(city);
 
   const ctx: ScoreContext = {
     categoryAffinity: (tasteProfile?.categoryAffinity as Record<string, number> | undefined) ?? {},
@@ -280,17 +288,23 @@ export async function buildPersonalHome(userId: string, opts: { debug?: boolean 
   // fact about the event itself. See match.ts/explore.ts's identical fix for the same reason.
   windowEnd.setHours(23, 59, 59, 999);
 
-  const rows = (await prisma.experience.findMany({
+  const candidateRows = (await prisma.experience.findMany({
     where: {
       qualityScore: { gte: MIN_PUBLISHABLE_QUALITY_SCORE },
       bookingStatus: { not: 'SOLD_OUT' },
       startsAt: { gte: windowStart, lte: windowEnd },
-      venue: { city },
+      venue: { city: { in: localPlaces.map((p) => p.name) } },
     },
     include: { venue: true, listings: { select: { externalUrl: true }, take: 1, orderBy: { lastRefreshedAt: 'desc' } } },
     orderBy: { startsAt: 'asc' },
-    take: HOME_CANDIDATE_LIMIT,
+    take: HOME_CANDIDATE_LIMIT * Math.max(localPlaces.length, 1),
   })) as ExperienceWithVenue[];
+  // The actual, real distance check — being in `localPlaces` only means a venue's CITY LABEL is
+  // one of the real nearby gazetteer names; this confirms its own real coordinates are genuinely
+  // local too. A row with no venue has no coordinates to check — excluded rather than assumed local.
+  const rows = candidateRows
+    .filter((e) => e.venue && haversineKm(homeCenter.lat, homeCenter.lng, e.venue.latitude, e.venue.longitude) <= LOCAL_AREA_RADIUS_KM)
+    .slice(0, HOME_CANDIDATE_LIMIT);
 
   const deduped = dedupeNearDuplicates(rows, (e) => ({ name: e.name, category: e.category, startsAt: e.startsAt }));
   const scored = deduped.map((e) => scoreForIndividual(e, ctx, opts.debug === true));

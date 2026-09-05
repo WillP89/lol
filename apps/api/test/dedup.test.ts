@@ -117,9 +117,17 @@ describe('event deduplication: the actual "Jorja Smith DJ Set" duplicate, end to
       headers: { cookie: member.cookie },
     });
     expect(res.statusCode).toBe(200);
-    const { experiences } = res.json() as { experiences: { name: string }[] };
-    const jorjaCount = experiences.filter((e) => e.name === 'Jorja Smith DJ Set').length;
-    expect(jorjaCount).toBe(1);
+    const { experiences } = res.json() as { experiences: { name: string; listings?: { externalUrl: string }[] }[] };
+    // Scoped to the two admin-seeded fixtures THIS test itself created (identified by their own
+    // external URLs, both containing "Jorja%20Smith%20DJ%20Set-") rather than a blanket
+    // system-wide name count. "This area" now correctly also covers real neighbouring-town
+    // inventory (see services/inventorySync.ts#ensureLocalAreaInventory) — the Staffordshire
+    // mock catalogue's own recurring "Jorja Smith DJ Set" template can legitimately surface a
+    // genuinely separate real listing from a nearby town under that same generic name; that's a
+    // distinct real event, not a duplicate of this test's own fixture pair, and conflating the
+    // two would be testing something this test was never actually about.
+    const seededJorjas = experiences.filter((e) => e.name === 'Jorja Smith DJ Set' && e.listings?.some((l) => l.externalUrl.includes('/Jorja%20Smith%20DJ%20Set-')));
+    expect(seededJorjas).toHaveLength(1);
     // The genuinely different event is untouched.
     expect(experiences.filter((e) => e.name === 'Bicep')).toHaveLength(1);
   });

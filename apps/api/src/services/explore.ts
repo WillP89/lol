@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { MIN_PUBLISHABLE_QUALITY_SCORE } from './qualityScoring';
-import { ensureInventory } from './inventorySync';
+import { ensureInventory, ensureLocalAreaInventory, LOCAL_AREA_RADIUS_KM } from './inventorySync';
 import { categoryToTasteKey, evaluateTasteRelevance, type FreeTextSignal } from './tasteSignals';
 import { dedupeNearDuplicates } from './entityResolution';
 import { haversineKm } from '../lib/geo';
@@ -101,8 +101,20 @@ async function finishExploreList(rows: ExperienceWithVenue[], userId?: string, o
  * still surfaces rather than a total taste-only reshuffle. See docs/DECISIONS.md#explore-
  * personalisation.
  */
+// "This area" (the exact-city default, `radiusKm === null` on the client) was, until this real,
+// live-reported bug ("I'm in Birmingham... it's showing me events in Sheffield and Chester"), a
+// bare `venue.city === city` string match. Every live ticketed-events provider deliberately
+// searches well beyond the requested city (Ticketmaster 100km, Skiddle ~104km, PredictHQ 40km —
+// see each adapter's own SEARCH_RADIUS comment) so Explore's own radius-widening feature has real
+// inventory from one sync — genuinely correct on its own — but a `venue.city` string match then
+// trusted whatever label a venue happened to get (see inventorySync.ts#syncProvider's own fix for
+// the ingestion half of this bug) with zero real distance check at all. `ensureLocalAreaInventory`
+// (services/inventorySync.ts) is the query-time half, shared with personalHome.ts so both mean
+// the same real-world radius: even a still-mislabelled row can never again reach "This area"
+// unless it's genuinely close, while genuinely local neighbouring towns (Uttoxeter/Cannock/
+// Trentham all sit within ~25km of Stafford) still count, exactly as they always honestly should.
 export async function listExploreExperiences(city: string, userId?: string, opts?: { filterToTaste?: boolean }): Promise<ExplorePersonalisationResult> {
-  await ensureInventory(city);
+  const { center, places } = await ensureLocalAreaInventory(city);
 
   const windowStart = new Date();
   const windowEnd = new Date();
@@ -116,13 +128,19 @@ export async function listExploreExperiences(city: string, userId?: string, opts
       qualityScore: { gte: MIN_PUBLISHABLE_QUALITY_SCORE },
       bookingStatus: { not: 'SOLD_OUT' },
       startsAt: { gte: windowStart, lte: windowEnd },
-      venue: { city },
+      venue: { city: { in: places.map((p) => p.name) } },
     },
     include: { venue: true, listings: { select: { externalUrl: true }, take: 1, orderBy: { lastRefreshedAt: 'desc' } } },
     orderBy: { startsAt: 'asc' },
-    take: EXPLORE_LIMIT,
+    take: EXPLORE_LIMIT * Math.max(places.length, 1),
   });
-  return finishExploreList(rows, userId, opts);
+  // The actual, real distance check — being in `places` only means a venue's CITY LABEL is one
+  // of the real nearby gazetteer names; this confirms the venue's own real coordinates are
+  // genuinely within the local radius too, the same defense-in-depth belt-and-braces the radius
+  // search below already applies. A row with no venue has no coordinates to check — excluded
+  // rather than assumed local.
+  const withinLocalArea = rows.filter((r) => r.venue && haversineKm(center.lat, center.lng, r.venue.latitude, r.venue.longitude) <= LOCAL_AREA_RADIUS_KM);
+  return finishExploreList(withinLocalArea.slice(0, EXPLORE_LIMIT), userId, opts);
 }
 
 export interface RadiusSearchMeta {
