@@ -358,6 +358,17 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     // wins over a taste-blind one. Only when NOTHING in radius has any taste signal at all (the
     // Crew's stated preferences genuinely have zero matching inventory right now) does this fall
     // back to `inRadius`, an honest last resort rather than the default behaviour.
+    //
+    // SECOND real, live-reported bug this same guarantee later still let through ("I set the
+    // Crew's preferences to ONLY food... the first event Plot sent was comedy"): even with the
+    // fix above, `inRadius`/`withTaste`/`scored` themselves used to still contain EVERY category
+    // — a Crew's own explicit categoryPreferences/interestPreferences only ever added bonus
+    // score, never excluded anything, so a member's own unrelated personal comedy affinity could
+    // clear `hasTasteSignal` on its own for a category the Crew never asked for. Fixed at the
+    // source (services/match.ts#scoreExperiencesForCrew now hard-filters the candidate pool to
+    // the Crew's own explicit preference before any of the pools below are even built) — every
+    // pool this function sees is already correctly scoped, so `inRadius` is now a safe last
+    // resort here too, not a second place the same bug could sneak back in.
     const tasteMatchedPool = withTaste.length > 0 ? withTaste : inRadius;
     const bestAvailable = [...tasteMatchedPool].sort((a, b) => b.matchScore - a.matchScore)[0];
     return { outcome: 'eligible', details: { ...details, guaranteedFirst: true, guaranteedFirstHadTasteSignal: withTaste.length > 0 }, best: bestAvailable };

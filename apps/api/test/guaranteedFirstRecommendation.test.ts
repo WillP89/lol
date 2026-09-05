@@ -210,6 +210,62 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
     expect(row!.imageSource).toBe('CATEGORY_STOCK');
   });
 
+  /**
+   * Real, live-reported bug (the exact wording): "I made a new crew, set the preferences to
+   * ONLY food related events, then the FIRST event Plot sent to the crew was a comedy event."
+   * Different root cause from the "one shot" test above, and NOT covered by it: that test used
+   * two members with zero personal taste signal, so the only thing that could ever win was the
+   * Crew's own +20 crew_preference bonus — it never exercised the actual bug, which is a
+   * member's OWN personal TasteProfile (comedy affinity from their own onboarding swipes,
+   * nothing to do with what this Crew explicitly asked for) being enough on its own to clear
+   * `hasTasteSignal`/the confidence bar for a category the Crew never selected. Before the fix
+   * (services/match.ts#scoreExperiencesForCrew's own candidate-pool hard filter), a Crew's
+   * categoryPreferences only ever added bonus score on top of whatever a member's personal taste
+   * already favoured — it never excluded anything — so this exact scenario would have delivered
+   * the comedy event.
+   */
+  test('a member\'s own personal comedy taste never overrides the Crew\'s explicit food-only preference', async () => {
+    await resetDatabase();
+    await seedExperience('Personal-Taste Comedy Night', 'COMEDY', 'The Sugarmill');
+    await seedExperience('Stafford Street Food Market', 'RESTAURANT', 'Market Square');
+
+    const owner = await setUpMemberNoTaste('foodonly-owner@plot-test.invalid');
+    // This member has REAL personal comedy affinity — the exact ingredient the old bug needed.
+    // Deliberately unrelated to anything this Crew itself will go on to select.
+    const mate = await setUpMemberNoTaste('foodonly-mate@plot-test.invalid');
+    await app.inject({
+      method: 'POST',
+      url: '/users/me/taste',
+      headers: { cookie: mate.cookie },
+      payload: {
+        swipes: [{ category: 'comedy', choice: 'yes' as const }],
+        budget: { minMinor: 1000, maxMinor: 8000, currency: 'GBP' },
+        travelRadiusMeters: 24000,
+        energyPreference: 'MEDIUM',
+      },
+    });
+
+    const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name: 'Food Only Test Crew', defaultCity: STAFFORD.city } });
+    const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
+
+    // The Crew explicitly selects RESTAURANT (food) only — comedy is never chosen, at all.
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crew.id}/recommendation-settings`,
+      headers: { cookie: owner.cookie },
+      payload: { categoryPreferences: ['RESTAURANT'] },
+    });
+    await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
+    const { messages } = messagesRes.json() as { messages: { body: string }[] };
+    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    expect(announcement).toBeDefined();
+    expect(announcement!.body).toContain('Stafford Street Food Market');
+    expect(announcement!.body).not.toContain('Personal-Taste Comedy Night');
+  });
+
   test('genuinely zero candidates (nothing in radius) still honestly delivers nothing — never fabricated', async () => {
     await resetDatabase();
     // No experience seeded at all this time — and Truro has no coverage in any of the three

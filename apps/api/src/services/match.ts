@@ -164,8 +164,31 @@ export async function scoreExperiencesForCrew(
     ?? (medianOf(tasteProfiles.map((tp) => tp.travelRadiusMeters).filter((r) => r > 0)) || DEFAULT_RADIUS_METERS);
   const radiusMiles = radiusMeters / 1609.34;
 
+  // Layer 1b: the Crew's OWN explicit category/interest picks, when set, are a HARD FILTER on
+  // the candidate pool — never just a scoring bonus blended in with individual member taste.
+  // REAL, LIVE-REPORTED BUG this fixes: a brand-new Crew's preferences were set to food ONLY,
+  // and the very first thing Plot ever sent that Crew was a comedy event. Root cause — below,
+  // `crewCategoryPreferences.has(experience.category)` only ever ADDED score+a reason on top of
+  // whatever a candidate already had; it never excluded anything. A member's own personal
+  // TasteProfile (comedy affinity from THEIR OWN onboarding swipes, nothing to do with what
+  // THIS Crew explicitly said it's about) was on its own enough to clear the confidence bar via
+  // category_affinity/interest_match alone, for a category the Crew never asked for. Once a
+  // Crew has explicitly said "we are specifically this", that IS the Crew's answer — a member's
+  // own unrelated personal taste can still rank AMONG matching options (the scoring below is
+  // unchanged for those), it can never again override the restriction itself. Empty preferences
+  // (a Crew that hasn't said anything explicit) keeps the original, fully member-derived
+  // behaviour — nothing to restrict to yet.
+  const crewHasExplicitPreference = crewCategoryPreferences.size > 0 || crewInterestPreferences.size > 0;
+  const filteredCandidates = !crewHasExplicitPreference
+    ? candidates
+    : candidates.filter(
+        (experience) =>
+          crewCategoryPreferences.has(experience.category) ||
+          experienceInterestTags(experience).some((tag) => crewInterestPreferences.has(tag)),
+      );
+
   const scored: MatchOption[] = [];
-  for (const experience of candidates) {
+  for (const experience of filteredCandidates) {
     const reasons: MatchReason[] = [];
     let score = 0;
 
@@ -190,11 +213,13 @@ export async function scoreExperiencesForCrew(
       reasons.push({ code: 'crew_dna_match', label: "Matches this Crew's usual taste" });
     }
 
-    // A Crew's own explicit pick blends WITH (never replaces) member-derived taste — the two
-    // reasons above already reflect who's actually in the Crew; this is the group deliberately
-    // saying "we're specifically into this", which counts as a taste signal in its own right
-    // (see hasTasteSignal in crewRecommendations.ts) even for a Crew whose members haven't swiped
-    // enough yet to generate real affinity/DNA signal on their own.
+    // A Crew's own explicit pick is already a hard gate on the candidate pool above (see
+    // `filteredCandidates`) — reaching this line means either the Crew set no explicit
+    // preference at all, or this experience already matches one. This still adds its own score
+    // + reason on top of member-derived taste (the group deliberately saying "we're specifically
+    // into this" counts as a taste signal in its own right — see hasTasteSignal in
+    // crewRecommendations.ts) so a preference-matching candidate a member ALSO personally likes
+    // still ranks above one that only just cleared the Crew's own bar.
     if (crewCategoryPreferences.has(experience.category)) {
       score += 20;
       reasons.push({ code: 'crew_preference', label: 'Your Crew set this as a preference' });

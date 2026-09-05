@@ -47,9 +47,13 @@ async function setUpMember(email: string, interestIds: string[]): Promise<{ user
 async function createCrewWith(owner: { cookie: string }, mate: { cookie: string }, name: string): Promise<string> {
   const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name, defaultCity: STAFFORD.city } });
   const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
-  // BAR is unrelated to this file's LIVE_MUSIC fixtures — satisfies the preferences gate without
-  // adding a crew_preference boost that would confound scoring.
-  await app.inject({ method: 'PATCH', url: `/crews/${crew.id}/recommendation-settings`, headers: { cookie: owner.cookie }, payload: { categoryPreferences: ['BAR'] } });
+  // LIVE_MUSIC is the only category this file's fixtures ever use — satisfies the preferences
+  // gate without excluding any of them. (scoreExperiencesForCrew now hard-filters the candidate
+  // pool to the Crew's own explicit categoryPreferences when set — see match.ts — so a
+  // deliberately-unrelated placeholder like the old 'BAR' would now wrongly exclude every
+  // candidate instead of just satisfying the gate; listing the real category still adds the
+  // identical flat crew_preference bonus to every candidate here, so it can't confound scoring.)
+  await app.inject({ method: 'PATCH', url: `/crews/${crew.id}/recommendation-settings`, headers: { cookie: owner.cookie }, payload: { categoryPreferences: ['LIVE_MUSIC'] } });
   await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
   return crew.id;
 }
