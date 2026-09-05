@@ -49,7 +49,12 @@ const MIN_FOR_YOU_TO_SHOW_EXPLORATION = 3;
 // Home — "open" alone is too weak a signal to justify a whole section built around it.
 const INTEREST_ROW_THRESHOLD = 0.5;
 
-type ExperienceWithVenue = Experience & { venue: Venue | null };
+// Carries `listings` too (not just `venue`) for the same reason explore.ts's own identical type
+// does: Home's own detail view needs somewhere to point "view full details & pricing" at, and
+// that's ProviderListing's field, not Experience's own. Real, reported bug this fixes — Home
+// cards used to link to a generic /explore page with no way to see the actual event they came
+// from, let alone send it to a specific Crew from there.
+type ExperienceWithVenue = Experience & { venue: Venue | null; listings: { externalUrl: string }[] };
 
 // A small, Home-specific label set for the category-level reason line only ("Because you're
 // into Live music") — the specific-interest reason (matchedInterestId) is almost always the more
@@ -282,7 +287,7 @@ export async function buildPersonalHome(userId: string, opts: { debug?: boolean 
       startsAt: { gte: windowStart, lte: windowEnd },
       venue: { city },
     },
-    include: { venue: true },
+    include: { venue: true, listings: { select: { externalUrl: true }, take: 1, orderBy: { lastRefreshedAt: 'desc' } } },
     orderBy: { startsAt: 'asc' },
     take: HOME_CANDIDATE_LIMIT,
   })) as ExperienceWithVenue[];
