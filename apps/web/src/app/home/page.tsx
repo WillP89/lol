@@ -189,8 +189,17 @@ function pulseLine(crews: CrewSummary[], nextPlan: UpcomingPlan | null, needsCou
  * not this event, not any event, just Explore's own unfiltered list. `onOpen` now opens THIS
  * card's own detail (see the sheet built in HomePage below), same as tapping a result in Explore
  * already does.
+ *
+ * Deliberately NOT `.v2-reveal` (the below-the-fold slide-up-on-scroll treatment — see
+ * useScrollReveal.ts): a row near the top of the page (For you, This weekend) sits inside the
+ * viewport at first paint and gets marked revealed immediately, so it was already rendering in
+ * its final position with no visible animation — but "Try something different" sits low enough
+ * on the page that its cards genuinely animated into place as they scrolled into view, which read
+ * as "the images move" next to the other rows that never appeared to move at all. Every row
+ * should look identically static regardless of where it happens to fall on the page, so none of
+ * them animate in on scroll.
  */
-function DiscoveryCard({ item, index, muted, onOpen, onNotForMe }: { item: HomeItem; index: number; muted?: boolean; onOpen: () => void; onNotForMe: () => void }) {
+function DiscoveryCard({ item, muted, onOpen, onNotForMe }: { item: HomeItem; muted?: boolean; onOpen: () => void; onNotForMe: () => void }) {
   const { experience } = item;
   const price = formatPriceFrom(experience.priceMinMinor, experience.currency);
   const reason = item.reasons[0]?.label;
@@ -198,8 +207,8 @@ function DiscoveryCard({ item, index, muted, onOpen, onNotForMe }: { item: HomeI
     <button
       type="button"
       onClick={onOpen}
-      className="v2-reveal v2-hoverable"
-      style={{ flex: '0 0 auto', width: 172, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', ['--reveal-i' as string]: index, opacity: muted ? 0.85 : 1, position: 'relative', border: 'none', padding: 0, textAlign: 'left', font: 'inherit', color: 'inherit', cursor: 'pointer' }}
+      className="v2-hoverable"
+      style={{ flex: '0 0 auto', width: 172, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', opacity: muted ? 0.85 : 1, position: 'relative', border: 'none', padding: 0, textAlign: 'left', font: 'inherit', color: 'inherit', cursor: 'pointer' }}
     >
       <div style={{ position: 'relative', height: 110, background: v2Art(experience.imageUrl, experience.category, experience.id) }}>
         {CATEGORY_TAG[experience.category] && (
@@ -822,11 +831,10 @@ export default function HomePage() {
                 <Link href="/explore" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>Discover</Link>
               </div>
               <div style={{ display: 'flex', gap: 12, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
-                {section.items.slice(0, 6).map((item, i) => (
+                {section.items.slice(0, 6).map((item) => (
                   <DiscoveryCard
                     key={item.experience.id}
                     item={item}
-                    index={i}
                     muted={section.isExploration}
                     onOpen={() => openDetail(item.experience)}
                     onNotForMe={() => sendHomeFeedback(item.experience.id, 'not_for_me')}
