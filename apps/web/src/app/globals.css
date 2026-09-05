@@ -1321,21 +1321,42 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   .v2-crew-main { flex: 1 1 auto; height: calc(100dvh - 18px) !important; }
 }
 
-/* THE keyboard-cutoff fix, fourth and final round — see crews/[id]/page.tsx's own top-of-render
-   comment for the full story of what the three JS-only attempts before this got wrong. Below
-   the desktop split breakpoint (>=1280px, same one `.v2-crew-split` uses above), a Crew's chat
-   is no longer a fixed-height "app shell" with its own internal `overflow-y: auto` scroll region
-   for messages — it's a normal, auto-height page that the BODY scrolls, the way virtually every
-   other page on the web already does, with the composer pinned via plain `position: sticky;
-   bottom: 0`. This is the standard, boring pattern browsers are actually built and tested to
-   get right when an on-screen keyboard opens — no viewport-height JS left to get subtly wrong
-   per browser/WebView. `.v2-crew-fill` (the flex-fill role two different elements share — the
-   wrapper around the message list, and the message list itself) and `.v2-crew-scroll` (the
-   message list's own internal scrolling) are both no-ops below the breakpoint for exactly that
-   reason; `.v2-crew-composer` is what actually needs real mobile-specific styling, since going
-   sticky pulls it out of the flow other siblings assume around it. */
-.v2-crew-fill { }
+/* THE keyboard-cutoff fix, fourth round — see crews/[id]/page.tsx's own top-of-render comment
+   for the full story of what the three JS-only attempts before this got wrong. Below the desktop
+   split breakpoint (>=1280px, same one `.v2-crew-split` uses above), a Crew's chat is no longer a
+   fixed-height "app shell" with its own internal `overflow-y: auto` scroll region for messages —
+   it's a normal, auto-height page that the BODY scrolls, the way virtually every other page on
+   the web already does, with the composer pinned via plain `position: sticky; bottom: 0`. This is
+   the standard, boring pattern browsers are actually built and tested to get right when an
+   on-screen keyboard opens — no viewport-height JS left to get subtly wrong per browser/WebView.
+   `.v2-crew-scroll` (the message list's own internal scrolling) stays a no-op below the breakpoint
+   for exactly that reason — mobile never gets an internally-scrolling region, on purpose.
+
+   FIFTH round, real and live-reported (screenshot: a brand-new Crew, one message sent, tapping
+   the composer): a genuinely short conversation left the composer stranded mid-screen with a huge
+   blank gap below it, all the way down to the browser's own chrome — arguably the worst possible
+   place for this to show up, since a Crew's very first message is exactly when the thread is
+   shortest. Root cause: `position: sticky; bottom: 0` only pulls an element to the visible bottom
+   edge while something taller than the viewport is being scrolled PAST it — it does nothing to
+   fill empty space when the page is shorter than the viewport in the first place (`.v2` further
+   up only guarantees `min-height: 100dvh` on the page as a whole; nothing was making the flex
+   column IN BETWEEN — `.v2-crew-main` down to the message canvas — actually reach that height, so
+   the composer just sat in normal flow right after a one-message-tall conversation, and the
+   leftover `min-height` showed up as bare page below it instead). Fixed the standard flexbox way
+   — a "sticky footer" needs BOTH pieces, not sticky alone: a flex column with a real height floor
+   (`.v2-crew-main`'s own `min-height: 100dvh` below) and its content area actually claiming the
+   leftover space (`flex: 1 0 auto`, `shrink: 0` so a long conversation still just grows the page
+   past 100dvh — never clips or gains an internal scrollbar — exactly like before). `.v2-crew-fill`
+   (the flex-fill role two different elements share — the wrapper around the message list, and the
+   message list itself) is what carries that on both levels: growing the wrapper to the full column
+   height pushes the composer down to the true bottom; growing the message list inside IT the same
+   way is what makes that bottom edge the message canvas's own, not a gap between canvas and
+   composer. */
+.v2-crew-fill { flex: 1 0 auto; }
 .v2-crew-scroll { }
+@media (max-width: 1279px) {
+  .v2-crew-main { min-height: 100dvh; }
+}
 .v2-crew-composer {
   position: sticky;
   bottom: 0;

@@ -4,6 +4,7 @@ import { track } from './analytics';
 import { ensureInventory, enrichMissingImageForExperience } from './inventorySync';
 import { scoreExperiencesForCrew, getCrewExcludedExperienceIds, type MatchOption } from './match';
 import { createRecommendationPlanForCrew } from './plan';
+import { sendSystemMessage } from './chat';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { Prisma } from '@prisma/client';
 import type { CrewRecommendation, CrewRecommendationStatus } from '@prisma/client';
@@ -399,6 +400,42 @@ export async function generateRecommendationForCrew(crewId: string, opts: { guar
   const evaluation = await evaluateCrewEligibility(crewId, opts);
   if (evaluation.outcome !== 'eligible' || !evaluation.best) {
     logRecommendationOutcome(crewId, evaluation.outcome as RecommendationOutcome, evaluation.details);
+    // Real, live-reported gap this closes: this guarantee's whole point (see
+    // evaluateCrewEligibility's own comment) is that a brand-new Crew's first moment with Plot
+    // must never come up empty — but "empty" used to mean total silence whenever the Crew's own
+    // explicit category/interest preference (now a HARD filter, services/match.ts) genuinely
+    // matches zero live inventory near them right now — a real, likely scenario for a narrow
+    // preference in a smaller city, and the exact live-reported symptom: "I made a new crew...
+    // nothing has been sent to the crew yet". Silence reads as the product being broken, not as
+    // an honest "nothing yet" — so this is the one moment `no_eligible_candidate` still owes the
+    // Crew a reply, even though it can't honestly send an experience. Scoped tightly to
+    // `guaranteeFirst` (never the periodic sweep, which is deliberately, silently conservative —
+    // see this function's own doc comment) and to genuinely finding nothing at all, never a
+    // near-miss that just didn't clear the confidence bar (that's exactly what the guarantee
+    // above already relaxes; reaching `no_eligible_candidate` here means there was nothing in
+    // radius matching the Crew's own preference, full stop). Guarded by checking for a prior Plot
+    // message first — this is a single-shot trigger in practice (see routes/crews.ts and
+    // updateSettings's own comments on why only one of the two call sites ever reaches a real,
+    // 2+-member evaluation) but a concurrent double-fire should still never double up the
+    // message a Crew sees.
+    if (opts.guaranteeFirst && evaluation.outcome === 'no_eligible_candidate') {
+      const systemUserId = await getPlotSystemUserId();
+      const alreadySpoken = await prisma.crewMessage.findFirst({ where: { crewId, authorId: systemUserId }, select: { id: true } });
+      if (!alreadySpoken) {
+        const settings = await getOrCreateSettings(crewId);
+        const city = typeof evaluation.details.city === 'string' ? evaluation.details.city : null;
+        const preferenceLabel = settings.categoryPreferences.length > 0
+          ? settings.categoryPreferences.map((c) => c.replace(/_/g, ' ').toLowerCase()).join(' or ')
+          : settings.interestPreferences.length > 0
+            ? 'what you told us you\'re into'
+            : null;
+        const near = city ? ` near ${city}` : '';
+        const body = preferenceLabel
+          ? `We don't have any ${preferenceLabel} events${near} that we can honestly recommend yet — we're still looking, and we'll message the moment something turns up.`
+          : `We don't have anything${near} that we can honestly recommend yet — we're still looking, and we'll message the moment something turns up.`;
+        await sendSystemMessage(crewId, systemUserId, body);
+      }
+    }
     return null;
   }
 
