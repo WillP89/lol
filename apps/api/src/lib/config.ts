@@ -43,6 +43,13 @@ const EnvSchema = z.object({
   DICE_API_KEY: z.string().optional(),
   EVENTBRITE_API_KEY: z.string().optional(),
   OPENTABLE_API_KEY: z.string().optional(),
+  // A genuinely different SHAPE of source from Ticketmaster/Skiddle — an events-intelligence
+  // aggregator (community listings, festivals, food & drink, performing arts, sport) searchable
+  // by real lat/lng radius, not another ticketed-listings site. See providers/live/predicthq.ts's
+  // own header for two things to verify before relying on it (current self-serve pricing, and
+  // the lack of a public click-through URL) and docs/providers/ticketing.md for the full writeup.
+  // Self-serve signup: predicthq.com.
+  PREDICTHQ_ACCESS_TOKEN: z.string().optional(),
   // Optional upgrade path for lib/imageEnrichment.ts's SPORT-category image lookup — unset
   // falls back to TheSportsDB's own published free test key ("123"), which their docs
   // explicitly document as fine for light/testing use but not indefinite production volume.
@@ -158,6 +165,7 @@ export const providerReadiness = {
   dice: Boolean(config.DICE_API_KEY),
   eventbrite: Boolean(config.EVENTBRITE_API_KEY),
   openTable: Boolean(config.OPENTABLE_API_KEY),
+  predicthq: Boolean(config.PREDICTHQ_ACCESS_TOKEN),
   postmarkEmail: Boolean(config.POSTMARK_API_KEY),
   smtpEmail: Boolean(config.SMTP_HOST && config.SMTP_USER && config.SMTP_PASS),
   resendEmail: Boolean(config.RESEND_API_KEY),

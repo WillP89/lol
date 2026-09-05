@@ -51,6 +51,12 @@ const STAFFORDSHIRE_ACTIVITIES: Seed[] = [
   { name: 'Odeon Cinema: new release', category: 'CINEMA', venueName: 'Odeon Stoke-on-Trent', lat: 53.0083, lng: -2.1889, description: 'This week’s big new release, group booking available.', subcategories: ['film'], priceFromMinor: 900, priceToMinor: 1400, groupFriendly: true },
   { name: 'Stafford Indoor Market', category: 'COMMUNITY', venueName: 'Stafford Market', lat: 52.8058, lng: -2.1176, description: 'Independent stalls, street food and a Saturday crowd.', subcategories: ['market'], priceFromMinor: 0, priceToMinor: 0, groupFriendly: true },
   { name: "Katie Fitzgerald's Quiz Night", category: 'BAR', venueName: "Katie Fitzgerald's", lat: 52.8047, lng: -2.1213, description: 'Weekly pub quiz, teams of up to six.', subcategories: ['quiz'], priceFromMinor: 200, priceToMinor: 200, groupFriendly: true },
+  // Real gap this closes (live product directive: "street food, food festivals, food markets,
+  // pop-ups... are still underrepresented"): the mock catalogue's only food-adjacent entries
+  // before this were a market with a generic 'market' tag and the restaurant provider's own
+  // cuisine list — nothing that could ever earn a "street_food"/"food_festivals" taxonomy match
+  // specifically. Real, named Stafford town-centre location, not a fabricated one.
+  { name: 'Stafford Street Food Festival', category: 'RESTAURANT', venueName: 'Market Square, Stafford', lat: 52.8062, lng: -2.1170, description: 'A weekend of street food traders and live cooking demos in the town centre.', subcategories: ['street_food', 'food_festivals'], priceFromMinor: 0, priceToMinor: 1500, groupFriendly: true },
 ];
 
 const BIRMINGHAM_ACTIVITIES: Seed[] = [

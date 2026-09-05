@@ -68,6 +68,36 @@ needs before it can replace or sit alongside the mock.
   Skiddle's own documented API contract; verify against Render's own logs once a real key is
   configured there.
 
+## PredictHQ — LIVE (needs `PREDICTHQ_ACCESS_TOKEN`)
+- **Why this one, on top of Ticketmaster + Skiddle**: both of those are real, self-serve, and
+  already registered — but both are ticketed-*listings* sites, and their actual UK catalogue for
+  a small-to-mid town genuinely does skew toward comedy nights and gigs inside any 3-week window
+  (the live product report this closes: "I only see comedy and live music"). PredictHQ is a
+  different SHAPE of source — an events-intelligence aggregator indexing community listings,
+  festivals, food & drink events, performing arts and sport from many public sources, searchable
+  by the same real lat/lng radius model Plot already uses (`within=<radius>@<lat>,<lng>`).
+- **Access**: self-serve signup at [predicthq.com](https://predicthq.com). **Not independently
+  verified from this environment** — outbound network here is blocked to everything except
+  api.github.com (the same restriction every other live adapter's header documents). Check
+  predicthq.com/pricing directly for current free-tier/paid terms before applying — the same
+  discipline already applied to Skiddle's business-activity clause above.
+- **The one real limitation worth knowing before applying**: PredictHQ has **no public
+  click-through URL** on its event objects — it's an intelligence API, not a consumer listings
+  site. `providers/live/predicthq.ts` handles this honestly: `externalUrl` is a real Google Maps
+  search for the venue/address PredictHQ does give us (useful — "here's where it is" — but
+  clearly not a booking link), never a fabricated one. Revisit if PredictHQ ever exposes a real
+  source link.
+- **Env**: `PREDICTHQ_ACCESS_TOKEN` (a Bearer token, not a query-string API key)
+- **Implementation**: `src/providers/live/predicthq.ts`, registered in `registry.ts` alongside
+  Ticketmaster/Skiddle — more than one ticketed/events source runs concurrently, not either/or.
+  Requests 8 of PredictHQ's own categories (community, concerts, conferences, expos, festivals,
+  food-drink, performing-arts, sports) — deliberately excludes public-holidays/school-holidays/
+  academic/politics/severe-weather/disasters/airport-delays, none of which is "a thing a Crew
+  could go and do".
+- **Not exercised against the live API from this environment** — same egress restriction as
+  every other adapter here. Written against PredictHQ's own publicly documented Events API v1
+  contract; verify against Render's own logs once a real token is configured there.
+
 ## DICE
 - **Access**: partner API, commercial agreement required — no public self-serve key. Contact
   DICE partnerships.

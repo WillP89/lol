@@ -1,21 +1,32 @@
 name: Wake recommendation scheduler
 
 # The free alternative to Render's (paid) Cron Jobs add-on. Render's free-tier web services
-# sleep when idle, and a sleeping process can't run its own in-memory checks — see
+# sleep after 15 minutes idle, and a sleeping process can't run its own in-memory checks — see
 # docs/DEPLOYMENT.md Step 2.6 and server.ts's own comment on `checkSweep`. GitHub Actions'
 # scheduled workflows are free (public repos: unlimited; private repos: within the free
-# monthly minutes, and this job runs in a few seconds), so this pings the API every 30
-# minutes purely to wake it — the actual "is a sweep due" decision still lives entirely in
-# `runSweepIfDue` (services/crewRecommendations.ts), so this never double-fires a sweep that
-# already happened; it just makes sure something checks regularly even while the dyno sleeps.
+# monthly minutes, and this job runs in a few seconds), so this pings the API purely to keep it
+# awake — the actual "is a sweep due" decision still lives entirely in `runSweepIfDue`
+# (services/crewRecommendations.ts), so this never double-fires a sweep that already happened.
+#
+# REAL BUG THIS INTERVAL FIXES, not just the scheduler: this used to run every 30 minutes,
+# which is LONGER than Render's own 15-minute idle-sleep timeout — so the dyno was still going
+# to sleep between pings and wove right back into a cold boot the moment a real user hit it
+# (live-reported: "first login of the day just spins forever, refreshing and retrying fixes
+# it" — apps/web/src/app/auth/page.tsx's own comment has the full story). This same dyno
+# serves EVERY route, not just the scheduler's own endpoint, so keeping it genuinely
+# continuously warm — not just periodically woken — is what actually prevents that, not a
+# frontend timeout alone (which only makes a cold start fail honestly, it can't make one not
+# happen). 10 minutes leaves a real safety margin under the 15-minute timeout even accounting
+# for GitHub's own documented scheduling jitter on scheduled workflows (a few minutes' delay is
+# normal, especially on quieter repos) — 30 minutes had none at all.
 #
 # Requires two repo secrets (Settings -> Secrets and variables -> Actions -> New repository
 # secret): PLOT_API_URL (e.g. https://plot-api.onrender.com, no trailing slash) and
 # PLOT_ADMIN_API_KEY (must match ADMIN_API_KEY set on the API service itself). Until both are
-# set, this workflow's step is skipped rather than failing loudly every 30 minutes.
+# set, this workflow's step is skipped rather than failing loudly every 10 minutes.
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '*/10 * * * *'
   workflow_dispatch: {} # lets you trigger a one-off run manually from the Actions tab
 
 jobs:

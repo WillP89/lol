@@ -54,9 +54,18 @@ function matchInterests(rawText: string): TasteInterest[] {
     for (const syn of interest.synonyms) {
       // Word-boundary-ish substring check both ways: "garage" should match "uk garage"'s synonym
       // list, and a longer typed phrase ("small indie gigs") should match the shorter "indie"
-      // synonym sitting inside it. Multi-word synonyms (e.g. "hip-hop/rap" normalised) still work
-      // as a plain substring check since both sides are already normalised the same way.
-      if (text.includes(syn) || syn.includes(text)) {
+      // synonym sitting inside it. Real bug this normalize() call fixes, caught by
+      // test/personalHome.test.ts: a synonym straight from @plot/shared/tasteTaxonomy.ts (e.g.
+      // "stand-up", "hip-hop/rap") keeps its own punctuation verbatim — it is NOT run through
+      // this file's `normalize()` at authoring time, unlike `text` above. A provider's raw
+      // subcategory tag, by this whole codebase's own snake_case convention (`stand_up`,
+      // `hip_hop`), normalizes its underscore to a space ("stand up") — which then can never
+      // match the synonym's un-normalized hyphen ("stand-up") on either side of an `.includes()`
+      // check, silently failing every taxonomy entry whose label/synonym contains punctuation.
+      // Normalizing the synonym here, at comparison time, is what actually makes "both sides
+      // normalised the same way" true rather than just asserted.
+      const normalizedSyn = normalize(syn);
+      if (text.includes(normalizedSyn) || normalizedSyn.includes(text)) {
         hits.push(interest);
         break;
       }
@@ -72,7 +81,10 @@ function matchInterestsForCategory(rawText: string, category: string): TasteInte
   const text = normalize(rawText);
   if (!text) return [];
   const scoped = interestsForCategory(category);
-  return scoped.filter((interest) => interest.synonyms.some((syn) => text.includes(syn) || syn.includes(text)));
+  // See matchInterests' own comment on why the synonym itself needs normalizing too, not just
+  // the input text — this is the same fix, applied to the category-scoped path (provider
+  // subcategory tags) that surfaced the bug in the first place.
+  return scoped.filter((interest) => interest.synonyms.some((syn) => { const n = normalize(syn); return text.includes(n) || n.includes(text); }));
 }
 
 export interface FreeTextSignal {
@@ -202,6 +214,89 @@ export function experienceMatchesFreeText(experience: { name: string; descriptio
   const needle = normalize(rawText);
   if (needle.length < 3) return false; // too short to mean anything reliably
   return normalize(experience.name).includes(needle) || normalize(experience.description).includes(needle);
+}
+
+/** TasteProfile.categoryAffinity keys are the free-text onboarding swipe categories (e.g.
+ *  "clubbing", "live music"), which don't line up 1:1 with the Experience.category enum — this
+ *  maps enum values to the closest onboarding key. A real mapping table grows with the taxonomy;
+ *  this is deliberately a small, visible function rather than buried inline. Lives here (not
+ *  match.ts, which used to own it) so this file — the one place both Crew scoring (match.ts) and
+ *  individual scoring (personalHome.ts) get their taxonomy logic from — has no reverse dependency
+ *  on either of them; moving it avoided a circular import the moment personalHome.ts needed it
+ *  too. */
+export function categoryToTasteKey(category: string): string {
+  const map: Record<string, string> = {
+    LIVE_MUSIC: 'live_music',
+    CLUBBING: 'clubbing',
+    RESTAURANT: 'restaurant',
+    BAR: 'bar',
+    COMEDY: 'comedy',
+    THEATRE: 'theatre',
+    CINEMA: 'cinema',
+    ART_CULTURE: 'art_culture',
+    SPORT: 'sport',
+    FITNESS: 'fitness',
+    FESTIVAL: 'festival',
+    DAY_ACTIVITY: 'day_activity',
+    COMMUNITY: 'community',
+  };
+  return map[category] ?? category.toLowerCase();
+}
+
+export interface TasteRelevance {
+  /** Stage-A eligibility (see docs/DECISIONS.md#personal-home): true the moment ANY real signal
+   *  — category, a specific interest tag, or a literal free-text match — is positive. This is
+   *  the ONE eligibility rule every individual-facing surface (Explore, Home) shares; Crew
+   *  scoring (match.ts#scoreExperiencesForCrew) is deliberately separate — a Crew's own
+   *  aggregate/DNA/preference signals mean something different from any one member's. */
+  eligible: boolean;
+  categoryAffinity: number;
+  /** The single strongest matching specific interest, if any — not "some interest matched" but
+   *  WHICH one, so a caller can build an honest "because you like UK garage" reason rather than
+   *  a vague "matches your taste". */
+  matchedInterestId: string | null;
+  matchedInterestAffinity: number;
+  matchedFreeText: string | null;
+}
+
+/** THE canonical "does this belong to this person at all" check — Stage A of the two-stage
+ *  eligibility-then-ranking model (docs/DECISIONS.md#personal-home). Used by both
+ *  services/explore.ts (Explore's own "only show what's relevant" filter) and
+ *  services/personalHome.ts (Home's personal feed) so "relevant" means exactly one thing across
+ *  the app, not two definitions that can quietly drift apart. An Experience is eligible the
+ *  moment ANY of these is true: (1) its own category has positive affinity, (2) at least one of
+ *  its real interest tags (experienceInterestTags below — provider subcategories + a scoped
+ *  keyword scan, never invented) has positive affinity, or (3) it textually matches one of the
+ *  viewer's own free-text signals. A negative/absent signal on all three is NOT eligible — this
+ *  is a hard gate, not a soft reorder (see match.ts's own scorer for the softer, additive
+ *  version Crew recommendations use instead). */
+export function evaluateTasteRelevance(
+  experience: { category: string; subcategories: unknown; name: string; description: string },
+  categoryAffinity: Record<string, number>,
+  interestAffinity: Record<string, number>,
+  freeTextSignals: FreeTextSignal[],
+): TasteRelevance {
+  const catScore = categoryAffinity[categoryToTasteKey(experience.category)] ?? 0;
+
+  let matchedInterestId: string | null = null;
+  let matchedInterestAffinity = 0;
+  for (const tag of experienceInterestTags(experience)) {
+    const affinity = interestAffinity[tag] ?? 0;
+    if (affinity > matchedInterestAffinity) {
+      matchedInterestAffinity = affinity;
+      matchedInterestId = tag;
+    }
+  }
+
+  const freeTextHit = freeTextSignals.find((s) => experienceMatchesFreeText(experience, s.text));
+
+  return {
+    eligible: catScore > 0 || matchedInterestAffinity > 0 || Boolean(freeTextHit),
+    categoryAffinity: catScore,
+    matchedInterestId,
+    matchedInterestAffinity,
+    matchedFreeText: freeTextHit?.text ?? null,
+  };
 }
 
 export { TASTE_TAXONOMY };

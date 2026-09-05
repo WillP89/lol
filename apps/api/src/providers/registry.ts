@@ -5,6 +5,7 @@ import { mockActivityProvider } from './mock/activityProvider';
 import { ticketmasterProvider } from './live/ticketmaster';
 import { eventbriteProvider } from './live/eventbrite';
 import { skiddleProvider } from './live/skiddle';
+import { predictHqProvider } from './live/predicthq';
 import { openStreetMapProvider } from './live/openStreetMap';
 import { config } from '../lib/config';
 
@@ -20,7 +21,13 @@ void eventbriteProvider; // kept implemented, deliberately not registered — se
  * more than one can run at once, the normal case for "every source possible", not either/or.
  * Skiddle (see live/skiddle.ts) is a second, independent ticketed-events source alongside
  * Ticketmaster — different real inventory (club nights, UK festivals, comedy, smaller venues),
- * not a duplicate. Eventbrite is implemented but NOT registered: researched and confirmed (September 2026, see
+ * not a duplicate. PredictHQ (see live/predicthq.ts) is a THIRD, genuinely different-shaped
+ * source again — a broad events-intelligence aggregator (community, festivals, food & drink,
+ * performing arts, sport) rather than another ticketed-listings site, added specifically because
+ * Ticketmaster + Skiddle's own real UK catalogue for a small town skews toward comedy/live music
+ * in any given few-week window — see that file's own header for two things to verify (current
+ * pricing, and its lack of a public click-through URL) before relying on it. Eventbrite is
+ * implemented but NOT registered: researched and confirmed (September 2026, see
  * its own file's top comment) that Eventbrite cut public event search off for new keys in 2020
  * and ended official API support entirely by 2025 — a real EVENTBRITE_API_KEY would not make
  * this adapter return real inventory, so presenting it as a "live" option the moment a key is
@@ -45,6 +52,7 @@ void eventbriteProvider; // kept implemented, deliberately not registered — se
 const liveTicketedProviders: ProviderAdapter[] = [
   ...(config.TICKETMASTER_API_KEY ? [ticketmasterProvider] : []),
   ...(config.SKIDDLE_API_KEY ? [skiddleProvider] : []),
+  ...(config.PREDICTHQ_ACCESS_TOKEN ? [predictHqProvider] : []),
 ];
 
 // Same convention already used for media storage (lib/mediaStorage.ts) and email

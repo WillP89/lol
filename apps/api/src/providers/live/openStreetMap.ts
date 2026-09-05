@@ -48,7 +48,17 @@ const FETCH_RETRY = { attempts: 2, timeoutMs: 8_000 };
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 const SEARCH_RADIUS_METERS = 6000; // dining/nightlife — a real "worth the trip" catchment, not a whole county
 const CULTURE_RADIUS_METERS = 9000; // museums/attractions/markets are sparser — search a bit wider
-const MAX_RESULTS = 60; // keeps one sync run's DB writes and the shared Overpass instance's load bounded
+// Real, live-reported gap this closes: "I only see comedy and live music" — Ticketmaster/Skiddle's
+// own UK catalogue for a small-to-mid town genuinely does skew that way in any given 3-week
+// window (see match.ts's CANDIDATE_WINDOW_DAYS), and this codebase had already ruled out every
+// realistic paid places API for the same directive (Yelp paid-only since 2024, Foursquare's free
+// tier excludes Photos — see docs/providers/food-and-places.md's rejection table). OSM's own
+// tagging vocabulary already covers several more real, free, no-credential categories than this
+// adapter was requesting — nightclub, cinema, theatre, and several DAY_ACTIVITY/FITNESS leisure
+// values were sitting unused in Overpass's own data the whole time. Widening the query, not
+// adding a new source, is the honest fix here: no new adapter's worth of uncertainty, just more
+// of a source already proven to work.
+const MAX_RESULTS = 90; // raised from 60 alongside the wider query so no one category starves the others
 
 interface OsmElement {
   type: 'node' | 'way' | 'relation';
@@ -72,8 +82,21 @@ function mapCategory(tags: Record<string, string>): ExperienceCategory {
   const leisure = tags.leisure;
   if (amenity === 'bar' || amenity === 'pub') return 'BAR';
   if (amenity === 'restaurant' || amenity === 'cafe' || amenity === 'fast_food' || amenity === 'marketplace') return 'RESTAURANT';
+  // Real gap this closes: CLUBBING previously had exactly one real source (Skiddle's own CLUB
+  // eventcode) — a real, well-tagged OSM amenity value costs nothing to add on top of that.
+  if (amenity === 'nightclub') return 'CLUBBING';
+  if (amenity === 'cinema') return 'CINEMA';
+  if (amenity === 'theatre') return 'THEATRE';
   if (tourism === 'museum' || tourism === 'gallery' || tourism === 'attraction') return 'ART_CULTURE';
-  if (leisure) return 'DAY_ACTIVITY';
+  // Real gap this closes: FITNESS had ZERO real source at all before this — every FITNESS
+  // Experience in the database was mock-only. Gyms/pools/sports centres are common, reliably
+  // tagged OSM leisure values in any real UK town.
+  if (leisure === 'fitness_centre' || leisure === 'sports_centre' || leisure === 'swimming_pool') return 'FITNESS';
+  // horse_riding is the honest, real thing OSM actually has for "horse racing" — a riding
+  // centre/school, not a race meeting. Deliberately NOT relabelled as anything closer to
+  // "horse racing" than that would honestly support — see docs/providers/food-and-places.md's
+  // note on why real racecourse fixtures have no self-serve API and stay a manual-curation case.
+  if (leisure) return 'DAY_ACTIVITY'; // golf_course, ice_rink, horse_riding, bowling_alley, escape_game, trampoline_park, amusement_arcade
   return 'COMMUNITY';
 }
 
@@ -122,12 +145,15 @@ function directImageTag(tags: Record<string, string>): string | null {
 function buildQuery(center: UkPlace): string {
   const { lat, lng } = center;
   return `[out:json][timeout:25];(
-    node["amenity"~"^(restaurant|cafe|bar|pub|fast_food)$"]["name"](around:${SEARCH_RADIUS_METERS},${lat},${lng});
-    way["amenity"~"^(restaurant|cafe|bar|pub|fast_food)$"]["name"](around:${SEARCH_RADIUS_METERS},${lat},${lng});
+    node["amenity"~"^(restaurant|cafe|bar|pub|fast_food|nightclub)$"]["name"](around:${SEARCH_RADIUS_METERS},${lat},${lng});
+    way["amenity"~"^(restaurant|cafe|bar|pub|fast_food|nightclub)$"]["name"](around:${SEARCH_RADIUS_METERS},${lat},${lng});
     node["amenity"="marketplace"]["name"](around:${CULTURE_RADIUS_METERS},${lat},${lng});
+    node["amenity"~"^(cinema|theatre)$"]["name"](around:${CULTURE_RADIUS_METERS},${lat},${lng});
+    way["amenity"~"^(cinema|theatre)$"]["name"](around:${CULTURE_RADIUS_METERS},${lat},${lng});
     node["tourism"~"^(museum|gallery|attraction)$"]["name"](around:${CULTURE_RADIUS_METERS},${lat},${lng});
     way["tourism"~"^(museum|gallery|attraction)$"]["name"](around:${CULTURE_RADIUS_METERS},${lat},${lng});
-    node["leisure"~"^(escape_game|bowling_alley|trampoline_park|amusement_arcade)$"]["name"](around:${CULTURE_RADIUS_METERS},${lat},${lng});
+    node["leisure"~"^(escape_game|bowling_alley|trampoline_park|amusement_arcade|fitness_centre|sports_centre|swimming_pool|golf_course|ice_rink|horse_riding)$"]["name"](around:${CULTURE_RADIUS_METERS},${lat},${lng});
+    way["leisure"~"^(escape_game|bowling_alley|trampoline_park|amusement_arcade|fitness_centre|sports_centre|golf_course)$"]["name"](around:${CULTURE_RADIUS_METERS},${lat},${lng});
   );
   out center tags ${MAX_RESULTS};`;
 }
@@ -149,7 +175,7 @@ async function runQuery(center: UkPlace, signal: AbortSignal): Promise<OsmElemen
 export const openStreetMapProvider: ProviderAdapter = {
   id: 'openstreetmap',
   displayName: 'OpenStreetMap',
-  categories: ['RESTAURANT', 'BAR', 'ART_CULTURE', 'DAY_ACTIVITY', 'COMMUNITY'],
+  categories: ['RESTAURANT', 'BAR', 'CLUBBING', 'CINEMA', 'THEATRE', 'ART_CULTURE', 'FITNESS', 'DAY_ACTIVITY', 'COMMUNITY'],
   isLive: true, // no credential — a public API, always "configured"
 
   async healthCheck(): Promise<ProviderHealth> {

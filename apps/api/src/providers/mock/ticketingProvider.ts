@@ -117,6 +117,22 @@ const COMEDY_LINEUP: { name: string; venue: number }[] = [
   { name: 'Saturday Night Stand-Up Social', venue: 4 },
 ];
 
+// Real gap this closes (live product directive: "I only really see comedy events and live
+// music... the ONLY plot sent events to crews are all comedy"): the mock catalogue's own
+// LIVE_MUSIC coverage was entirely house/techno/electronic/indie before this — genuinely nothing
+// a "rap" or "street food" taste profile could ever match, which is exactly the personalisation
+// gap the directive's own worked example names. Generic event-type titles, deliberately not real
+// artists' names (unlike CLUBBING_LIVE_LINEUP's convention above) — this is mock/dev/test
+// fixture data, and a made-up night name reads honestly as a placeholder while a real artist's
+// name attached to a fabricated date would not.
+const URBAN_MUSIC_LINEUP: { name: string; sub: string[]; venue: number }[] = [
+  { name: 'UK Rap All-Nighter', sub: ['hip_hop', 'rap'], venue: 1 },
+  { name: 'Grime Originals', sub: ['grime'], venue: 2 },
+  { name: 'Drill Showcase Night', sub: ['drill'], venue: 6 },
+  { name: 'R&B Sessions', sub: ['rnb'], venue: 3 },
+  { name: 'Afrobeats Block Party', sub: ['afrobeats'], venue: 5 },
+];
+
 function generateMockCatalogue(city: string): MockTicketingRaw[] {
   const venues = CITY_VENUES[city.trim().toLowerCase()];
   if (!venues) return []; // honest: no sample coverage here rather than another city's data
@@ -129,6 +145,7 @@ function generateMockCatalogue(city: string): MockTicketingRaw[] {
   const entries: { id: string; name: string; venue: (typeof LONDON_VENUES)[number]; cat: ExperienceCategory; sub: string[] }[] = [
     ...CLUBBING_LIVE_LINEUP.map((a, i) => ({ id: `mock-tkt-${citySlug}-${i}`, name: a.name, venue: venues[a.venue], cat: a.cat as ExperienceCategory, sub: a.sub })),
     ...COMEDY_LINEUP.map((c, i) => ({ id: `mock-tkt-${citySlug}-comedy-${i}`, name: c.name, venue: venues[c.venue], cat: 'COMEDY' as ExperienceCategory, sub: ['stand_up'] })),
+    ...URBAN_MUSIC_LINEUP.map((u, i) => ({ id: `mock-tkt-${citySlug}-urban-${i}`, name: u.name, venue: venues[u.venue], cat: 'LIVE_MUSIC' as ExperienceCategory, sub: u.sub })),
   ];
 
   return entries.map(({ id, name, venue, cat, sub }, i) => {

@@ -17,6 +17,7 @@ import { rewindRoutes } from './routes/rewind';
 import { adminRoutes } from './routes/admin';
 import { feedbackRoutes } from './routes/feedback';
 import { exploreRoutes } from './routes/explore';
+import { homeRoutes } from './routes/home';
 import { locationRoutes } from './routes/locations';
 import { analyticsClientRoutes } from './routes/analyticsClient';
 import { SWEEP_JOB_NAME, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from './services/crewRecommendations';
@@ -121,6 +122,7 @@ export function buildApp() {
   app.register(rewindRoutes);
   app.register(feedbackRoutes);
   app.register(exploreRoutes);
+  app.register(homeRoutes);
   app.register(locationRoutes);
   app.register(analyticsClientRoutes);
   app.register(adminRoutes, { prefix: '/admin' });

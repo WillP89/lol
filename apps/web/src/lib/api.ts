@@ -44,9 +44,9 @@ async function apiUpload<T>(path: string, file: File): Promise<T> {
 }
 
 export const api = {
-  get: <T>(path: string) => apiFetch<T>(path),
-  post: <T>(path: string, data?: unknown) =>
-    apiFetch<T>(path, { method: 'POST', body: data ? JSON.stringify(data) : undefined }),
+  get: <T>(path: string, options?: RequestInit) => apiFetch<T>(path, options),
+  post: <T>(path: string, data?: unknown, options?: RequestInit) =>
+    apiFetch<T>(path, { ...options, method: 'POST', body: data ? JSON.stringify(data) : undefined }),
   patch: <T>(path: string, data?: unknown) =>
     apiFetch<T>(path, { method: 'PATCH', body: data ? JSON.stringify(data) : undefined }),
   delete: <T>(path: string, data?: unknown) =>

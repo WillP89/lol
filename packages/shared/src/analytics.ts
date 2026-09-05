@@ -91,6 +91,15 @@ export const AnalyticsEvents = {
 
   // Feedback / trust
   FeedbackSubmitted: 'FeedbackSubmitted',
+
+  // HOME = ME (docs/DECISIONS.md#personal-home) — the individual-facing personalisation surface,
+  // distinct from RecommendationShown/CrewRecommendationDelivered above (both Crew-facing). Lets
+  // Part 23's own metrics ("irrelevant impression rate", category/source diversity) actually be
+  // computed later, and — combined with the real Stage-A eligibility gate these events sit
+  // behind — gives a real, queryable trail of what a person's Home actually showed and did with
+  // it, not just what the manual Crew-recommendation funnel did.
+  HomePersonalizedImpression: 'HomePersonalizedImpression',
+  HomeItemFeedback: 'HomeItemFeedback',
 } as const;
 
 export type AnalyticsEventName = (typeof AnalyticsEvents)[keyof typeof AnalyticsEvents];
@@ -160,6 +169,16 @@ export interface AnalyticsEventPayloads {
   CrewSecondPlan: { crewId: string; daysSinceFirstPlan: number };
 
   FeedbackSubmitted: { context: string; category: string; userId?: string };
+
+  HomePersonalizedImpression: {
+    personalized: boolean;
+    forYouCount: number;
+    thisWeekendCount: number;
+    interestRowCount: number;
+    nearYouCount: number;
+    explorationCount: number;
+  };
+  HomeItemFeedback: { experienceId: string; action: 'save' | 'not_for_me' | 'pass' | 'view' };
 }
 
 export type AnalyticsEvent<K extends AnalyticsEventName = AnalyticsEventName> = {

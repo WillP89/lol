@@ -117,13 +117,24 @@ default), and that self-healing check also fires once on every boot — so on Fl
 where the container stays running continuously, **no further setup is required.**
 
 **On Render specifically, you also need an external ping.** Why: its free tier puts an idle
-service to sleep, and a sleeping process's in-memory checks (the 15-minute poll above) simply
-stop running until something wakes it back up. An external ping is the one thing that reliably
-wakes a sleeping dyno in the first place — nothing running inside the process can do that for
-itself.
+service to sleep after **15 minutes** with no requests, and a sleeping process's in-memory
+checks (the 15-minute poll above) simply stop running until something wakes it back up. An
+external ping is the one thing that reliably wakes a sleeping dyno in the first place — nothing
+running inside the process can do that for itself.
+
+**This is also the fix for a real, separate, live-reported bug**: "the first login of the day
+just spins forever after typing the email — refreshing and trying again fixes it." That's the
+exact same dyno going to sleep, then a real user's login being the thing that has to wait out a
+cold boot — the web app's own `/auth` page now handles that failure honestly (a bounded timeout
++ a clear retry, see that page's own comment), but the only way to stop it happening at all is
+keeping the dyno genuinely warm. **The ping interval has to be shorter than Render's 15-minute
+timeout to actually do that** — this repo's workflow pings every 10 minutes, not the 30 it
+started at, specifically so there's a real safety margin under that 15-minute line (GitHub's
+own scheduled workflows can run a few minutes late, especially on quieter repos — 30 minutes
+left zero room for that and the dyno was sleeping between pings regardless).
 
 **Recommended (free): the GitHub Actions workflow already in this repo**
-(`.github/workflows/wake-scheduler.yml`) pings the sweep endpoint every 30 minutes — no
+(`.github/workflows/wake-scheduler.yml`) pings the sweep endpoint every 10 minutes — no
 Render dashboard clicking, no paid add-on (Render's own Cron Jobs feature is billed, unlike a
 GitHub Actions schedule). Turn it on by adding two repo secrets (GitHub → this repo → Settings
 → Secrets and variables → Actions → New repository secret):
@@ -139,14 +150,14 @@ set them up. You can also trigger it once by hand from the repo's **Actions** ta
 recommendation scheduler" → **Run workflow**, to confirm it's wired up correctly before waiting
 for the schedule.
 
-**Alternative**: Render → your service → Cron Jobs → New Cron Job (schedule `*/30 * * * *`),
+**Alternative**: Render → your service → Cron Jobs → New Cron Job (schedule `*/10 * * * *`),
 running the same `curl -X POST https://<your-api-url>/admin/recommendations/sweep -H
 "x-admin-key: <your ADMIN_API_KEY>"` — this costs a small amount on Render's usage-based
 pricing for Cron Jobs, which the GitHub Actions workflow above avoids entirely.
 
 Either way, the request calls the exact same "is a sweep actually due" check the in-process
-poll uses (see `runSweepIfDue` in `crewRecommendations.ts`), so pinging every 30 minutes does
-**not** mean a sweep runs every 30 minutes — it means "wake up and check every 30 minutes,
+poll uses (see `runSweepIfDue` in `crewRecommendations.ts`), so pinging every 10 minutes does
+**not** mean a sweep runs every 10 minutes — it means "wake up and check every 10 minutes,
 actually run whenever the real 6-hour cadence says it's due." This same endpoint accepts
 `{"force": true}` in the request body for a genuine one-off manual run (ops/debugging only — a
 scheduler should never pass this).
