@@ -1,8 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { MIN_PUBLISHABLE_QUALITY_SCORE } from './qualityScoring';
 import { ensureInventory } from './inventorySync';
-import { categoryToTasteKey } from './match';
-import { experienceInterestTags, experienceMatchesFreeText, type FreeTextSignal } from './tasteSignals';
+import { categoryToTasteKey, evaluateTasteRelevance, type FreeTextSignal } from './tasteSignals';
 import { dedupeNearDuplicates } from './entityResolution';
 import { haversineKm } from '../lib/geo';
 import { placesWithinRadiusKm } from '../data/ukPlaces';
@@ -33,34 +32,6 @@ export interface ExplorePersonalisationResult {
   /** How many rows existed before the taste filter ran — lets the client say "12 hidden", never
    *  a black box when someone wants to see everything again. */
   totalBeforeFilter: number;
-}
-
-/** Real, specific relevance check — never a bare category guess. An Experience counts as
- *  "within your preference" if ANY of: (1) its own category has positive affinity, (2) at least
- *  one of the Experience's own real interest tags (see tasteSignals.ts#experienceInterestTags —
- *  provider subcategories + a scoped keyword scan, never invented) has positive affinity, or (3)
- *  it textually matches one of the viewer's own free-text signals. The same signals match.ts
- *  already scores a Crew recommendation against — Explore's "only show what's relevant" now
- *  means the same thing "relevant" means everywhere else in Plot, not a separate, cruder rule. */
-function isRelevantToTaste(
-  experience: ExperienceWithVenue,
-  categoryAffinity: Record<string, number>,
-  interestAffinity: Record<string, number>,
-  freeTextSignals: FreeTextSignal[],
-): boolean {
-  if ((categoryAffinity[categoryToTasteKey(experience.category)] ?? 0) > 0) return true;
-
-  const tags = experienceInterestTags({
-    category: experience.category,
-    subcategories: experience.subcategories,
-    name: experience.name,
-    description: experience.description ?? '',
-  });
-  if (tags.some((id) => (interestAffinity[id] ?? 0) > 0)) return true;
-
-  if (freeTextSignals.some((s) => experienceMatchesFreeText({ name: experience.name, description: experience.description ?? '' }, s.text))) return true;
-
-  return false;
 }
 
 /** Shared by both the exact-city and the radius search below: quality/booking-status/date-
@@ -103,7 +74,15 @@ async function finishExploreList(rows: ExperienceWithVenue[], userId?: string, o
   const shouldFilter = hasSignal && opts?.filterToTaste !== false;
   if (!shouldFilter) return { experiences: ordered, filteredToTaste: false, totalBeforeFilter: ordered.length };
 
-  const relevant = ordered.filter((e) => isRelevantToTaste(e, categoryAffinity, interestAffinity, freeTextSignals));
+  const relevant = ordered.filter(
+    (e) =>
+      evaluateTasteRelevance(
+        { category: e.category, subcategories: e.subcategories, name: e.name, description: e.description ?? '' },
+        categoryAffinity,
+        interestAffinity,
+        freeTextSignals,
+      ).eligible,
+  );
   return { experiences: relevant, filteredToTaste: true, totalBeforeFilter: ordered.length };
 }
 
@@ -128,6 +107,9 @@ export async function listExploreExperiences(city: string, userId?: string, opts
   const windowStart = new Date();
   const windowEnd = new Date();
   windowEnd.setDate(windowEnd.getDate() + EXPLORE_WINDOW_DAYS);
+  // See match.ts's own identical fix for the full story: without this, "the next N days"
+  // silently depends on what time of day the request happens to fire, not just the date.
+  windowEnd.setHours(23, 59, 59, 999);
 
   const rows = await prisma.experience.findMany({
     where: {
@@ -174,6 +156,9 @@ export async function listExploreExperiencesByRadius(
   const windowStart = new Date();
   const windowEnd = new Date();
   windowEnd.setDate(windowEnd.getDate() + EXPLORE_WINDOW_DAYS);
+  // See match.ts's own identical fix for the full story: without this, "the next N days"
+  // silently depends on what time of day the request happens to fire, not just the date.
+  windowEnd.setHours(23, 59, 59, 999);
 
   const rows = await prisma.experience.findMany({
     where: {

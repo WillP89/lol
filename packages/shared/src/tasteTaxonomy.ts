@@ -80,6 +80,12 @@ export const TASTE_TAXONOMY: TasteTerritory[] = [
       t('alternative', 'Alternative', 'alt rock'),
       t('pop', 'Pop'),
       t('hip_hop', 'Hip-hop & rap', 'hip-hop/rap', 'rap'),
+      // Real gap this closes (live product directive, worked example verbatim): "RAP / UK RAP /
+      // GRIME / DRILL / OLD SCHOOL... where metadata genuinely supports it" — grime and drill are
+      // real, distinct UK genres, not synonyms of the broader "hip-hop & rap" bucket above; a
+      // person who's specifically into one shouldn't be treated as generically "into rap".
+      t('grime', 'Grime'),
+      t('drill', 'Drill', 'uk drill'),
       t('rnb', 'R&B', 'r and b', 'rnb'),
       t('house', 'House'),
       t('techno', 'Techno'),
@@ -224,6 +230,13 @@ export const TASTE_TAXONOMY: TasteTerritory[] = [
       t('activity_bars', 'Activity bars', 'darts bar', 'crazy golf'),
       t('adventure', 'Adventure'),
       t('day_trips', 'Day trips'),
+      // Real gap this closes (live product directive's own test-profile example: "family
+      // activities, animals, outdoor activities, free events"): neither had any real taxonomy
+      // entry before this, despite real mock inventory already existing for both (Trentham
+      // Monkey Forest's own subcategories are literally ['nature', 'family'] —
+      // providers/mock/activityProvider.ts) with nothing able to match it specifically.
+      t('family_days_out', 'Family days out', 'family day out', 'family'),
+      t('animals_wildlife', 'Animals & wildlife', 'zoo', 'safari', 'wildlife', 'nature'),
     ],
   },
 ];

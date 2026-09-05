@@ -8,7 +8,7 @@ import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { haversineMiles } from '../lib/geo';
 import { track } from './analytics';
 import { sendExperienceToCrew } from './plan';
-import { experienceInterestTags, experienceMatchesFreeText, type FreeTextSignal } from './tasteSignals';
+import { experienceInterestTags, experienceMatchesFreeText, categoryToTasteKey, type FreeTextSignal } from './tasteSignals';
 import { assertCrewPreferencesSet } from './crewPreferencesGate';
 import { interestLabel } from '@plot/shared';
 import type { Experience, TasteProfile, Plan } from '@prisma/client';
@@ -140,6 +140,12 @@ export async function scoreExperiencesForCrew(
   const windowStart = new Date();
   const windowEnd = new Date();
   windowEnd.setDate(windowEnd.getDate() + CANDIDATE_WINDOW_DAYS);
+  // Real bug this closes, caught by test/personalHome.test.ts's own acceptance run: without
+  // this, "the next 21 days" silently means "21 days from THIS EXACT TIMESTAMP", not 21 full
+  // calendar days — an event pinned to 8pm on day 21 was excluded whenever this ran earlier in
+  // the day than 8pm, purely because of what time the request happened to fire, never a fact
+  // about the event itself. End-of-day makes the window mean what it says.
+  windowEnd.setHours(23, 59, 59, 999);
 
   // Layer 1: hard constraints, expressed directly as a WHERE clause rather than filtered in
   // application code — no reason to pull rows across the wire just to discard them.
@@ -421,6 +427,12 @@ export async function findUsSomething(
   const windowStart = new Date();
   const windowEnd = new Date();
   windowEnd.setDate(windowEnd.getDate() + CANDIDATE_WINDOW_DAYS);
+  // Real bug this closes, caught by test/personalHome.test.ts's own acceptance run: without
+  // this, "the next 21 days" silently means "21 days from THIS EXACT TIMESTAMP", not 21 full
+  // calendar days — an event pinned to 8pm on day 21 was excluded whenever this ran earlier in
+  // the day than 8pm, purely because of what time the request happened to fire, never a fact
+  // about the event itself. End-of-day makes the window mean what it says.
+  windowEnd.setHours(23, 59, 59, 999);
 
   const recommendation = await prisma.planRecommendation.create({
     data: {
@@ -524,25 +536,7 @@ function medianOf(values: number[]): number {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
-/** TasteProfile.categoryAffinity keys are the free-text onboarding swipe categories (e.g.
- *  "clubbing", "live music"), which don't line up 1:1 with the Experience.category enum — this
- *  maps enum values to the closest onboarding key. A real mapping table grows with the taxonomy;
- *  this is deliberately a small, visible function rather than buried inline. */
-export function categoryToTasteKey(category: string): string {
-  const map: Record<string, string> = {
-    LIVE_MUSIC: 'live_music',
-    CLUBBING: 'clubbing',
-    RESTAURANT: 'restaurant',
-    BAR: 'bar',
-    COMEDY: 'comedy',
-    THEATRE: 'theatre',
-    CINEMA: 'cinema',
-    ART_CULTURE: 'art_culture',
-    SPORT: 'sport',
-    FITNESS: 'fitness',
-    FESTIVAL: 'festival',
-    DAY_ACTIVITY: 'day_activity',
-    COMMUNITY: 'community',
-  };
-  return map[category] ?? category.toLowerCase();
-}
+// categoryToTasteKey moved to tasteSignals.ts (re-exported here for anything still importing it
+// from this file) — see that file's own comment for why: personalHome.ts needed it too, and
+// tasteSignals.ts is the one place with no reverse dependency on either scorer.
+export { categoryToTasteKey };

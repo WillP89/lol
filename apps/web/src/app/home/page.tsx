@@ -68,6 +68,42 @@ interface Experience {
   venue: { name: string };
 }
 
+// HOME = ME (docs/DECISIONS.md#personal-home) — the shape GET /home/personalized returns.
+// Deliberately NOT the same shape as Explore's flat experience list: this is already grouped
+// into the sections the directive asks for (For you / This weekend / one row per explicit
+// interest / Near you / a small, separate "try something different"), each item carrying real,
+// explainable reasons — never re-derived or guessed client-side.
+interface HomeReason {
+  code: string;
+  label: string;
+}
+interface HomeItem {
+  experience: Experience;
+  reasons: HomeReason[];
+}
+interface HomeInterestRow {
+  interestId: string;
+  label: string;
+  items: HomeItem[];
+}
+interface PersonalHome {
+  personalized: boolean;
+  forYou: HomeItem[];
+  thisWeekend: HomeItem[];
+  interestRows: HomeInterestRow[];
+  nearYou: HomeItem[];
+  exploration: HomeItem[];
+  emptyMessage: string | null;
+}
+interface DiscoverySection {
+  key: string;
+  title: string;
+  items: HomeItem[];
+  /** Exploration items deliberately failed Stage-A eligibility (see personalHome.ts) — rendered
+   *  visibly differently so it's never mistaken for a personalised pick, per Part 12. */
+  isExploration?: boolean;
+}
+
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diffMs / 60000);
@@ -130,6 +166,53 @@ function pulseLine(crews: CrewSummary[], nextPlan: UpcomingPlan | null, needsCou
 }
 
 /**
+ * One "For you" / "This weekend" / per-interest / "Near you" / "Try something different" card —
+ * the mobile inline-row renderer. Carries a real, honest reason line straight from the backend's
+ * own `HomeItem.reasons` (see personalHome.ts) rather than a decorative caption invented here —
+ * Part 26 of the personalisation directive: never fabricate a personalisation reason. Muted rows
+ * (exploration) never show a reason at all, since nothing there was actually matched to taste.
+ * The × is a real "not for me" tap, optimistically removed from view and reported to
+ * `/home/personalized/:id/feedback` — see `sendHomeFeedback` above.
+ */
+function DiscoveryCard({ item, index, muted, onNotForMe }: { item: HomeItem; index: number; muted?: boolean; onNotForMe: () => void }) {
+  const { experience } = item;
+  const price = formatPriceFrom(experience.priceMinMinor, experience.currency);
+  const reason = item.reasons[0]?.label;
+  return (
+    <Link
+      href="/explore"
+      className="v2-reveal v2-hoverable"
+      style={{ flex: '0 0 auto', width: 172, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', ['--reveal-i' as string]: index, opacity: muted ? 0.85 : 1, position: 'relative' }}
+    >
+      <div style={{ position: 'relative', height: 110, background: v2Art(experience.imageUrl, experience.category, experience.id) }}>
+        {CATEGORY_TAG[experience.category] && (
+          <span style={{ position: 'absolute', top: 8, left: 8, fontSize: 9.5, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase', color: '#fff', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', padding: '4px 8px', borderRadius: 100 }}>
+            {CATEGORY_TAG[experience.category]}
+          </span>
+        )}
+        <button
+          type="button"
+          aria-label="Not for me"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onNotForMe(); }}
+          onMouseDown={(e) => e.preventDefault()}
+          style={{ position: 'absolute', top: 8, right: 8, width: 22, height: 22, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', color: '#fff', fontSize: 13, lineHeight: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          ×
+        </button>
+      </div>
+      <div style={{ padding: '10px 12px', background: 'var(--v2-surface)' }}>
+        <div style={{ fontWeight: 700, fontSize: 12.5, lineHeight: 1.3, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{experience.name}</div>
+        <div className="v2-dim" style={{ fontSize: 10.5 }}>
+          {new Date(experience.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
+          {price && ` · ${price}`}
+        </div>
+        {reason && !muted && <div className="v2-muted" style={{ fontSize: 10, marginTop: 3, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{reason}</div>}
+      </div>
+    </Link>
+  );
+}
+
+/**
  * Home — HARD RESET (see docs/DECISIONS.md#plot-design-reset-3), not a restyle of the previous
  * attempt. That version was a dashboard: a bounded hero card, a grid of Crew tiles, a sticky
  * desktop right-rail — three separate places a Crew's people/state could live, one column/panel
@@ -142,7 +225,10 @@ function pulseLine(crews: CrewSummary[], nextPlan: UpcomingPlan | null, needsCou
 export default function HomePage() {
   const [crews, setCrews] = useState<CrewSummary[] | null>(null);
   const [upcoming, setUpcoming] = useState<UpcomingPlan[] | null>(null);
-  const [ideas, setIdeas] = useState<Experience[] | null>(null);
+  const [home, setHome] = useState<PersonalHome | null>(null);
+  // Real-only removals — a "not for me" tap (see DiscoveryCard below) hides that one card
+  // immediately rather than waiting on a full refetch, without ever fabricating a replacement.
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [me, setMe] = useState<{ displayName: string | null; email: string; avatarUrl: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   useScrollReveal();
@@ -169,9 +255,14 @@ export default function HomePage() {
     }
     loadCrews();
     loadUpcoming();
+    // HOME = ME — a genuinely personal, sectioned feed (see PersonalHome above), not the same
+    // flat/unfiltered list Explore shows. Real, live-reported bug this replaces: this used to
+    // call Explore's own endpoint and just take the first few results — someone's explicit taste
+    // (rap, street food, museums) had no way to produce a Home that looked any different from
+    // anyone else's, since nothing here ever asked for anything grouped or reasoned about.
     api
-      .get<{ experiences: Experience[] }>('/explore/experiences') // no hardcoded city — resolves to this viewer's own home city server-side
-      .then((res) => { if (!cancelled) setIdeas(res.experiences.slice(0, 6)); })
+      .get<PersonalHome>('/home/personalized')
+      .then((res) => { if (!cancelled) setHome(res); })
       .catch(() => {});
     api
       .get<{ user: { displayName: string | null; email: string; avatarUrl: string | null } }>('/users/me')
@@ -224,6 +315,35 @@ export default function HomePage() {
       .map((c) => ({ kind: 'message', crew: c }));
     return [...plotFoundItems, ...voteItems, ...eventItems, ...messageItems].slice(0, 4);
   }, [crews, heroCrewId]);
+
+  // HOME = ME's own composition — real, named sections built straight from what the API already
+  // grouped (see PersonalHome above), each one skipped outright when empty rather than padded
+  // with filler (Part 16: "a sparse, accurate Home is better than a full, stupid Home"). Explicit
+  // interest rows use whatever label the taxonomy gave that interest ("UK garage", "Street food"),
+  // never a generic "More for you". `exploration` is built into its own separately-flagged
+  // section rather than folded into any of the above, so the client can never blur the line
+  // between "this matches you" and "try something different" (Part 12).
+  const sections = useMemo<DiscoverySection[]>(() => {
+    if (!home) return [];
+    const withoutDismissed = (items: HomeItem[]) => items.filter((i) => !dismissedIds.has(i.experience.id));
+    const list: DiscoverySection[] = [
+      { key: 'for-you', title: home.personalized ? 'For you' : 'Worth a look nearby', items: withoutDismissed(home.forYou) },
+      { key: 'weekend', title: 'This weekend', items: withoutDismissed(home.thisWeekend) },
+      ...home.interestRows.map((row) => ({ key: `interest-${row.interestId}`, title: row.label, items: withoutDismissed(row.items) })),
+      { key: 'near-you', title: 'Near you', items: withoutDismissed(home.nearYou) },
+      { key: 'exploration', title: 'Try something different', items: withoutDismissed(home.exploration), isExploration: true },
+    ];
+    return list.filter((s) => s.items.length > 0);
+  }, [home, dismissedIds]);
+
+  // Part 18: feedback has to actually change the feed, not just log an analytics event into the
+  // void. Optimistic on the client (the card disappears immediately) — the real write lands on
+  // this person's own TasteProfile server-side (services/personalHome.ts#applyHomeFeedback),
+  // never a Crew's, and takes effect on the NEXT Home load, not retroactively on this one.
+  function sendHomeFeedback(experienceId: string, action: 'save' | 'not_for_me') {
+    setDismissedIds((prev) => new Set(prev).add(experienceId));
+    api.post(`/home/personalized/${experienceId}/feedback`, { action }).catch(() => {});
+  }
 
   const loading = crews === null && !error;
   const firstName = me ? displayNameOf(me.displayName, me.email).split(' ')[0] : '';
@@ -635,44 +755,34 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* FOR YOUR CREWS — a few genuinely useful suggestions, deliberately small and last:
-              discovery feeds the social loop, it doesn't lead the page. Desktop ≥1280px hides
-              this in favour of the persistent vertical rail (see .v2-home-discover-rail below,
-              and globals.css's own comment on why) — mobile/tablet/narrow-desktop keep it. */}
-          {ideas && ideas.length > 0 && (
-            <div className="v2-home-ideas-inline" style={{ marginTop: 8 }}>
+          {/* HOME = ME — real, named sections (For you / This weekend / one row per explicit
+              interest / Near you / a small, separately-labelled Try something different),
+              deliberately small and last: discovery feeds the social loop, it doesn't lead the
+              page. Desktop ≥1280px hides this in favour of the persistent vertical rail (see
+              .v2-home-discover-rail below) — mobile/tablet/narrow-desktop keep it. Every section
+              is already real (skipped by `sections` above when empty) — never padded to look
+              fuller, per the product's own "sparse and accurate beats full and stupid" rule. */}
+          {sections.map((section) => (
+            <div key={section.key} className="v2-home-ideas-inline" style={{ marginTop: 20 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
-                <div className="v2-eyebrow" style={{ marginBottom: 0 }}>{crews && crews.length > 0 ? 'For your Crews' : 'Worth a look nearby'}</div>
+                <div className="v2-eyebrow" style={{ marginBottom: 0, color: section.isExploration ? 'var(--v2-ink-dim)' : undefined }}>{section.title}</div>
                 <Link href="/explore" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>Discover</Link>
               </div>
               <div style={{ display: 'flex', gap: 12, overflowX: 'auto', margin: '0 -20px', padding: '2px 20px 8px' }}>
-                {ideas.slice(0, 4).map((exp, i) => {
-                  const price = formatPriceFrom(exp.priceMinMinor, exp.currency);
-                  return (
-                    <Link
-                      key={exp.id}
-                      href="/explore"
-                      className="v2-reveal v2-hoverable"
-                      style={{ flex: '0 0 auto', width: 172, borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', ['--reveal-i' as string]: i }}
-                    >
-                      <div style={{ position: 'relative', height: 110, background: v2Art(exp.imageUrl, exp.category, exp.id) }}>
-                        {CATEGORY_TAG[exp.category] && (
-                          <span style={{ position: 'absolute', top: 8, left: 8, fontSize: 9.5, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase', color: '#fff', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', padding: '4px 8px', borderRadius: 100 }}>
-                            {CATEGORY_TAG[exp.category]}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ padding: '10px 12px', background: 'var(--v2-surface)' }}>
-                        <div style={{ fontWeight: 700, fontSize: 12.5, lineHeight: 1.3, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
-                        <div className="v2-dim" style={{ fontSize: 10.5 }}>
-                          {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
-                          {price && ` · ${price}`}
-                        </div>
-                      </div>
-                    </Link>
-                  );
-                })}
+                {section.items.slice(0, 6).map((item, i) => (
+                  <DiscoveryCard key={item.experience.id} item={item} index={i} muted={section.isExploration} onNotForMe={() => sendHomeFeedback(item.experience.id, 'not_for_me')} />
+                ))}
               </div>
+            </div>
+          ))}
+
+          {home?.emptyMessage && sections.length === 0 && (
+            // Part 16, taken literally: never silently show nothing when there's genuinely
+            // nothing relevant right now — say so, and give a real way out rather than quietly
+            // relaxing the very preferences someone explicitly set.
+            <div className="v2-dim fade-up" style={{ marginTop: 20, padding: '18px 0', fontSize: 13, textAlign: 'center' }}>
+              {home.emptyMessage}{' '}
+              <Link href="/explore" className="v2-muted" style={{ fontWeight: 700 }}>Explore further out →</Link>
             </div>
           )}
 
@@ -699,44 +809,55 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* THE DESKTOP DISCOVER RAIL — real content under the "Discover" header, not empty
-            margin (see globals.css's own comment on the bug this fixes). Same `ideas` data the
-            mobile row already fetched; a real vertical list, not a second horizontal strip
-            squeezed into a narrow column. Only rendered ≥1280px (globals.css), so this never
-            shows twice. */}
-        {ideas && ideas.length > 0 && (
+        {/* THE DESKTOP DISCOVER RAIL — real content under each section header, not empty margin
+            (see globals.css's own comment on the bug this fixes). Same `sections` data the
+            mobile rows already fetched; a real vertical list per section, not a second
+            horizontal strip squeezed into a narrow column. Only rendered ≥1280px (globals.css),
+            so this never shows twice. */}
+        {sections.length > 0 && (
           <aside className="v2-home-discover-rail">
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
-              <div className="v2-eyebrow" style={{ marginBottom: 0 }}>{crews && crews.length > 0 ? 'For your Crews' : 'Worth a look nearby'}</div>
-              <Link href="/explore" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>See all</Link>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {ideas.slice(0, 6).map((exp) => {
-                const price = formatPriceFrom(exp.priceMinMinor, exp.currency);
-                return (
-                  <Link
-                    key={exp.id}
-                    href="/explore"
-                    className="v2-hoverable"
-                    style={{ display: 'flex', gap: 12, alignItems: 'center', borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', background: 'var(--v2-surface)' }}
-                  >
-                    <div style={{ flexShrink: 0, width: 72, height: 72, background: v2Art(exp.imageUrl, exp.category, exp.id) }} />
-                    <div style={{ minWidth: 0, flex: 1, padding: '8px 12px 8px 0' }}>
-                      {CATEGORY_TAG[exp.category] && (
-                        <div className="v2-dim" style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', marginBottom: 3 }}>
-                          {CATEGORY_TAG[exp.category]}
+            {sections.map((section) => (
+              <div key={section.key} style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <div className="v2-eyebrow" style={{ marginBottom: 0, color: section.isExploration ? 'var(--v2-ink-dim)' : undefined }}>{section.title}</div>
+                  <Link href="/explore" className="v2-muted" style={{ fontSize: 12.5, fontWeight: 600 }}>See all</Link>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {section.items.slice(0, 4).map((item) => {
+                    const { experience } = item;
+                    const price = formatPriceFrom(experience.priceMinMinor, experience.currency);
+                    const reason = item.reasons[0]?.label;
+                    return (
+                      <Link
+                        key={experience.id}
+                        href="/explore"
+                        className="v2-hoverable"
+                        style={{ display: 'flex', gap: 12, alignItems: 'center', borderRadius: 'var(--v2-r-md)', overflow: 'hidden', boxShadow: 'var(--v2-shadow-sm)', background: 'var(--v2-surface)', opacity: section.isExploration ? 0.85 : 1 }}
+                      >
+                        <div style={{ flexShrink: 0, width: 72, height: 72, background: v2Art(experience.imageUrl, experience.category, experience.id) }} />
+                        <div style={{ minWidth: 0, flex: 1, padding: '8px 12px 8px 0' }}>
+                          {CATEGORY_TAG[experience.category] && (
+                            <div className="v2-dim" style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', marginBottom: 3 }}>
+                              {CATEGORY_TAG[experience.category]}
+                            </div>
+                          )}
+                          <div style={{ fontWeight: 700, fontSize: 13, lineHeight: 1.3, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{experience.name}</div>
+                          <div className="v2-dim" style={{ fontSize: 11 }}>
+                            {new Date(experience.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
+                            {price && ` · ${price}`}
+                          </div>
+                          {/* THE EXPLAINABILITY LAYER — a real, computed reason, never a fabricated
+                              "popular with people like you" (see personalHome.ts's own scorer). */}
+                          {reason && !section.isExploration && (
+                            <div className="v2-muted" style={{ fontSize: 10.5, marginTop: 2, fontStyle: 'italic' }}>{reason}</div>
+                          )}
                         </div>
-                      )}
-                      <div style={{ fontWeight: 700, fontSize: 13, lineHeight: 1.3, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exp.name}</div>
-                      <div className="v2-dim" style={{ fontSize: 11 }}>
-                        {new Date(exp.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
-                        {price && ` · ${price}`}
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </aside>
         )}
         </div>
