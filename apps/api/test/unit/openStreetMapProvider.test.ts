@@ -37,6 +37,27 @@ describe('openStreetMapProvider.mapToCanonical', () => {
     expect(openStreetMapProvider.mapToCanonical(listing).category).toBe('DAY_ACTIVITY');
   });
 
+  test('a nightclub maps to CLUBBING — a real, free second source alongside Skiddle\'s CLUB eventcode', () => {
+    const listing = rawNode({ name: 'Mode', amenity: 'nightclub' });
+    expect(openStreetMapProvider.mapToCanonical(listing).category).toBe('CLUBBING');
+  });
+
+  test('a cinema maps to CINEMA and a theatre maps to THEATRE — real local venues beyond ticketed listings', () => {
+    expect(openStreetMapProvider.mapToCanonical(rawNode({ name: 'The Electric', amenity: 'cinema' })).category).toBe('CINEMA');
+    expect(openStreetMapProvider.mapToCanonical(rawNode({ name: 'The Rep', amenity: 'theatre' })).category).toBe('THEATRE');
+  });
+
+  test('a gym/sports centre/pool maps to FITNESS — previously a mock-only category with zero real source', () => {
+    expect(openStreetMapProvider.mapToCanonical(rawNode({ name: 'PureGym', leisure: 'fitness_centre' })).category).toBe('FITNESS');
+    expect(openStreetMapProvider.mapToCanonical(rawNode({ name: 'Leisure Centre', leisure: 'sports_centre' })).category).toBe('FITNESS');
+    expect(openStreetMapProvider.mapToCanonical(rawNode({ name: 'Lido', leisure: 'swimming_pool' })).category).toBe('FITNESS');
+  });
+
+  test('a horse riding centre maps to DAY_ACTIVITY, not fabricated as a horse racing fixture', () => {
+    const result = openStreetMapProvider.mapToCanonical(rawNode({ name: 'Staffordshire Riding School', leisure: 'horse_riding' }));
+    expect(result.category).toBe('DAY_ACTIVITY');
+  });
+
   test('a real website tag becomes the externalUrl, not a fabricated one', () => {
     const listing = rawNode({ name: 'Purnell\'s', amenity: 'restaurant', website: 'https://purnellsrestaurant.com' });
     expect(openStreetMapProvider.mapToCanonical(listing).externalUrl).toBe('https://purnellsrestaurant.com');
