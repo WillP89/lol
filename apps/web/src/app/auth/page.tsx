@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import { usePointerParallax } from '@/lib/usePointerParallax';
-import { ParticleField } from '@/components/ParticleField';
+import { MarketingAtmosphere } from '@/components/MarketingAtmosphere';
 
 type LoginResponse =
   | { mode: 'logged_in'; user: { id: string; email: string; displayName: string | null } }
@@ -99,30 +99,31 @@ function AuthForm() {
   }
 
   return (
-    <div ref={rootRef} className="v2" style={{ minHeight: '100dvh', position: 'relative', display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' }}>
+    <div ref={rootRef} className="v2 v2-marketing-dark" style={{ minHeight: '100dvh', position: 'relative', display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' }}>
       <AuthAtmosphere />
 
       <div className="v2-page" style={{ position: 'relative', zIndex: 1, paddingTop: 0, paddingBottom: 0 }}>
-        <Link href="/" className="v2-tap-feedback" style={{ display: 'inline-block', fontFamily: 'Archivo, sans-serif', fontWeight: 900, fontSize: 22, letterSpacing: '-0.02em', marginBottom: 32 }}>
+        <Link href="/" className="v2-tap-feedback" style={{ display: 'inline-block', fontFamily: 'Archivo, sans-serif', fontWeight: 900, fontSize: 22, letterSpacing: '-0.02em', marginBottom: 32, color: 'var(--v2-ink)' }}>
           Plot
         </Link>
 
         {welcomingBack ? (
-          <div className="v2-card v2-auth-welcome-in" style={{ textAlign: 'center', padding: '36px 26px' }}>
+          <div className="v2-mkt-glass-card v2-auth-welcome-in" style={{ textAlign: 'center', padding: '36px 26px', borderRadius: 'var(--v2-r-lg)', boxShadow: 'var(--v2-shadow-lg)' }}>
             <span className="v2-plotfound-mark" style={{ color: 'var(--v2-pop)', display: 'inline-flex', marginBottom: 14 }}>
               <svg width="30" height="30" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="4" r="2" fill="currentColor" /><circle cx="4" cy="18" r="2" fill="currentColor" /><circle cx="20" cy="18" r="2" fill="currentColor" /><path d="M12 6v6l-6 4M12 12l6 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
             </span>
-            <p className="v2-display" style={{ fontSize: 19 }}>Welcome back.</p>
+            <p className="v2-display" style={{ fontSize: 19, color: 'var(--v2-ink)' }}>Welcome back.</p>
           </div>
         ) : !sent ? (
-          <div className="fade-up">
-            <h1 className="v2-display" style={{ fontSize: 27, marginBottom: 8 }}>What&rsquo;s your email?</h1>
+          <div className="v2-mkt-glass-card fade-up" style={{ padding: '30px 26px', borderRadius: 'var(--v2-r-lg)', boxShadow: 'var(--v2-shadow-lg)' }}>
+            <h1 className="v2-display" style={{ fontSize: 27, marginBottom: 8, color: 'var(--v2-ink)' }}>What&rsquo;s your email?</h1>
             <p className="v2-muted" style={{ marginBottom: 24 }}>
               Already on Plot? You&rsquo;ll go straight in. New here? We&rsquo;ll send a link that signs you up.
             </p>
             <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <input
-                style={{ width: '100%', padding: '15px 18px', borderRadius: 16, border: 'none', outline: 'none', background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)', fontSize: 15.5, fontFamily: 'inherit', color: 'var(--v2-ink)' }}
+                className="v2-mkt-input"
+                style={{ width: '100%', padding: '15px 18px', borderRadius: 16, outline: 'none', fontSize: 15.5, fontFamily: 'inherit', color: 'var(--v2-ink)' }}
                 type="email"
                 required
                 autoFocus
@@ -130,25 +131,25 @@ function AuthForm() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
-              <button className="v2-btn v2-btn-brand v2-tap-feedback" disabled={loading || !email} type="submit" style={{ padding: '16px 22px', fontSize: 15.5 }}>
+              <button className="v2-btn v2-btn-brand v2-mkt-cta v2-tap-feedback" disabled={loading || !email} type="submit" style={{ padding: '16px 22px', fontSize: 15.5 }}>
                 {loading ? (slow ? 'Still checking — first login of the day can take a moment…' : 'Checking…') : 'Continue'}
               </button>
               {error && <div style={{ color: 'var(--v2-error)', fontSize: 13 }}>{error}</div>}
             </form>
           </div>
         ) : (
-          <div className="v2-card fade-up" style={{ textAlign: 'center', padding: '32px 26px' }}>
-            <div className="v2-pop-in" style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(27,122,77,0.12)', color: 'var(--v2-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 22 }}>
+          <div className="v2-mkt-glass-card fade-up" style={{ textAlign: 'center', padding: '32px 26px', borderRadius: 'var(--v2-r-lg)', boxShadow: 'var(--v2-shadow-lg)' }}>
+            <div className="v2-pop-in" style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(61,220,148,0.16)', color: 'var(--v2-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 22 }}>
               ✓
             </div>
-            <p className="v2-display" style={{ fontSize: 18, marginBottom: 8 }}>Check your email</p>
+            <p className="v2-display" style={{ fontSize: 18, marginBottom: 8, color: 'var(--v2-ink)' }}>Check your email</p>
             <p className="v2-muted" style={{ fontSize: 13.5, marginBottom: sent.devMagicLinkUrl ? 18 : 6 }}>
-              We sent a sign-in link to <strong>{email}</strong>. It expires in 15 minutes.
+              We sent a sign-in link to <strong style={{ color: 'var(--v2-ink)' }}>{email}</strong>. It expires in 15 minutes.
             </p>
             {sent.devMagicLinkUrl ? (
               <>
                 <p className="v2-dim" style={{ fontSize: 12, marginBottom: 12 }}>No email provider is configured yet — here&rsquo;s the link directly:</p>
-                <a className="v2-btn v2-btn-brand v2-tap-feedback" href={sent.devMagicLinkUrl} style={{ marginBottom: 12 }}>
+                <a className="v2-btn v2-btn-brand v2-mkt-cta v2-tap-feedback" href={sent.devMagicLinkUrl} style={{ marginBottom: 12 }}>
                   Continue →
                 </a>
               </>
@@ -170,28 +171,26 @@ function AuthForm() {
 }
 
 /**
- * THE SIGN-IN PAGE'S OWN ATMOSPHERE — third real round of reported feedback now: round one (slow
- * blurred blobs on a timer) was "still no movement at all"; round two (a particle field +
- * parallax, tuned subtle) was "better... but you have to look for it, I want it in your face this
- * time". This round deliberately overcorrects — same primitives as the landing page's own hero
- * atmosphere (LandingClient.tsx — a live particle field, a breathing "core" glow, every layer
- * reading the shared `--px`/`--py` pointer-parallax variables with its own depth multiplier, set
- * on the page's own root ref above), but every multiplier roughly TRIPLED from the previous round,
- * plus the faster/bigger idle-drift and breathing-core keyframes globals.css now uses everywhere.
- * Still never competes with the one thing that matters here — typing an email and hitting
+ * THE SIGN-IN PAGE'S OWN ATMOSPHERE — hard revamp alongside the landing page's own (see
+ * LandingClient.tsx's top-level comment for the full "why"). Built on the same shared
+ * `MarketingAtmosphere` base (aurora + particles + cursor spotlight + grain, all reading this
+ * page's own `--px`/`--py` pointer-parallax root set above) so navigating from the landing page
+ * into sign-in feels like continuing in the same world, not switching design systems — then this
+ * page layers its own additional accents on top: a warm breathing "core" glow behind the card, a
+ * couple of soft colour blobs, and two blurred, distant echoes of the landing hero's own plan
+ * cards. Still never competes with the one thing that matters here — typing an email and hitting
  * Continue: every layer sits well behind the card in opacity/blur/z-index, `aria-hidden`
- * throughout. Each blob is two nested nodes (outer owns position + parallax `translate3d`, inner
- * `.v2-auth-blob` owns its size/colour + its own independent idle-drift animation) since a running
- * CSS animation replaces the whole `transform` property and would otherwise clobber the parallax
- * offset. Respects `prefers-reduced-motion` throughout (ParticleField freezes to one still frame;
- * the drift/breathe animations turn off; the parallax layer is simply never wired up at all — see
- * usePointerParallax's own comment).
+ * throughout, and the card itself is now a genuine glass surface (`.v2-mkt-glass-card`) so the
+ * moving colour behind it visibly bleeds through at the edges instead of being fully hidden by a
+ * flat opaque panel. Respects `prefers-reduced-motion` throughout (ParticleField freezes to one
+ * still frame; the drift/breathe animations turn off; the parallax layer is simply never wired up
+ * at all — see usePointerParallax's own comment).
  */
 function AuthAtmosphere() {
   return (
-    <div aria-hidden className="v2-auth-atmosphere">
-      <ParticleField count={70} />
-      <div className="v2-hero-core" style={{ top: '38%', left: '50%', width: 460, height: 460, margin: '-230px 0 0 -230px', opacity: 0.26, transform: 'translate3d(calc(var(--px, 0) * 16px), calc(var(--py, 0) * 16px), 0)' }} />
+    <div aria-hidden style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 0 }}>
+      <MarketingAtmosphere dense={false} />
+      <div className="v2-hero-core" style={{ top: '38%', left: '50%', width: 460, height: 460, margin: '-230px 0 0 -230px', opacity: 0.22, transform: 'translate3d(calc(var(--px, 0) * 16px), calc(var(--py, 0) * 16px), 0)' }} />
 
       <div style={{ position: 'absolute', width: 480, height: 480, top: '-14%', left: '-10%', transform: 'translate3d(calc(var(--px, 0) * -42px), calc(var(--py, 0) * -32px), 0)' }}>
         <div className="v2-auth-blob" style={{ position: 'absolute', inset: 0, background: 'var(--v2-pop)', animationDelay: '0s' }} />

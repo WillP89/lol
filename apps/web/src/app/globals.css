@@ -443,37 +443,23 @@ html[data-theme="dark"] body { background: #131316; }
   .v2-btn-ghost:hover:not(:disabled) { background: var(--v2-bg-deep); }
 }
 
-/* Landing page's collage of plan-card tiles — each sits at its own resting tilt (--tilt/--lift,
-   set inline per card) and straightens flat + lifts toward the cursor on hover, the one
-   playful, tactile "this app moves" moment on the entrance screen. */
+/* The landing hero marquee's own card tile (LandingClient.tsx's `MarqueeCard`) — lifts and
+   scales toward the cursor on hover, the one hover-specific "this app moves" moment on top of the
+   row's own permanent scroll (see globals.css's `.v2-marquee-track` for that). Previously also
+   backed a static 3-card collage with a per-card idle bob (`.v2-collage-drift`) — removed once the
+   whole row became permanently in motion via the marquee track, which supersedes it: a card that
+   never stops scrolling doesn't need its own separate idle animation too. */
 .v2-collage-card { transition: transform 0.35s cubic-bezier(.2,.8,.2,1), box-shadow 0.35s ease; }
 @media (hover: hover) {
-  .v2-collage-card:hover { transform: rotate(0deg) translateY(calc(var(--lift, 0px) - 10px)) scale(1.05) !important; box-shadow: 0 24px 44px -12px rgba(12, 12, 13, 0.4); }
+  .v2-collage-card:hover { transform: translateY(-10px) scale(1.05); box-shadow: 0 24px 44px -12px rgba(12, 12, 13, 0.4); }
 }
-.v2-collage-card:active { transform: rotate(var(--tilt, 0deg)) translateY(var(--lift, 0px)) scale(0.97); }
+.v2-collage-card:active { transform: scale(0.97); }
 
-/* The collage's idle life — real, reported feedback across TWO rounds now: first "does not look
-   any different", then (after the first fix) "you have to look for it... I want it in your face
-   this time". This round deliberately overcorrects from subtle to unmissable: bigger amplitude,
-   much faster cycle. Each card bobs continuously around its own resting tilt (using the same
-   --tilt/--lift each card already sets inline), staggered via --drift-delay so the three drift
-   out of phase rather than in unison. Hover's own `!important` transform still wins while a
-   pointer's actually on a card (CSS animations lose to !important declarations). */
-.v2-collage-drift { animation: v2CollageDrift 3.2s ease-in-out infinite; animation-delay: var(--drift-delay, 0s); }
-@keyframes v2CollageDrift {
-  0%, 100% { transform: rotate(var(--tilt, 0deg)) translateY(var(--lift, 0px)); }
-  50% { transform: rotate(var(--tilt, 0deg)) translateY(calc(var(--lift, 0px) - 22px)); }
-}
-@media (prefers-reduced-motion: reduce) { .v2-collage-drift { animation: none; } }
-
-/* THE SIGN-IN PAGE'S OWN ATMOSPHERE — see auth/page.tsx's own AuthAtmosphere comment for the
-   full "why". Large, softly blurred colour fields drifting (v2AuthDrift) behind the card, plus a
-   faint, blurred, dimmed echo of the landing page's own tilted plan-card collage (v2AuthCardDrift)
-   — both layers sit well below the card in stacking order and opacity so they read as ambient
-   life, never compete with the form. Second round of reported feedback ("in your face this
-   time") — noticeably faster cycles and bigger amplitude/opacity than the first pass throughout
-   this block, not just on the collage above. */
-.v2-auth-atmosphere { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+/* THE SIGN-IN PAGE'S OWN EXTRA ACCENTS — layered on top of the shared `MarketingAtmosphere` base
+   (see that component's own comment, and auth/page.tsx's `AuthAtmosphere`): large, softly blurred
+   colour fields drifting (v2AuthDrift), plus a faint, blurred, dimmed echo of the landing page's
+   own marquee cards (v2AuthCardDrift) — both sit well below the card in stacking order and
+   opacity so they read as ambient life, never compete with the form. */
 .v2-auth-blob {
   position: absolute;
   border-radius: 50%;
@@ -541,6 +527,164 @@ html[data-theme="dark"] body { background: #131316; }
 .v2-auth-welcome-in { animation: v2WelcomeIn 0.4s cubic-bezier(.2,.8,.2,1.05) both; }
 @keyframes v2WelcomeIn { 0% { opacity: 0; transform: scale(0.94) translateY(6px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .v2-auth-welcome-in { animation: none; } }
+
+/* ==========================================================================
+   MARKETING DARK — Plot's two entrance surfaces (the landing hero, sign-in)
+   commit to one bold, ALWAYS-dark presentation, independent of whatever the
+   visitor's own stored in-app theme preference is (`data-theme` on <html> —
+   see the dark-mode block above, and its own comment: "NEVER AUTO SWITCH TO
+   DARK MODE" for the PRODUCT). That directive is about the app defaulting
+   itself for a real user with real content; this is the opposite kind of
+   decision — a marketing/brand surface deliberately choosing its own fixed
+   look, the same way Linear, Vercel and Arc's own entrance pages stay dark
+   regardless of the visitor's system setting, while the product itself still
+   opens in light unless someone explicitly taps the toggle. Nothing here
+   touches `data-theme` — once inside the product, everything still behaves
+   exactly as that directive requires.
+
+   Written after the dark-mode block above on purpose: same specificity
+   (one attribute class), later in source order, so this always wins
+   whether or not `data-theme="dark"` happens to be set. A saturated colour
+   (the pink `--v2-pop`, the confetti set) only reads as electric against
+   something genuinely dark behind it — the light canvas was the real
+   ceiling on "feels alive" no amount of extra particles could fix.
+   ========================================================================== */
+.v2.v2-marketing-dark {
+  --v2-bg: #08080a;
+  --v2-bg-deep: #020203;
+  --v2-surface: #17171b;
+  --v2-ink: #f8f7f5;
+  --v2-ink-muted: #adaab2;
+  --v2-ink-dim: #6f6d74;
+
+  --v2-brand: #f8f7f5;
+  --v2-brand-ink: #08080a;
+
+  --v2-error: #ff6259;
+  --v2-green: #3ddc94;
+
+  --v2-line: rgba(255, 255, 255, 0.12);
+  --v2-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 18px -8px rgba(0, 0, 0, 0.7);
+  --v2-shadow-lg: 0 6px 16px rgba(0, 0, 0, 0.55), 0 28px 64px -18px rgba(0, 0, 0, 0.85);
+}
+
+/* THE SHARED ATMOSPHERE — see components/MarketingAtmosphere.tsx for the full "why" behind each
+   of the four layers. Stacking order (back to front): aurora -> particle field (rendered by the
+   component itself, a <canvas> sibling) -> spotlight -> grain -> page content (z-index: 1, set by
+   each page's own wrapper). */
+.v2-mkt-atmosphere { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+
+/* A large conic gradient, heavily blurred so only colour bleeds through, rotating on its own slow
+   clock — the "always visibly moving, even before you touch anything" backbone the old blob-only
+   atmosphere never had. `inset: -20%` and the blur both push any hard edge well off-screen at
+   every rotation angle. */
+.v2-mkt-aurora {
+  position: absolute;
+  inset: -25%;
+  background: conic-gradient(from 0deg at 50% 50%,
+    var(--v2-pop), var(--v2-confetti-2), var(--v2-confetti-3) 45%, var(--v2-confetti-5) 60%, var(--v2-confetti-4) 78%, var(--v2-pop));
+  filter: blur(130px) saturate(1.4);
+  opacity: 0.4;
+  animation: v2AuroraSpin 30s linear infinite;
+}
+@keyframes v2AuroraSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .v2-mkt-aurora { animation: none; } }
+@media (max-width: 700px) { .v2-mkt-aurora { opacity: 0.32; } }
+
+/* Tracks the pointer via the same `--px`/`--py` custom properties `usePointerParallax` already
+   writes on the page's root ref — the darkness itself feels like it's reacting to you, not just
+   the foreground content shifting on top of a static backdrop. Never wired up at all for
+   reduced-motion/touch visitors (usePointerParallax's own guard), so `--px`/`--py` simply stay at
+   their authored 0 default and this sits dead-centre — a plain, still highlight, never a broken
+   half-effect chasing a cursor that was never tracked. */
+.v2-mkt-spotlight {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(640px circle at calc(50% + var(--px, 0) * 30%) calc(50% + var(--py, 0) * 30%), rgba(255,255,255,0.10), transparent 60%);
+}
+
+/* A tiled noise texture over the whole scene — the difference between "a dark gradient" and a
+   considered, cinematic surface (the same trick behind most premium dark marketing pages). Pure
+   inline SVG turbulence, no image asset; `mix-blend-mode: overlay` so it reads as grain sitting
+   ON the gradient rather than a separate flat layer. */
+.v2-mkt-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* THE PLAN-CARD MARQUEE — the landing hero's single biggest "feels alive" change: motion that
+   never stops regardless of the cursor, the way Partiful/Linear's own marketing pages use a
+   continuously-scrolling row rather than a handful of cards idling in place. The track renders
+   its card list TWICE back to back (see LandingClient.tsx) and animates exactly -50% — since the
+   two halves are identical, the loop point is invisible and the scroll reads as infinite. A soft
+   mask fades both edges so cards never appear to hard-cut in or out of the row. Pausing on hover
+   is a deliberate small courtesy (lets you actually read a card you're pointing at) rather than a
+   performance necessity. */
+.v2-marquee { position: relative; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); }
+.v2-marquee-track { display: flex; gap: 16px; width: max-content; animation: v2MarqueeScroll 34s linear infinite; }
+.v2-marquee-track.v2-marquee-reverse { animation-name: v2MarqueeScrollReverse; }
+@media (hover: hover) {
+  .v2-marquee:hover .v2-marquee-track { animation-play-state: paused; }
+}
+@keyframes v2MarqueeScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes v2MarqueeScrollReverse { from { transform: translateX(-50%); } to { transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .v2-marquee-track { animation: none; } }
+
+/* The headline's own cycling word (LandingClient.tsx's `useCyclingWord`) — a fresh React key per
+   word means this animation restarts on every swap, giving the one highlighted word in the
+   headline continuous, unmissable life without ever touching the static text around it. */
+.v2-word-cycle { display: inline-block; animation: v2WordCycleIn 0.5s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes v2WordCycleIn { 0% { opacity: 0; transform: translateY(0.3em); filter: blur(6px); } 100% { opacity: 1; transform: translateY(0); filter: blur(0); } }
+@media (prefers-reduced-motion: reduce) { .v2-word-cycle { animation: none; } }
+
+/* The sign-in card's own elevated treatment on the new dark atmosphere — a genuine glass surface
+   (translucent + blurred backdrop) rather than a flat opaque card sitting on top of the scene, so
+   the moving colour behind it visibly bleeds through at the edges. */
+.v2-mkt-glass-card {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* The sign-in email field on the same glass surface — a translucent field rather than a flat
+   opaque one, with a genuine glowing ring (not just a colour-change outline) on focus so the one
+   interactive element on the page has its own small moment of life. */
+.v2-mkt-input {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.v2-mkt-input::placeholder { color: var(--v2-ink-dim); }
+.v2-mkt-input:focus {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--v2-pop);
+  box-shadow: 0 0 0 4px rgba(255, 47, 126, 0.18);
+}
+
+/* The primary CTA's own shine sweep — a light band that travels across the button on hover, the
+   small premium touch a plain colour-shift alone doesn't give. Pure CSS, one pseudo-element. */
+.v2-mkt-cta { position: relative; overflow: hidden; }
+.v2-mkt-cta::after {
+  content: '';
+  position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
+  background: linear-gradient(115deg, transparent, rgba(255,255,255,0.5), transparent);
+  transform: skewX(-20deg);
+  transition: left 0.65s ease;
+}
+@media (hover: hover) {
+  .v2-mkt-cta:hover::after { left: 130%; }
+}
+
+/* The "how it works" step cards on the new dark landing page — a small lift + a brightening
+   border on hover, so the grid reads as tactile rather than three flat printed tiles. */
+.v2-mkt-step-card { border: 1px solid transparent; transition: transform 0.25s ease, border-color 0.25s ease; }
+@media (hover: hover) {
+  .v2-mkt-step-card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.14); }
+}
 
 .v2-card {
   background: var(--v2-surface);
