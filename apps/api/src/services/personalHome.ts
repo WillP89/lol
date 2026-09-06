@@ -1,7 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { MIN_PUBLISHABLE_QUALITY_SCORE } from './qualityScoring';
 import { ensureLocalAreaInventory, LOCAL_AREA_RADIUS_KM } from './inventorySync';
-import { evaluateTasteRelevance, experienceInterestTags, categoryToTasteKey, type FreeTextSignal, type TasteRelevance } from './tasteSignals';
+import { categoriesImpliedByInterests, evaluateTasteRelevance, experienceInterestTags, categoryToTasteKey, type FreeTextSignal, type TasteRelevance } from './tasteSignals';
 import { dedupeNearDuplicates } from './entityResolution';
 import { haversineMiles, haversineKm } from '../lib/geo';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
@@ -151,10 +151,20 @@ function scoreForIndividual(
   // "Your taste" summary, built from interestAffinity alone) never included it — a stale,
   // one-time onboarding swipe with no UI to see or clear it, contradicting what Profile itself
   // promises. `relevance.categoryAffinity` is no longer read here at all — a specific interest
-  // match is the only way an item earns a reason or a score bump from taste in Home.
+  // match (literal, or the category it implies — see the next branch) is the only way an item
+  // earns a reason or a score bump from taste in Home.
   if (relevance.matchedInterestId && relevance.matchedInterestAffinity > 0) {
     score += relevance.matchedInterestAffinity * 45;
     reasons.push({ code: 'interest_match', label: `Because you like ${interestLabel(relevance.matchedInterestId)}` });
+  } else if (relevance.impliedByInterestId) {
+    // Fourth round, immediately after the fix above shipped: "0 recommendations" for an account
+    // with entirely real, current interests set — real provider inventory essentially never uses
+    // Plot's own specific taxonomy wording, so requiring a literal text match alone was too
+    // strict (see evaluateTasteRelevance's own comment on categoriesImpliedByInterests). This
+    // still names the actual, specific, CURRENT interest responsible — never a bare category
+    // label, and never the stale onboarding-swipe signal the branch above deliberately excludes.
+    score += 20;
+    reasons.push({ code: 'interest_match', label: `Because you're into ${interestLabel(relevance.impliedByInterestId)}` });
   }
 
   if (relevance.matchedFreeText) {
@@ -324,7 +334,39 @@ export async function buildPersonalHome(userId: string, opts: { debug?: boolean 
     };
   }
 
-  const eligible = scored.filter((s) => isEligible(s, ctx)).sort((a, b) => b.score - a.score);
+  const strictEligible = scored.filter((s) => isEligible(s, ctx));
+
+  // Real, live-reported bug this fixes, the moment the strict fix above shipped: "my account has
+  // boxing, MMA, restaurants and street food set... it says 0 recommendations." The strict set
+  // above can legitimately have zero real matches for one or more of a person's own picks — real
+  // provider inventory essentially never uses Plot's own specific taxonomy wording. Scoped PER
+  // INTEREST, not "widen everything the moment the whole set is empty": a person can easily have
+  // one interest (say, a genre with real literal-tag coverage) working perfectly while a
+  // DIFFERENT interest they also picked has none at all — gating on the whole set being empty
+  // would let the first interest's real coverage silently suppress the second's fallback
+  // entirely. Only interests with ZERO strict matches anywhere in the whole candidate pool get
+  // widened (see evaluateTasteRelevance's own `impliedByInterestId` doc comment for why this is
+  // never folded into strict eligibility itself) — an interest that's already finding real,
+  // specific matches is never touched by this at all.
+  const matchedInterestIds = new Set(
+    strictEligible
+      .map((s) => evaluateTasteRelevance(
+        { category: s.experience.category, subcategories: s.experience.subcategories, name: s.experience.name, description: s.experience.description },
+        ctx.categoryAffinity,
+        ctx.interestAffinity,
+        ctx.freeTextSignals,
+      ).matchedInterestId)
+      .filter((id): id is string => id !== null),
+  );
+  const underCoveredInterests = Object.fromEntries(
+    Object.entries(ctx.interestAffinity).filter(([id, v]) => v > 0 && !matchedInterestIds.has(id)),
+  );
+  const impliedCategoriesForUnderCovered = categoriesImpliedByInterests(underCoveredInterests);
+  const strictEligibleIds = new Set(strictEligible.map((s) => s.experience.id));
+  const widened = scored.filter(
+    (s) => !strictEligibleIds.has(s.experience.id) && impliedCategoriesForUnderCovered.has(s.experience.category),
+  );
+  let eligible = [...strictEligible, ...widened].sort((a, b) => b.score - a.score);
 
   const forYou = eligible.slice(0, FOR_YOU_LIMIT);
 
@@ -350,10 +392,15 @@ export async function buildPersonalHome(userId: string, opts: { debug?: boolean 
 
   // Explicit, controlled exploration (Part 12) — real candidates that genuinely failed Stage A,
   // never mixed into any section above, and only surfaced once there's enough real personal
-  // content that this reads as a deliberate offer, not Plot admitting it came up short.
+  // content that this reads as a deliberate offer, not Plot admitting it came up short. Excludes
+  // by id against `eligible` itself (which may already be the last-resort-widened set above)
+  // rather than re-deriving strict eligibility independently — otherwise an item let in ONLY via
+  // the widened set could also pass `!isEligible` here and get shown twice, once as a genuine
+  // personalised pick and once as "try something different".
+  const eligibleIds = new Set(eligible.map((s) => s.experience.id));
   const exploration =
     forYou.length >= MIN_FOR_YOU_TO_SHOW_EXPLORATION
-      ? [...scored].filter((s) => !isEligible(s, ctx)).sort((a, b) => b.score - a.score).slice(0, EXPLORATION_LIMIT)
+      ? [...scored].filter((s) => !eligibleIds.has(s.experience.id)).sort((a, b) => b.score - a.score).slice(0, EXPLORATION_LIMIT)
       : [];
 
   return {

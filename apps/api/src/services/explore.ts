@@ -1,7 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { MIN_PUBLISHABLE_QUALITY_SCORE } from './qualityScoring';
 import { ensureInventory, ensureLocalAreaInventory, LOCAL_AREA_RADIUS_KM } from './inventorySync';
-import { categoryToTasteKey, evaluateTasteRelevance, type FreeTextSignal } from './tasteSignals';
+import { categoriesImpliedByInterests, categoryToTasteKey, evaluateTasteRelevance, type FreeTextSignal } from './tasteSignals';
 import { dedupeNearDuplicates } from './entityResolution';
 import { haversineKm } from '../lib/geo';
 import { placesWithinRadiusKm } from '../data/ukPlaces';
@@ -78,15 +78,35 @@ async function finishExploreList(rows: ExperienceWithVenue[], userId?: string, o
   const shouldFilter = hasSignal && opts?.filterToTaste !== false;
   if (!shouldFilter) return { experiences: ordered, filteredToTaste: false, totalBeforeFilter: ordered.length };
 
-  const relevant = ordered.filter(
-    (e) =>
-      evaluateTasteRelevance(
-        { category: e.category, subcategories: e.subcategories, name: e.name, description: e.description ?? '' },
-        categoryAffinity,
-        interestAffinity,
-        freeTextSignals,
-      ).eligible,
+  const relevance = ordered.map((e) =>
+    evaluateTasteRelevance(
+      { category: e.category, subcategories: e.subcategories, name: e.name, description: e.description ?? '' },
+      categoryAffinity,
+      interestAffinity,
+      freeTextSignals,
+    ),
   );
+  const strictRelevant = ordered.filter((_e, i) => relevance[i].eligible);
+
+  // Real, live-reported bug this fixes, the moment the strict fix above shipped: an account with
+  // entirely real, current interests set (boxing, MMA, restaurants, street food) could still see
+  // "0 recommendations" — real provider inventory essentially never uses Plot's own specific
+  // taxonomy wording. Scoped PER INTEREST, not "widen everything the moment the whole set is
+  // empty" (see personalHome.ts's identical fallback and its own comment on exactly why a global
+  // empty-check would let one interest's real coverage silently suppress a completely different
+  // interest's fallback) — only interests with ZERO strict matches anywhere in `ordered` get
+  // widened (see evaluateTasteRelevance's own `impliedByInterestId` doc comment for why this is
+  // never folded into strict eligibility itself); an interest already finding real, specific
+  // matches is never touched by this at all.
+  const matchedInterestIds = new Set(relevance.map((r) => r.matchedInterestId).filter((id): id is string => id !== null));
+  const underCoveredInterests = Object.fromEntries(
+    Object.entries(interestAffinity).filter(([id, v]) => v > 0 && !matchedInterestIds.has(id)),
+  );
+  const impliedCategoriesForUnderCovered = categoriesImpliedByInterests(underCoveredInterests);
+  const strictRelevantIds = new Set(strictRelevant.map((e) => e.id));
+  const widened = ordered.filter((e) => !strictRelevantIds.has(e.id) && impliedCategoriesForUnderCovered.has(e.category));
+  const relevant = [...strictRelevant, ...widened];
+
   return { experiences: relevant, filteredToTaste: true, totalBeforeFilter: ordered.length };
 }
 
