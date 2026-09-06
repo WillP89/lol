@@ -5,6 +5,8 @@ import {
   TASTE_TAXONOMY,
   interestsForCategory,
   UNAMBIGUOUS_CATEGORIES as SHARED_UNAMBIGUOUS_CATEGORIES,
+  TERRITORIES_REQUIRING_EXPLICIT_RELATION,
+  RELATED_INTERESTS,
   type TasteInterest,
 } from '@plot/shared';
 import type { TasteProfile } from '@prisma/client';
@@ -340,6 +342,14 @@ export function categoriesImpliedByInterests(interestAffinity: Record<string, nu
     if (affinity <= 0) continue;
     const territory = TASTE_INTEREST_INDEX.get(interestId)?.territory;
     if (!territory) continue;
+    // REAL, LIVE-REPORTED BUG this excludes: "I love drill" -> Sam Smith, captioned "because
+    // you're into drill". `music` bundles ~30 genuinely distinct, often mutually-exclusive
+    // genres under LIVE_MUSIC/FESTIVAL — bare category membership is never enough evidence on
+    // its own for a territory this broad. See @plot/shared's TERRITORIES_REQUIRING_EXPLICIT_
+    // RELATION for the full rationale; a territory in that set gets NO blanket category grant
+    // here at all — only evaluateTasteRelevance's own explicit-relation check (RELATED_INTERESTS,
+    // checked against what an experience's text actually, literally supports) can grant one.
+    if (TERRITORIES_REQUIRING_EXPLICIT_RELATION.has(territory.id)) continue;
     for (const category of territory.categories) {
       if (UNAMBIGUOUS_CATEGORIES.has(category)) categories.add(category);
     }
@@ -430,10 +440,11 @@ export function evaluateTasteRelevance(
   freeTextSignals: FreeTextSignal[],
 ): TasteRelevance {
   const catScore = categoryAffinity[categoryToTasteKey(experience.category)] ?? 0;
+  const literalTags = experienceInterestTags(experience);
 
   let matchedInterestId: string | null = null;
   let matchedInterestAffinity = 0;
-  for (const tag of experienceInterestTags(experience)) {
+  for (const tag of literalTags) {
     const affinity = interestAffinity[tag] ?? 0;
     if (affinity > matchedInterestAffinity) {
       matchedInterestAffinity = affinity;
@@ -445,16 +456,34 @@ export function evaluateTasteRelevance(
 
   // Only computed/consulted when the literal-tag match above found nothing — a real interest tag
   // match is always more specific and always takes priority (see the `matchedInterestId` branch
-  // above and scoreForIndividual's own reason-picking order). Gated on `UNAMBIGUOUS_CATEGORIES`
-  // (see its own comment) so this never implies a category a DIFFERENT, unrelated territory also
-  // claims — the exact cross-contamination this same widening caused when it first shipped.
+  // above and scoreForIndividual's own reason-picking order).
   let impliedByInterestId: string | null = null;
-  if (!matchedInterestId && UNAMBIGUOUS_CATEGORIES.has(experience.category)) {
+  if (!matchedInterestId) {
     let bestImpliedAffinity = 0;
     for (const [interestId, affinity] of Object.entries(interestAffinity)) {
       if (affinity <= bestImpliedAffinity) continue;
       const territory = TASTE_INTEREST_INDEX.get(interestId)?.territory;
-      if (territory?.categories.some((c) => c === experience.category)) {
+      if (!territory) continue;
+      if (TERRITORIES_REQUIRING_EXPLICIT_RELATION.has(territory.id)) {
+        // REAL, LIVE-REPORTED BUG this closes: "I love drill" -> Sam Smith, captioned "because
+        // you're into drill". Bare category membership is never enough evidence on its own for
+        // `music` (~30 genuinely distinct, often mutually-exclusive genres share LIVE_MUSIC/
+        // FESTIVAL) — only an explicit, curated close relation (RELATED_INTERESTS — real, specific,
+        // testable relationships, e.g. drill/grime), and only when this experience's own text
+        // ACTUALLY, LITERALLY matches the related interest (`literalTags`, computed above) —
+        // never a fabricated match with zero textual basis. See @plot/shared's
+        // TERRITORIES_REQUIRING_EXPLICIT_RELATION for the full rationale.
+        const relatives = RELATED_INTERESTS[interestId] ?? [];
+        if (relatives.some((rel) => literalTags.includes(rel))) {
+          bestImpliedAffinity = affinity;
+          impliedByInterestId = interestId;
+        }
+        continue;
+      }
+      // Gated on `UNAMBIGUOUS_CATEGORIES` (see its own comment) so this never implies a category
+      // a DIFFERENT, unrelated territory also claims — the exact cross-contamination this same
+      // widening caused when it first shipped.
+      if (UNAMBIGUOUS_CATEGORIES.has(experience.category) && territory.categories.some((c) => c === experience.category)) {
         bestImpliedAffinity = affinity;
         impliedByInterestId = interestId;
       }

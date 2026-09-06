@@ -33,6 +33,9 @@ export const AnalyticsEvents = {
 
   // Crew lifecycle
   CrewCreated: 'CrewCreated',
+  // The New Crew flow's own location step (or a later edit) setting/clearing the Crew's
+  // explicit centre point — see Crew.latitude/.longitude's own schema comment.
+  CrewLocationUpdated: 'CrewLocationUpdated',
   CrewInviteSent: 'CrewInviteSent',
   // The invite-preview moment (before auth) and the moment it actually converts into
   // membership — two different funnel steps with a real drop-off between them, worth telling
@@ -121,6 +124,7 @@ export interface AnalyticsEventPayloads {
   ContactsSkipped: { userId: string };
 
   CrewCreated: { crewId: string; userId: string; memberCount: number };
+  CrewLocationUpdated: { crewId: string; userId: string };
   CrewInviteSent: { crewId: string; channel: 'link' | 'whatsapp' | 'imessage' | 'sms' | 'other' | 'email' };
   InviteOpened: { inviteCode: string; authenticated: boolean };
   InviteAccepted: { crewId: string; userId: string };

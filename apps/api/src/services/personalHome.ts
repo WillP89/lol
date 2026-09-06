@@ -363,9 +363,28 @@ export async function buildPersonalHome(userId: string, opts: { debug?: boolean 
   );
   const impliedCategoriesForUnderCovered = categoriesImpliedByInterests(underCoveredInterests);
   const strictEligibleIds = new Set(strictEligible.map((s) => s.experience.id));
-  const widened = scored.filter(
+  const widenedByCategory = scored.filter(
     (s) => !strictEligibleIds.has(s.experience.id) && impliedCategoriesForUnderCovered.has(s.experience.category),
   );
+  // Territories requiring an explicit relation (@plot/shared's TERRITORIES_REQUIRING_EXPLICIT_
+  // RELATION — currently `music`, see its own comment: the drill/Sam Smith bug) get NO blanket
+  // category grant above at all — `categoriesImpliedByInterests` already excludes them. Their
+  // only fallback is a genuinely curated close relation (RELATED_INTERESTS), and unlike bare
+  // category membership that depends on THIS specific candidate's own literal text, so it can
+  // only be checked per-experience via evaluateTasteRelevance's own `impliedByInterestId` — which
+  // already applies the same relation check — rather than the bulk category set above.
+  const widenedByCategoryIds = new Set(widenedByCategory.map((s) => s.experience.id));
+  const widenedByRelation = scored.filter((s) => {
+    if (strictEligibleIds.has(s.experience.id) || widenedByCategoryIds.has(s.experience.id)) return false;
+    const relevance = evaluateTasteRelevance(
+      { category: s.experience.category, subcategories: s.experience.subcategories, name: s.experience.name, description: s.experience.description },
+      ctx.categoryAffinity,
+      ctx.interestAffinity,
+      ctx.freeTextSignals,
+    );
+    return relevance.impliedByInterestId !== null && underCoveredInterests[relevance.impliedByInterestId] !== undefined;
+  });
+  const widened = [...widenedByCategory, ...widenedByRelation];
   let eligible = [...strictEligible, ...widened].sort((a, b) => b.score - a.score);
 
   const forYou = eligible.slice(0, FOR_YOU_LIMIT);

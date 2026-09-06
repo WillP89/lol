@@ -277,6 +277,17 @@ model Crew {
   name        String
   imageUrl    String?
   defaultCity String?
+  // Real, live product requirement: "setting the location and the distance from said location
+  // should be part of creating a group" — an explicit, geocoded centre point for the Crew's own
+  // recommendations, set once via the New Crew flow's location step (routes/crews.ts's own
+  // PATCH /crews/:id/location) and editable afterwards, same "you can tailor it after" pattern
+  // every other Crew-level preference already follows. Null = no explicit override; distance
+  // filtering (services/match.ts#scoreExperiencesForCrew) then falls back to member-derived
+  // home locations alone, exactly as before this field existed. Set independently of
+  // `defaultCity` (a plain label used for provider inventory syncing) so a precise haversine
+  // distance can be computed the same way it already is for individual members.
+  latitude    Float?
+  longitude   Float?
   createdById String
   inviteCode  String    @unique @default(cuid())
   createdAt   DateTime  @default(now())

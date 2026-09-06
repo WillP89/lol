@@ -104,8 +104,19 @@ async function finishExploreList(rows: ExperienceWithVenue[], userId?: string, o
   );
   const impliedCategoriesForUnderCovered = categoriesImpliedByInterests(underCoveredInterests);
   const strictRelevantIds = new Set(strictRelevant.map((e) => e.id));
-  const widened = ordered.filter((e) => !strictRelevantIds.has(e.id) && impliedCategoriesForUnderCovered.has(e.category));
-  const relevant = [...strictRelevant, ...widened];
+  const widenedByCategory = ordered.filter((e) => !strictRelevantIds.has(e.id) && impliedCategoriesForUnderCovered.has(e.category));
+  // Territories requiring an explicit relation (@plot/shared's TERRITORIES_REQUIRING_EXPLICIT_
+  // RELATION — currently `music`, see its own comment: the drill/Sam Smith bug) get NO blanket
+  // category grant above — `categoriesImpliedByInterests` already excludes them. Their only
+  // fallback is a genuinely curated close relation (RELATED_INTERESTS), checked per-experience via
+  // `relevance[i].impliedByInterestId` (already computed above, index-aligned with `ordered`).
+  const widenedByCategoryIds = new Set(widenedByCategory.map((e) => e.id));
+  const widenedByRelation = ordered.filter((e, i) => {
+    if (strictRelevantIds.has(e.id) || widenedByCategoryIds.has(e.id)) return false;
+    const impliedId = relevance[i].impliedByInterestId;
+    return impliedId !== null && underCoveredInterests[impliedId] !== undefined;
+  });
+  const relevant = [...strictRelevant, ...widenedByCategory, ...widenedByRelation];
 
   return { experiences: relevant, filteredToTaste: true, totalBeforeFilter: ordered.length };
 }
