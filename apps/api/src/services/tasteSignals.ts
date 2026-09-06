@@ -20,6 +20,12 @@ import type { TasteProfile } from '@prisma/client';
  *     never matched against anything before this pass.
  */
 
+// `open`'s 0.2 here is never actually written to a TasteProfile any more — see
+// applyInterestUpdates's own comment: clearing an interest now deletes its key outright (true
+// neutral) rather than storing this as a residual weight. Kept in the map only so `TasteStrength`
+// still derives 'open' as a valid value the client can send (the picker's own explicit "I'm
+// clearing this" signal, distinct from simply omitting an id) and so the type-checked
+// `STRENGTH_WEIGHT[u.strength]` lookup for the other three strengths compiles without a cast.
 const STRENGTH_WEIGHT: Record<'love' | 'like' | 'open' | 'not_for_me', number> = {
   love: 1,
   like: 0.6,
@@ -108,7 +114,21 @@ export function interpretFreeText(rawText: string): { matchedInterestIds: string
 /** Merges (never overwrites) taps from the "Tune My Plot" editor into TasteProfile.interestAffinity
  *  — unlike the bulk onboarding swipe write (services/taste.ts#submitTasteSwipes), this gets
  *  called repeatedly over a user's lifetime, one or a few interests at a time, so a partial
- *  update must never clobber everything else already set. */
+ *  update must never clobber everything else already set.
+ *
+ *  Real, live-reported bug this fixes: "once I tune my plot, it saves the previous preferences as
+ *  well as the newly set... if I had Rock selected but then go back and set different ones, I do
+ *  not then want to see Rock on the home page." Root cause — the picker's own clear tap
+ *  (TuneMyPlotSheet.tsx#cycleInterest cycling like -> love -> cleared) sent `strength: 'open'`
+ *  rather than skipping the write specifically so clearing was never silently dropped, but this
+ *  function then stored `STRENGTH_WEIGHT.open` (0.2) as the new affinity — a real, nonzero,
+ *  POSITIVE number, not "no preference". Home's own scoring (personalHome.ts) treats any
+ *  `matchedInterestAffinity > 0` as a genuine match ("Because you like Rock"), so a "cleared"
+ *  interest kept influencing Home forever, and re-opening Tune My Plot even showed it as still
+ *  tapped (`strengthFromAffinity` treats any v > 0 as 'like') — indistinguishable from never
+ *  having cleared it at all. `'open'` now means what the UI actually intends by it — true
+ *  neutral, zero influence — by deleting the key outright rather than writing a residual weight;
+ *  every other strength (love/like/not_for_me) is unchanged, still a real, deliberate signal. */
 export async function applyInterestUpdates(
   userId: string,
   updates: { interestId: string; strength: TasteStrength }[],
@@ -118,7 +138,11 @@ export async function applyInterestUpdates(
   const next = { ...current };
   for (const u of updates) {
     if (!TASTE_INTEREST_INDEX.has(u.interestId)) continue; // never store an id the taxonomy doesn't recognise
-    next[u.interestId] = STRENGTH_WEIGHT[u.strength];
+    if (u.strength === 'open') {
+      delete next[u.interestId]; // true neutral — never a residual weight that outlives the tap that cleared it
+    } else {
+      next[u.interestId] = STRENGTH_WEIGHT[u.strength];
+    }
   }
   const profile = await prisma.tasteProfile.upsert({
     where: { userId },
