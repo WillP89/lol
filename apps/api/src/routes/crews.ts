@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../middleware/auth';
-import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getCrewPreviewByInviteCode, isCrewMember, removeCrewMember, leaveCrew, markCrewRead, setEmailNotificationsEnabled, CrewMembershipError } from '../services/crew';
+import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getCrewPreviewByInviteCode, isCrewMember, removeCrewMember, leaveCrew, markCrewRead, setEmailNotificationsEnabled, updateCrewLocation, CrewMembershipError } from '../services/crew';
 import { sendCrewMessage, listCrewMessages, toggleReaction, createPoll, votePoll, ChatError } from '../services/chat';
 import { track } from '../services/analytics';
 import { getOrCreateSettings, updateSettings, respondToRecommendation, generateRecommendationForCrew, RecommendationError } from '../services/crewRecommendations';
@@ -14,7 +14,18 @@ import { displayNameOf } from '../lib/displayName';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 
-const CreateCrewSchema = z.object({ name: z.string().min(1).max(60), defaultCity: z.string().optional() });
+// `latitude`/`longitude` are optional but paired in practice — the New Crew flow's location step
+// (LocationSearch, same UK-wide place picker onboarding's own "Where are you based?" uses)
+// always sends a real `{ lat, lng }` alongside the place name it resolved, never one without the
+// other. Kept independently optional here (rather than `.and()`-ing them into a single required
+// pair) so a Crew can still be created with a bare `defaultCity` label and no precise point —
+// the pre-location-step behaviour this replaces, never removed, only no longer the only option.
+const CreateCrewSchema = z.object({
+  name: z.string().min(1).max(60),
+  defaultCity: z.string().optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+});
 const JoinCrewSchema = z.object({ inviteCode: z.string().min(1) });
 const InviteByEmailSchema = z.object({ email: z.string().email() });
 
@@ -24,8 +35,40 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     const parsed = CreateCrewSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
 
-    const crew = await createCrew(request.user.id, parsed.data.name, parsed.data.defaultCity);
+    const location =
+      parsed.data.latitude !== undefined && parsed.data.longitude !== undefined
+        ? { latitude: parsed.data.latitude, longitude: parsed.data.longitude }
+        : undefined;
+    const crew = await createCrew(request.user.id, parsed.data.name, parsed.data.defaultCity, location);
     return reply.code(201).send({ crew });
+  });
+
+  /**
+   * Real, live product requirement: "one of the key parts of creating a group should be setting
+   * the location and the distance from said location, to ensure it's finding events in the right
+   * location" — set once via the New Crew flow's own location step (before the taste step, same
+   * "no events or things should be done on crew until preference set" spirit as the taste gate,
+   * though location itself is never a hard block — a Crew that skips it simply keeps the
+   * original, fully member-derived location behaviour), and editable afterwards. Any active
+   * member can update it, same permission shape as recommendation-settings. Explicit `null`
+   * clears the override back to member-derived location; `undefined` leaves a field untouched —
+   * the schema can't express "clear vs. don't touch" with `.optional()` alone (same reasoning as
+   * `UpdateSettingsSchema.travelRadiusMeters` below).
+   */
+  const UpdateLocationSchema = z.object({
+    defaultCity: z.string().nullable().optional(),
+    latitude: z.number().min(-90).max(90).nullable().optional(),
+    longitude: z.number().min(-180).max(180).nullable().optional(),
+  });
+  app.patch('/crews/:id/location', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id } = request.params as { id: string };
+    if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+    const parsed = UpdateLocationSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+    const crew = await updateCrewLocation(id, parsed.data);
+    await track('CrewLocationUpdated', { crewId: id, userId: request.user.id }, { userId: request.user.id, crewId: id });
+    return reply.send({ crew });
   });
 
   app.get('/crews', async (request, reply) => {

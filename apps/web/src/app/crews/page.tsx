@@ -10,6 +10,8 @@ import { messagePreview } from '@/lib/messagePreview';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { MediaUploadButton } from '@/components/MediaUploadButton';
 import { CrewTuneContent } from '@/components/CrewTuneSheet';
+import { LocationSearch, type UkPlaceResult } from '@/components/LocationSearch';
+import { Segmented, TRAVEL_BANDS, closestBand } from '@/components/Segmented';
 import { identityGradient } from '@/lib/identity';
 import { isCrewArtUrl } from '@/lib/crewArt';
 import { IconMore } from '@/components/icons';
@@ -47,7 +49,8 @@ function crewActivityText(crew: CrewSummary): { text: string; tone: 'plan' | 'de
   return { text: 'Someone has to start it — say hi', tone: 'quiet' };
 }
 
-type CreateStep = 'name' | 'look' | 'taste' | 'invite';
+type CreateStep = 'name' | 'look' | 'location' | 'taste' | 'invite';
+const DEFAULT_CREW_TRAVEL_RADIUS_METERS = 16000; // "Up to 10mi" — a sane real default, editable immediately
 
 /**
  * Crews — HARD RESET (see docs/DECISIONS.md#plot-design-reset-3), not a restyle. The previous
@@ -80,6 +83,17 @@ export default function CrewsPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteEmailStatus, setInviteEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [inviteEmailError, setInviteEmailError] = useState<string | null>(null);
+
+  // Real, live product requirement: "one of the key parts of creating a group should be setting
+  // the location and the distance from said location, to ensure it's finding events in the right
+  // location" — a real reference point (Crew.latitude/.longitude), not just relying on whichever
+  // members happen to have their own home location set. Optional, unlike taste (a Crew genuinely
+  // made up of people who all live in the same place doesn't need an override) — skippable, and
+  // editable any time after via the same PATCH /crews/:id/location this step itself calls.
+  const [crewLocationPlace, setCrewLocationPlace] = useState<UkPlaceResult | null>(null);
+  const [crewTravelRadiusMeters, setCrewTravelRadiusMeters] = useState(DEFAULT_CREW_TRAVEL_RADIUS_METERS);
+  const [locationSaving, setLocationSaving] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   // "Before creating a crew, one person must fill out the crew's specific preferences... set it
   // at the crew level by the person who created it... no events or things should be done on
@@ -140,7 +154,36 @@ export default function CrewsPage() {
     setInviteEmailError(null);
     setCrewInterestPreferences([]);
     setTasteError(null);
+    setCrewLocationPlace(null);
+    setCrewTravelRadiusMeters(DEFAULT_CREW_TRAVEL_RADIUS_METERS);
+    setLocationError(null);
     setShowCreate(true);
+  }
+
+  /** Saves the Crew's own explicit location + distance together — PATCH /crews/:id/location for
+   *  the place, and the existing recommendation-settings PATCH for the radius, since that's
+   *  already the one place travelRadiusMeters lives (services/crewRecommendations.ts). Called
+   *  once, on "Continue" — unlike the taste step's per-tap saves, there's nothing meaningful to
+   *  persist optimistically before a place is actually picked. */
+  async function saveCrewLocationAndContinue() {
+    if (!newCrewId) return;
+    setLocationSaving(true);
+    setLocationError(null);
+    try {
+      if (crewLocationPlace) {
+        await api.patch(`/crews/${newCrewId}/location`, {
+          defaultCity: crewLocationPlace.name,
+          latitude: crewLocationPlace.lat,
+          longitude: crewLocationPlace.lng,
+        });
+        await api.patch(`/crews/${newCrewId}/recommendation-settings`, { travelRadiusMeters: crewTravelRadiusMeters });
+      }
+      setStep('taste');
+    } catch (err) {
+      setLocationError(err instanceof ApiError ? err.message : 'Could not save that — check your connection and try again.');
+    } finally {
+      setLocationSaving(false);
+    }
   }
 
   /** Same add-or-remove-from-array pattern as crews/[id]/page.tsx#toggleInterestPreference —
@@ -426,8 +469,34 @@ export default function CrewsPage() {
                 </MediaUploadButton>
               )}
             </div>
-            <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={() => setStep('taste')}>
+            <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} onClick={() => setStep('location')}>
               Continue
+            </button>
+          </div>
+        ) : step === 'location' ? (
+          <div>
+            <div className="v2-eyebrow" style={{ marginBottom: 4 }}>{name}</div>
+            <h2 className="v2-display" style={{ fontSize: 20, marginBottom: 6 }}>Where&rsquo;s {name} based?</h2>
+            <p className="v2-muted" style={{ marginBottom: 16, fontSize: 13.5, lineHeight: 1.5 }}>
+              Set a real centre point and distance so Plot finds things in the right place — not just wherever members
+              happen to live. Optional; you can set or change this any time after.
+            </p>
+            {locationError && <p style={{ color: 'var(--v2-error)', fontSize: 12.5, marginBottom: 10 }}>{locationError}</p>}
+            <div style={{ marginBottom: 16 }}>
+              <LocationSearch placeholder="Search a town or city…" initialValue={crewLocationPlace?.name ?? ''} onSelect={setCrewLocationPlace} />
+            </div>
+            {crewLocationPlace && (
+              <div style={{ marginBottom: 20 }}>
+                <div className="v2-muted" style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>How far is worth it?</div>
+                <Segmented
+                  options={TRAVEL_BANDS.map((b) => ({ label: b.label, value: String(b.meters) }))}
+                  value={String(closestBand(TRAVEL_BANDS, 'meters', crewTravelRadiusMeters).meters)}
+                  onChange={(v) => setCrewTravelRadiusMeters(Number(v))}
+                />
+              </div>
+            )}
+            <button className="v2-btn v2-btn-brand" style={{ width: '100%' }} disabled={locationSaving} onClick={saveCrewLocationAndContinue}>
+              {locationSaving ? 'Saving…' : crewLocationPlace ? 'Continue' : 'Skip — use everyone’s own location'}
             </button>
           </div>
         ) : step === 'taste' ? (

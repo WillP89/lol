@@ -10,11 +10,18 @@ import { getPlotSystemUserId } from './crewRecommendations';
 // "active decisions": BOOKED already has an answer, IDEA has no real option attached yet.
 const ACTIVE_DECISION_STATUSES = ['SHARED', 'GATHERING_INTEREST', 'LIKELY', 'READY'] as const;
 
-export async function createCrew(userId: string, name: string, defaultCity?: string) {
+export async function createCrew(
+  userId: string,
+  name: string,
+  defaultCity?: string,
+  location?: { latitude: number; longitude: number },
+) {
   const crew = await prisma.crew.create({
     data: {
       name,
       defaultCity,
+      latitude: location?.latitude,
+      longitude: location?.longitude,
       createdById: userId,
       members: { create: { userId, role: 'OWNER', status: 'ACTIVE' } },
     },
@@ -25,6 +32,30 @@ export async function createCrew(userId: string, name: string, defaultCity?: str
   await track('CrewCreated', { crewId: crew.id, userId, memberCount: 1 }, { userId, crewId: crew.id });
 
   return crew;
+}
+
+/**
+ * Real, live product requirement: "setting the location and the distance from said location
+ * should be part of creating a group" — set once via the New Crew flow's own location step, and
+ * editable afterwards (same "you can tailor it after and change" pattern every other Crew-level
+ * preference already follows — see updateSettings's own comment in crewRecommendations.ts).
+ * `defaultCity`/`latitude`/`longitude` are updated together (the UI always sends all three from
+ * one place-search selection); passing `null` explicitly clears the override back to fully
+ * member-derived location, `undefined` leaves it untouched.
+ */
+export async function updateCrewLocation(
+  crewId: string,
+  patch: { defaultCity?: string | null; latitude?: number | null; longitude?: number | null },
+) {
+  return prisma.crew.update({
+    where: { id: crewId },
+    data: {
+      ...(patch.defaultCity !== undefined ? { defaultCity: patch.defaultCity } : {}),
+      ...(patch.latitude !== undefined ? { latitude: patch.latitude } : {}),
+      ...(patch.longitude !== undefined ? { longitude: patch.longitude } : {}),
+    },
+    select: { id: true, defaultCity: true, latitude: true, longitude: true },
+  });
 }
 
 export async function joinCrewByInviteCode(userId: string, inviteCode: string) {

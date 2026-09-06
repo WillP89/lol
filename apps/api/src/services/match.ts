@@ -11,7 +11,7 @@ import { sendExperienceToCrew } from './plan';
 import { experienceInterestTags, experienceMatchesFreeText, categoryToTasteKey, type FreeTextSignal } from './tasteSignals';
 import { assertCrewPreferencesSet } from './crewPreferencesGate';
 import { interestLabel, TASTE_INTEREST_INDEX, UNAMBIGUOUS_CATEGORIES } from '@plot/shared';
-import type { Experience, TasteProfile, Plan } from '@prisma/client';
+import type { Experience, TasteProfile, Plan, Venue } from '@prisma/client';
 
 export interface MatchReason {
   code: string;
@@ -94,7 +94,7 @@ export async function scoreExperiencesForCrew(
   crewId: string,
   opts: { radiusMetersOverride?: number | null } = {},
 ): Promise<MatchOption[]> {
-  const [members, dna, recommendationSettings, pastResponses] = await Promise.all([
+  const [members, dna, recommendationSettings, pastResponses, crewLocation] = await Promise.all([
     prisma.crewMember.findMany({
       where: { crewId, status: 'ACTIVE' },
       include: { user: { include: { tasteProfile: true, profile: true } } },
@@ -118,6 +118,10 @@ export async function scoreExperiencesForCrew(
       where: { crewId, status: { not: 'SENT' } },
       select: { status: true, experience: { select: { category: true, subcategories: true, name: true, description: true } } },
     }),
+    // The Crew's own explicit location (Crew.latitude/.longitude — see that field's own schema
+    // comment) — read here alongside everything else this function already fetches once, rather
+    // than requiring a second round trip.
+    prisma.crew.findUnique({ where: { id: crewId }, select: { latitude: true, longitude: true } }),
   ]);
   const crewCategoryPreferences = new Set(recommendationSettings?.categoryPreferences ?? []);
   const crewInterestPreferences = new Set(recommendationSettings?.interestPreferences ?? []);
@@ -136,6 +140,15 @@ export async function scoreExperiencesForCrew(
       memberCoords.push({ homeLat: p.homeLat, homeLng: p.homeLng });
     }
   }
+  // The Crew's own explicit location, folded into the same reference-point pool the geographic
+  // candidate prefilter and the final nearest-distance scoring both already use below — setting
+  // it works exactly like adding one more person who lives right there: it can make a candidate
+  // near that point "in radius" even when literally no member's own home is nearby, without
+  // displacing any member's own real location as a signal (see Crew.latitude/.longitude's own
+  // schema comment for the live product requirement this closes).
+  if (crewLocation && crewLocation.latitude !== null && crewLocation.longitude !== null) {
+    memberCoords.push({ homeLat: crewLocation.latitude, homeLng: crewLocation.longitude });
+  }
 
   const windowStart = new Date();
   const windowEnd = new Date();
@@ -149,15 +162,60 @@ export async function scoreExperiencesForCrew(
 
   // Layer 1: hard constraints, expressed directly as a WHERE clause rather than filtered in
   // application code — no reason to pull rows across the wire just to discard them.
-  const candidates = await prisma.experience.findMany({
-    where: {
-      qualityScore: { gte: MIN_PUBLISHABLE_QUALITY_SCORE },
-      bookingStatus: { not: 'SOLD_OUT' },
-      startsAt: { gte: windowStart, lte: windowEnd },
-    },
-    include: { venue: true },
-    take: 50,
-  });
+  const hardConstraints: Prisma.ExperienceWhereInput = {
+    qualityScore: { gte: MIN_PUBLISHABLE_QUALITY_SCORE },
+    bookingStatus: { not: 'SOLD_OUT' },
+    startsAt: { gte: windowStart, lte: windowEnd },
+  };
+
+  // REAL, LIVE-REPORTED BUG this closes: a Crew genuinely based in London (real, deep inventory
+  // — "no food event in London? find that very hard to believe", correctly so) got the honest
+  // "nothing yet" message anyway. Root cause: this query used to be a bare `take: 50` over the
+  // WHOLE Experience table — every city this pilot has ever synced inventory for, combined —
+  // with no location scoping and no explicit ordering at all. As that table accumulates real
+  // cities beyond wherever any one Crew actually is, an arbitrary, database-order-dependent
+  // slice of 50 rows can easily land entirely on OTHER cities' events, missing a Crew's own
+  // city's genuinely relevant inventory completely, however deep it is. Fixed by resolving
+  // candidates NEAREST to this Crew's reference points first (`memberCoords` above — every
+  // member's home location, plus the Crew's own explicit location if set) via a lightweight
+  // id+coordinates projection over every hard-constraint-passing row, then hydrating only the
+  // nearest slice. Never a hard geographic exclusion — an experience with no venue, or genuinely
+  // far from everyone, still sorts in (just last), preserving the existing "a member actively
+  // browsing can still see a great match further out" soft-radius behaviour (see
+  // MatchOption.withinRadius's own comment) exactly as before; only which candidates the fixed
+  // `take` cap actually keeps has changed.
+  let candidates: (Experience & { venue: Venue | null })[];
+  if (memberCoords.length > 0) {
+    // A lightweight projection (id + venue coordinates only) — cheap even over every row this
+    // pilot has ever synced, and bounded by its own generous safety cap so this can never turn
+    // into an unbounded table scan as inventory keeps growing.
+    const proximityRows = await prisma.experience.findMany({
+      where: hardConstraints,
+      select: { id: true, venue: { select: { latitude: true, longitude: true } } },
+      take: 5000,
+    });
+    const nearestDistanceMiles = (row: (typeof proximityRows)[number]): number =>
+      row.venue
+        ? Math.min(...memberCoords.map((c) => haversineMiles(c.homeLat, c.homeLng, row.venue!.latitude, row.venue!.longitude)))
+        : Number.POSITIVE_INFINITY; // no venue = distance genuinely unknown, sorts last, never excluded
+    const nearestIds = proximityRows
+      .map((row) => ({ id: row.id, distance: nearestDistanceMiles(row) }))
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 50)
+      .map((row) => row.id);
+    const hydrated = await prisma.experience.findMany({ where: { id: { in: nearestIds } }, include: { venue: true } });
+    const hydratedById = new Map(hydrated.map((e) => [e.id, e]));
+    // `findMany({ where: { id: { in: ... } } })` never guarantees it echoes back `in`'s own
+    // order — re-applying the distance-sorted order here is what actually keeps "nearest first"
+    // true for the scored/deduped output below, not just for this intermediate id list.
+    candidates = nearestIds.map((id) => hydratedById.get(id)).filter((e): e is (typeof hydrated)[number] => Boolean(e));
+  } else {
+    // No member has a home location set, and the Crew has no explicit location either — nothing
+    // to sort by proximity to. Falls back to the pre-fix query shape, with one still-safe
+    // improvement: explicit quality ordering, since a fully arbitrary order was never actually
+    // desirable even before this fix existed.
+    candidates = await prisma.experience.findMany({ where: hardConstraints, include: { venue: true }, orderBy: { qualityScore: 'desc' }, take: 50 });
+  }
 
   const dnaTopCategories = new Set((dna?.topCategories as string[] | undefined) ?? []);
   const radiusMeters = opts.radiusMetersOverride

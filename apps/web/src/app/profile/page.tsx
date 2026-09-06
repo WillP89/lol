@@ -11,6 +11,7 @@ import { v2Art } from '@/lib/v2Art';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { MediaUploadButton } from '@/components/MediaUploadButton';
 import { LocationSearch, type UkPlaceResult } from '@/components/LocationSearch';
+import { Segmented, TRAVEL_BANDS, closestBand } from '@/components/Segmented';
 import { TuneMyPlotSheet } from '@/components/TuneMyPlotSheet';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { interestLabel } from '@plot/shared';
@@ -62,55 +63,11 @@ const BUDGET_BANDS = [
   { label: '£50+', maxMinor: 10000 },
 ];
 
-const TRAVEL_BANDS = [
-  { label: 'Nearby', meters: 4800 },
-  { label: 'Up to 10mi', meters: 16000 },
-  { label: 'Up to 25mi', meters: 40000 },
-  { label: 'Up to 50mi', meters: 80000 },
-  { label: 'Worth travelling for', meters: 160000 },
-];
-
 const ENERGY_BANDS: { label: string; value: 'LOW' | 'MEDIUM' | 'HIGH' }[] = [
   { label: 'Low-key', value: 'LOW' },
   { label: 'Balanced', value: 'MEDIUM' },
   { label: 'Full send', value: 'HIGH' },
 ];
-
-function closestBand<T extends { [k: string]: unknown }>(bands: T[], key: keyof T, value: number): T {
-  return bands.reduce((best, band) => (Math.abs((band[key] as number) - value) < Math.abs((best[key] as number) - value) ? band : best));
-}
-
-function Segmented<T extends string>({ options, value, onChange, disabled }: { options: { label: string; value: T }[]; value: T; onChange: (v: T) => void; disabled?: boolean }) {
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-      {options.map((opt) => {
-        const active = opt.value === value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            disabled={disabled}
-            onClick={() => onChange(opt.value)}
-            className="v2-tap-feedback"
-            style={{
-              padding: '9px 14px',
-              borderRadius: 100,
-              border: 'none',
-              cursor: disabled ? 'default' : 'pointer',
-              fontSize: 13,
-              fontWeight: 700,
-              background: active ? 'var(--v2-brand)' : 'var(--v2-bg-deep)',
-              color: active ? 'var(--v2-brand-ink)' : 'var(--v2-ink-muted)',
-              transition: 'background 0.15s ease, color 0.15s ease',
-            }}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 type DangerAction = 'deactivate' | 'delete' | null;
 
