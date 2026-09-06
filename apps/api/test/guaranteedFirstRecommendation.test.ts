@@ -390,6 +390,46 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
   });
 
   /**
+   * Real, live-reported bug — the SAME Crew, the SAME artist, reported again after the
+   * COMMUNITY/catch-all fix above had already shipped: "just made a new crew, called Tt, set the
+   * crew preferences to street food, wine bars and food festivals, first event plot sends - mr
+   * traumatik music event, again." Root cause this time: `wine_bars` lives under the
+   * `drinks_nightlife` territory, whose own `categories` is `['BAR', 'CLUBBING']` — a wine bar
+   * and a full nightclub night are genuinely different things, and CLUBBING is ALSO claimed by
+   * the completely separate `music` territory (the exact cross-territory ambiguity
+   * @plot/shared's `UNAMBIGUOUS_CATEGORIES` exists to exclude, previously only ever applied on
+   * the individual Home/Explore side — this Crew-side filter had no equivalent guard at all).
+   * Reproduced exactly: seeds a CLUBBING-categorized gig with zero food/drink content as the
+   * ONLY candidate in radius for a Crew whose preferences are street food / food festivals /
+   * wine bars, matching the live report precisely.
+   */
+  test('a CLUBBING-categorized event is never implied by a "wine bars" preference alone, even as the only candidate in radius', async () => {
+    await resetDatabase();
+    await seedExperience('Mr Traumatik: Homecoming Tour', 'CLUBBING', 'The Sugarmill');
+
+    const owner = await setUpMemberNoTaste('clubbing-owner@plot-test.invalid');
+    const mate = await setUpMemberNoTaste('clubbing-mate@plot-test.invalid');
+    const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name: 'Tt', defaultCity: STAFFORD.city } });
+    const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crew.id}/recommendation-settings`,
+      headers: { cookie: owner.cookie },
+      payload: { interestPreferences: ['street_food', 'food_festivals', 'wine_bars'] },
+    });
+    await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
+    const { messages } = messagesRes.json() as { messages: { body: string }[] };
+    expect(messages.some((m) => m.body.includes('Mr Traumatik'))).toBe(false);
+    const honestMessage = messages.find((m) => m.body.includes("don't have any"));
+    expect(honestMessage).toBeDefined();
+    expect(honestMessage!.body).toMatch(/street food|food festivals|wine bars/);
+  });
+
+  /**
    * Real, live-reported bug (the exact grammar): "We don't have any what you told us you're into
    * events near London" — a literal placeholder phrase substituted into the sentence instead of
    * the Crew's actual interest. Forces the honest-empty path (a genuinely unmatched interest, in
