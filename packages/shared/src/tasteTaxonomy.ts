@@ -287,3 +287,41 @@ export function interestsForCategory(category: string): TasteInterest[] {
  * mechanism.
  */
 export const CATCH_ALL_CATEGORIES: ReadonlySet<TasteExperienceCategory> = new Set(['COMMUNITY']);
+
+/**
+ * REAL, LIVE-REPORTED BUG this exists to close (the SAME Crew, the SAME "Mr Traumatik" report,
+ * reported again after `CATCH_ALL_CATEGORIES` above shipped — the fix for the first cause wasn't
+ * enough): a Crew set its preferences to street food / food festivals / wine bars, and Plot's
+ * guaranteed-first send was still a completely unrelated artist's tour date — this time
+ * categorized CLUBBING, not COMMUNITY. Root cause: `wine_bars` lives under the `drinks_nightlife`
+ * territory, whose own `categories` list is `['BAR', 'CLUBBING']` — but a wine bar and a
+ * full nightclub/DJ night are genuinely different experiences, not two flavours of the same
+ * thing, and a person or Crew who specifically picked "wine bars" said nothing at all about
+ * wanting clubbing. This is the general form of a gap `services/personalHome.ts`/
+ * `services/tasteSignals.ts` (apps/api) already found and fixed for individual Home/Explore
+ * personalisation (CLUBBING is claimed by BOTH the `music` territory AND `drinks_nightlife`;
+ * DAY_ACTIVITY is claimed by BOTH `food` AND `outdoors_active`) — a category claimed by more
+ * than one territory can't be safely implied from a single interest pick, because a DIFFERENT,
+ * unrelated interest under the OTHER territory claiming it would leak in too. That fix lived only
+ * in tasteSignals.ts; `services/match.ts`'s own, separate Crew-side implied-category computation
+ * never adopted it, so the exact same class of bug reopened there under a different category.
+ * Precomputed once, here, as the ONE shared definition every caller that widens eligibility from
+ * an interest's *territory* alone (never a literal interest/text match, which is always real
+ * evidence regardless of category) must intersect against — so this can never again drift between
+ * the Crew-scoring and individual-personalisation call sites the way it just did. Only a category
+ * claimed by EXACTLY ONE territory, and not itself a `CATCH_ALL_CATEGORIES` member, is ever safe
+ * to imply this way.
+ */
+export const UNAMBIGUOUS_CATEGORIES: ReadonlySet<TasteExperienceCategory> = (() => {
+  const territoryCountByCategory = new Map<TasteExperienceCategory, number>();
+  for (const territory of TASTE_TAXONOMY) {
+    for (const category of territory.categories) {
+      territoryCountByCategory.set(category, (territoryCountByCategory.get(category) ?? 0) + 1);
+    }
+  }
+  return new Set(
+    [...territoryCountByCategory.entries()]
+      .filter(([category, count]) => count === 1 && !CATCH_ALL_CATEGORIES.has(category))
+      .map(([category]) => category),
+  );
+})();

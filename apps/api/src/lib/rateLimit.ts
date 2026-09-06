@@ -28,6 +28,21 @@ export function isRateLimited(key: string, maxRequests: number, windowMs: number
   return existing.count > maxRequests;
 }
 
+/**
+ * Test-only: real, live test-isolation bug this closes, same shape as crewRecommendations.ts's
+ * own `__resetSystemUserCacheForTests` — this module's buckets are keyed by IP/email and live for
+ * the whole process, so they survive `resetDatabase()` between tests. Every `app.inject` call in
+ * a test file shares one synthetic IP, and the real, deliberate 20-requests/15-minute
+ * `magic-link-ip` budget (src/services/auth.ts) is exactly the kind of thing a growing
+ * integration-test file (each test logging in its own fresh users to keep DB state isolated) can
+ * legitimately exceed on its own — not a bug in what's being tested, just two real budgets (DB
+ * isolation vs. IP rate limit) colliding. Called from resetDb.ts's own `resetDatabase()` so every
+ * test file gets a clean rate-limit slate for free, the same way it already gets a clean database.
+ */
+export function __resetRateLimitForTests(): void {
+  buckets.clear();
+}
+
 // Periodically sweep stale buckets so this doesn't grow unboundedly on a long-lived process.
 setInterval(() => {
   const now = Date.now();

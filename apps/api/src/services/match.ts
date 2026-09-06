@@ -10,7 +10,7 @@ import { track } from './analytics';
 import { sendExperienceToCrew } from './plan';
 import { experienceInterestTags, experienceMatchesFreeText, categoryToTasteKey, type FreeTextSignal } from './tasteSignals';
 import { assertCrewPreferencesSet } from './crewPreferencesGate';
-import { interestLabel, TASTE_INTEREST_INDEX, CATCH_ALL_CATEGORIES } from '@plot/shared';
+import { interestLabel, TASTE_INTEREST_INDEX, UNAMBIGUOUS_CATEGORIES } from '@plot/shared';
 import type { Experience, TasteProfile, Plan } from '@prisma/client';
 
 export interface MatchReason {
@@ -197,20 +197,29 @@ export async function scoreExperiencesForCrew(
   // `crew_interest_preference`) — this only affects which candidates reach scoring at all.
   // THIRD real, live-reported bug this same filter went on to cause: a Crew set its preferences
   // to street food / food festivals / wine bars — the very first thing Plot sent it was a grime
-  // artist's tour date. Root cause: COMMUNITY sits in the food territory's own `categories` list,
-  // but every live provider adapter also uses COMMUNITY as its universal fallback for anything it
-  // can't confidently classify at all (see @plot/shared's CATCH_ALL_CATEGORIES for the full
-  // rationale and the provider-by-provider evidence) — so an under-tagged live-music night with
-  // no genuine food/drink content whatsoever was, as far as this filter could tell, indistinguishable
-  // from a real street-food market. `CATCH_ALL_CATEGORIES` is excluded from the implied-by-territory
-  // set for exactly this reason: a food interest still gets full credit for a COMMUNITY-categorized
-  // experience that ACTUALLY, LITERALLY mentions food (the `experienceInterestTags` check below
-  // still applies to every category, catch-all or not) — it just can no longer ride in on category
-  // membership alone, with zero other evidence it has anything to do with what the Crew asked for.
+  // artist's tour date, categorized COMMUNITY. Root cause: COMMUNITY sits in the food territory's
+  // own `categories` list, but every live provider adapter also uses COMMUNITY as its universal
+  // fallback for anything it can't confidently classify at all (see @plot/shared's
+  // CATCH_ALL_CATEGORIES for the full rationale and provider-by-provider evidence).
+  // FOURTH real, live-reported bug (the SAME Crew, the SAME artist, reported again — the fix
+  // above wasn't the whole story): this time the event was categorized CLUBBING. Root cause:
+  // `wine_bars` lives under the `drinks_nightlife` territory, whose `categories` is
+  // `['BAR', 'CLUBBING']` — a wine bar and a full nightclub night are genuinely different
+  // things, and picking "wine bars" never said anything about wanting clubbing. CLUBBING is
+  // claimed by TWO territories (`music` and `drinks_nightlife`), the exact ambiguity
+  // @plot/shared's `UNAMBIGUOUS_CATEGORIES` exists to exclude — this file used to only exclude
+  // `CATCH_ALL_CATEGORIES`, never the broader ambiguous-territory case, even though
+  // services/tasteSignals.ts (Home/Explore's own equivalent widening) already had to learn this
+  // exact lesson for DAY_ACTIVITY (Food + Outdoors). Now both files share the one definition —
+  // see `UNAMBIGUOUS_CATEGORIES`'s own doc comment for why this can't be allowed to drift apart
+  // between the two call sites again. A literal interest-tag match still lets ANY category
+  // through on its own real merit (the `experienceInterestTags` check below applies regardless of
+  // whether a category is ambiguous) — only the "same territory, no other evidence" shortcut is
+  // restricted to categories no OTHER territory or provider-fallback pattern could also produce.
   const categoriesImpliedByInterests = new Set<string>();
   for (const interestId of crewInterestPreferences) {
     for (const category of TASTE_INTEREST_INDEX.get(interestId)?.territory.categories ?? []) {
-      if (CATCH_ALL_CATEGORIES.has(category)) continue;
+      if (!UNAMBIGUOUS_CATEGORIES.has(category)) continue;
       categoriesImpliedByInterests.add(category);
     }
   }

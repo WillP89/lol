@@ -1,6 +1,12 @@
 import { prisma } from '../lib/prisma';
 import { track } from './analytics';
-import { TASTE_INTEREST_INDEX, TASTE_TAXONOMY, interestsForCategory, CATCH_ALL_CATEGORIES, type TasteInterest } from '@plot/shared';
+import {
+  TASTE_INTEREST_INDEX,
+  TASTE_TAXONOMY,
+  interestsForCategory,
+  UNAMBIGUOUS_CATEGORIES as SHARED_UNAMBIGUOUS_CATEGORIES,
+  type TasteInterest,
+} from '@plot/shared';
 import type { TasteProfile } from '@prisma/client';
 
 /**
@@ -301,39 +307,15 @@ export function categoryToTasteKey(category: string): string {
   return map[category] ?? category.toLowerCase();
 }
 
-// Real, live-reported gap this closes, found the moment the plain territory-category fallback
-// below first shipped: a taxonomy territory can list MORE THAN ONE real category (Food covers
-// RESTAURANT, DAY_ACTIVITY AND COMMUNITY; Outdoors & Active covers DAY_ACTIVITY AND FITNESS) — so
-// two people with completely unrelated interests (one picks a food interest, the other picks
-// 'walking') both got DAY_ACTIVITY implied, and DAY_ACTIVITY inventory started leaking across
-// both of them, re-breaking the exact "three genuinely different people, one shared pool, must
-// see genuinely different homes" acceptance test this whole session's work was proving
-// (test/personalHome.test.ts). Precomputed once here: which categories belong to EXACTLY ONE
-// territory across the whole taxonomy — only those are ever safe to imply from a single interest
-// pick without risk of pulling in a category some OTHER, unrelated interest also happens to
-// share. CLUBBING (Music + Nightlife) and DAY_ACTIVITY (Food + Outdoors) are the only two
-// currently ambiguous; every other category in the taxonomy belongs to exactly one territory.
-// REAL, LIVE-REPORTED BUG this same set closes (found via the Crew-side equivalent of this exact
-// widening, services/match.ts#scoreExperiencesForCrew): COMMUNITY belongs to exactly one
-// territory (Food) by the count above, so it would otherwise pass as "unambiguous" — but every
-// live provider adapter (Ticketmaster, Eventbrite, PredictHQ, Skiddle, OpenStreetMap) ALSO uses
-// COMMUNITY as its universal fallback for anything it can't confidently classify at all, so
-// "this Experience is COMMUNITY" carries none of the real signal every other category here does.
-// See @plot/shared's CATCH_ALL_CATEGORIES for the full provider-by-provider evidence — excluded
-// here for the same reason match.ts excludes it from its own implied-category set.
-const UNAMBIGUOUS_CATEGORIES: ReadonlySet<string> = (() => {
-  const territoryCountByCategory = new Map<string, number>();
-  for (const territory of TASTE_TAXONOMY) {
-    for (const category of territory.categories) {
-      territoryCountByCategory.set(category, (territoryCountByCategory.get(category) ?? 0) + 1);
-    }
-  }
-  return new Set(
-    [...territoryCountByCategory.entries()]
-      .filter(([category, count]) => count === 1 && !(CATCH_ALL_CATEGORIES as ReadonlySet<string>).has(category))
-      .map(([category]) => category),
-  );
-})();
+// Imported from @plot/shared rather than computed here a second time — this used to be its own
+// local copy of the same computation, and match.ts's separate Crew-side implied-category filter
+// had no equivalent at all, which is exactly how the same class of bug (a category implied from
+// one interest pick leaking in for a completely different, unrelated interest) reopened under a
+// different category (CLUBBING, via `wine_bars`) after this file's own version had already been
+// fixed for COMMUNITY. See @plot/shared's UNAMBIGUOUS_CATEGORIES for the full reasoning and the
+// exact ambiguous/catch-all categories it excludes — one shared definition now, not two that can
+// drift apart again.
+const UNAMBIGUOUS_CATEGORIES: ReadonlySet<string> = SHARED_UNAMBIGUOUS_CATEGORIES;
 
 /** Given a person's CURRENT, specific interestAffinity, the set of real inventory categories
  *  those interests unambiguously imply — via each interest's own taxonomy territory (e.g.
