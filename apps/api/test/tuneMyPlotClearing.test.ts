@@ -150,9 +150,25 @@ describe('Tune My Plot: clearing an interest actually clears it, not just adds t
  * selected.
  */
 describe('Tune My Plot clearing a whole territory also releases the stale onboarding-era category signal', () => {
-  test('clearing every music interest stops Home showing live music at all — even one from the original onboarding swipe', async () => {
+  /**
+   * Real, live-reported bug, escalated: "It should ONLY show events they're interested in (MMA,
+   * Boxing, Street food, Restaurants)" — a person's Home kept showing Comedy and Live Music cards
+   * ("Because you're into comedy") that their own Profile page ("Your taste — what Plot actually
+   * understands about you") never listed at all. Root cause traced all the way back to
+   * evaluateTasteRelevance itself: a bare onboarding-era categoryAffinity value was ALWAYS enough
+   * to grant eligibility on its own, whether or not the person had EVER touched that territory in
+   * Tune My Plot — so the earlier, narrower "clearing a territory releases its stale category
+   * signal" fix (still proven below, for the data itself) wasn't sufficient on its own: a category
+   * never even glanced at in Tune My Plot could still leak through Home, forever, immediately
+   * after the one-time onboarding swipe — no clearing needed to trigger it. Fixed at the true
+   * source (services/tasteSignals.ts#evaluateTasteRelevance's own `eligible`): bare category
+   * affinity can no longer grant eligibility AT ALL, on Home or Explore — a real, specific
+   * interest match or free-text match is the only way in now, exactly matching what "Your taste"
+   * itself already promised to show.
+   */
+  test('a category from the onboarding swipe alone (never touched in Tune My Plot at all) never appears on Home', async () => {
     await resetDatabase();
-    await seedExperience('Untagged Arena Live Music Night', 'LIVE_MUSIC', []); // no interest tag at all — only category-level affinity can carry this one
+    await seedExperience('Untagged Arena Live Music Night', 'LIVE_MUSIC', []); // no interest tag at all — only category-level affinity could ever have carried this one
 
     const cookie = await loginByEmail('category-leak-owner@plot-test.invalid');
     await app.inject({
@@ -162,7 +178,9 @@ describe('Tune My Plot clearing a whole territory also releases the stale onboar
       payload: { displayName: 'category-leak', homeCity: STAFFORD.city, homeLat: STAFFORD.lat, homeLng: STAFFORD.lng },
     });
 
-    // The real onboarding flow: a bulk category swipe, "yes" to live_music.
+    // The real onboarding flow: a bulk category swipe, "yes" to live_music — and nothing else,
+    // ever, in Tune My Plot. Exactly the reported scenario: a category swiped once, months ago,
+    // that "Your taste" (interestAffinity-only) never surfaces and the person never revisits.
     await app.inject({
       method: 'POST',
       url: '/users/me/taste',
@@ -175,14 +193,39 @@ describe('Tune My Plot clearing a whole territory also releases the stale onboar
       },
     });
 
-    // Confirms the untagged event is genuinely eligible purely on category-level signal before
-    // Tune My Plot ever gets touched — otherwise this test wouldn't be exercising the real bug.
-    const beforeRes = await app.inject({ method: 'GET', url: '/home/personalized', headers: { cookie } });
-    const before = beforeRes.json() as { forYou: { experience: { name: string } }[] };
-    expect(before.forYou.some((s) => s.experience.name === 'Untagged Arena Live Music Night')).toBe(true);
+    const res = await app.inject({ method: 'GET', url: '/home/personalized', headers: { cookie } });
+    const home = res.json() as { forYou: { experience: { name: string }; reasons: { code: string }[] }[] };
+    // Never shown at all, immediately — no clearing, no Tune My Plot visit required to trigger
+    // this; a bare category swipe was never a real, specific preference to begin with.
+    expect(home.forYou.some((s) => s.experience.name === 'Untagged Arena Live Music Night')).toBe(false);
+    // And even where scoreForIndividual is called for other candidates, it can never again
+    // produce a reason attributing anything to bare category-level affinity.
+    expect(home.forYou.every((s) => s.reasons.every((r) => r.code !== 'category_affinity'))).toBe(true);
+  });
+
+  test('data hygiene: clearing every music interest also releases the stale categoryAffinity value itself', async () => {
+    await resetDatabase();
+    const cookie = await loginByEmail('category-hygiene-owner@plot-test.invalid');
+    await app.inject({
+      method: 'POST',
+      url: '/users/me/profile',
+      headers: { cookie },
+      payload: { displayName: 'category-hygiene', homeCity: STAFFORD.city, homeLat: STAFFORD.lat, homeLng: STAFFORD.lng },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/users/me/taste',
+      headers: { cookie },
+      payload: {
+        swipes: [{ category: 'live_music', choice: 'yes' as const }],
+        budget: { minMinor: 1000, maxMinor: 8000, currency: 'GBP' },
+        travelRadiusMeters: 24000,
+        energyPreference: 'MEDIUM',
+      },
+    });
 
     // Go into Tune My Plot's Music territory, pick a specific interest, then clear it — leaving
-    // Music with zero positive interest signal, exactly the reported flow.
+    // Music with zero positive interest signal.
     await app.inject({
       method: 'POST',
       url: '/users/me/taste/interests',
@@ -196,12 +239,10 @@ describe('Tune My Plot clearing a whole territory also releases the stale onboar
       payload: { updates: [{ interestId: 'rock', strength: 'open' }] },
     });
     const profile = (clearRes.json() as { tasteProfile: { categoryAffinity: Record<string, number> } }).tasteProfile;
-    // The stale onboarding-era category signal is gone too, not just the interest.
+    // The stale onboarding-era category signal is gone too, not just the interest — belt and
+    // suspenders alongside the eligibility fix above: nothing should be quietly relying on this
+    // stale value anywhere else in the system either.
     expect(profile.categoryAffinity.live_music).toBeUndefined();
-
-    const afterRes = await app.inject({ method: 'GET', url: '/home/personalized', headers: { cookie } });
-    const after = afterRes.json() as { forYou: { experience: { name: string } }[] };
-    expect(after.forYou.some((s) => s.experience.name === 'Untagged Arena Live Music Night')).toBe(false);
   });
 
   test('a category still covered by a DIFFERENT territory with real signal is never cleared out from under it', async () => {

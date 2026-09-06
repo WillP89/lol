@@ -1,7 +1,6 @@
 import { beforeAll, describe, expect, test } from 'vitest';
 import { buildApp } from '../src/app';
 import { resetDatabase } from './helpers/resetDb';
-import { prisma } from '../src/lib/prisma';
 
 /**
  * "When I change my preferences, the discovery page should IMMEDIATELY change to only show
@@ -14,7 +13,8 @@ import { prisma } from '../src/lib/prisma';
  * everything" even once real signal exists.
  */
 const app = buildApp();
-const STAFFORD = 'Stafford';
+const ADMIN_KEY = 'dev_admin_key_change_me';
+const STAFFORD = { city: 'Stafford', lat: 52.8062, lng: -2.1169 };
 
 async function loginByEmail(email: string): Promise<string> {
   const magicLinkRes = await app.inject({ method: 'POST', url: '/auth/magic-link', payload: { email } });
@@ -26,33 +26,53 @@ async function loginByEmail(email: string): Promise<string> {
   return `${cookie.name}=${cookie.value}`;
 }
 
+async function seedExperience(name: string, category: string, subcategories: string[]) {
+  const startsAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/admin/experiences/manual',
+    headers: { 'x-admin-key': ADMIN_KEY },
+    payload: {
+      name,
+      description: `${name} — a real test fixture with enough description to pass quality scoring.`,
+      category,
+      subcategories,
+      venueName: 'Explore Filter Test Venue',
+      city: STAFFORD.city,
+      latitude: STAFFORD.lat,
+      longitude: STAFFORD.lng,
+      startsAt,
+      priceMinMinor: 1000,
+      priceMaxMinor: 3000,
+      externalUrl: `https://example.invalid/${encodeURIComponent(name)}`,
+    },
+  });
+  expect(res.statusCode).toBe(201);
+}
+
 interface ExploreResponse {
-  experiences: { id: string; category: string }[];
+  experiences: { id: string; name: string; category: string }[];
   filteredToTaste: boolean;
   totalBeforeFilter: number;
 }
 
 describe('Explore taste filtering', () => {
   let cookie = '';
-  let userId = '';
 
   beforeAll(async () => {
     await resetDatabase();
+    // A deterministic, specifically-tagged fixture — real, live-reported bug this replaces a
+    // bare `categoryAffinity` write with (see tasteSignals.ts#evaluateTasteRelevance's own
+    // `eligible` doc comment): a raw category-level preference used to be enough on its own to
+    // filter Explore, even for a category the person's actual current taste never mentioned.
+    // Filtering is now driven by a real, specific interest match (or free text) only, same as
+    // Home — so this proves the real mechanism, not the superseded one.
+    await seedExperience('UK Garage All-Nighter Filter Test', 'LIVE_MUSIC', ['uk garage']);
     cookie = await loginByEmail('explore-taste-filter@plot-test.invalid');
-    const callback = await app.inject({ method: 'GET', url: '/users/me', headers: { cookie } });
-    userId = (callback.json() as { user: { id: string } }).user.id;
   });
 
-  // Real fragility this guards against: the mock providers seed events at fixed clock times
-  // (a dinner slot at a fixed hour, say), so "which category has any inventory still ahead of
-  // right now" genuinely shifts over the course of a day — a test that hardcodes "restaurant"
-  // would pass at 2pm and fail at 8pm with zero code change. Read the actual category present in
-  // the unfiltered baseline instead of assuming one, so this test proves the real behaviour
-  // (a positive preference hides non-matches) regardless of what time it happens to run.
-  let baselineCategories: string[] = [];
-
   test('with no taste signal, every real experience stays visible (never filtered to zero for a new account)', async () => {
-    const res = await app.inject({ method: 'GET', url: `/explore/experiences?city=${STAFFORD}`, headers: { cookie } });
+    const res = await app.inject({ method: 'GET', url: `/explore/experiences?city=${STAFFORD.city}`, headers: { cookie } });
     expect(res.statusCode).toBe(200);
     const body = res.json() as ExploreResponse;
     expect(body.filteredToTaste).toBe(false);
@@ -60,29 +80,27 @@ describe('Explore taste filtering', () => {
     expect(body.experiences.length).toBeGreaterThan(0);
     // The Stafford mock inventory spans more than one category — otherwise the filtered test
     // below would prove nothing (everything would "match" trivially).
-    baselineCategories = body.experiences.map((e) => e.category);
-    const categories = new Set(baselineCategories);
+    const categories = new Set(body.experiences.map((e) => e.category));
     expect(categories.size).toBeGreaterThan(1);
   });
 
-  test('a real, positive category preference immediately hides every non-matching experience', async () => {
-    const targetCategory = baselineCategories[0];
-    await prisma.tasteProfile.upsert({
-      where: { userId },
-      update: { categoryAffinity: { [targetCategory.toLowerCase()]: 1 } },
-      create: { userId, categoryAffinity: { [targetCategory.toLowerCase()]: 1 } },
+  test('a real, positive SPECIFIC-INTEREST preference immediately hides every non-matching experience', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/users/me/taste/interests',
+      headers: { cookie },
+      payload: { updates: [{ interestId: 'uk_garage', strength: 'love' }] },
     });
 
-    const res = await app.inject({ method: 'GET', url: `/explore/experiences?city=${STAFFORD}`, headers: { cookie } });
+    const res = await app.inject({ method: 'GET', url: `/explore/experiences?city=${STAFFORD.city}`, headers: { cookie } });
     const body = res.json() as ExploreResponse;
     expect(body.filteredToTaste).toBe(true);
-    expect(body.experiences.length).toBeGreaterThan(0); // there IS real inventory for this category
-    expect(body.experiences.length).toBeLessThan(body.totalBeforeFilter); // and real non-matching inventory got hidden
-    for (const e of body.experiences) expect(e.category).toBe(targetCategory);
+    expect(body.experiences.some((e) => e.name === 'UK Garage All-Nighter Filter Test')).toBe(true);
+    expect(body.experiences.length).toBeLessThan(body.totalBeforeFilter); // real non-matching inventory got hidden
   });
 
   test('?filter=off is the explicit escape hatch back to everything, even with real taste signal set', async () => {
-    const res = await app.inject({ method: 'GET', url: `/explore/experiences?city=${STAFFORD}&filter=off`, headers: { cookie } });
+    const res = await app.inject({ method: 'GET', url: `/explore/experiences?city=${STAFFORD.city}&filter=off`, headers: { cookie } });
     const body = res.json() as ExploreResponse;
     expect(body.filteredToTaste).toBe(false);
     expect(body.experiences.length).toBe(body.totalBeforeFilter);

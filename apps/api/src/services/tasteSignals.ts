@@ -302,11 +302,29 @@ export function categoryToTasteKey(category: string): string {
 }
 
 export interface TasteRelevance {
-  /** Stage-A eligibility (see docs/DECISIONS.md#personal-home): true the moment ANY real signal
-   *  — category, a specific interest tag, or a literal free-text match — is positive. This is
+  /** Stage-A eligibility (see docs/DECISIONS.md#personal-home): true the moment a REAL, specific
+   *  signal — a specific interest tag, or a literal free-text match — is positive. This is
    *  the ONE eligibility rule every individual-facing surface (Explore, Home) shares; Crew
    *  scoring (match.ts#scoreExperiencesForCrew) is deliberately separate — a Crew's own
-   *  aggregate/DNA/preference signals mean something different from any one member's. */
+   *  aggregate/DNA/preference signals mean something different from any one member's.
+   *
+   *  Real, live-reported bug this fixes (third round on the same root cause): "It should ONLY
+   *  show events they're interested in (MMA, Boxing, Street food, Restaurants)" — Home kept
+   *  showing Comedy and Live Music cards ("Because you're into comedy") for a person whose own
+   *  Profile page ("Your taste — what Plot actually understands about you", deliberately built
+   *  from interestAffinity ALONE, see profile/page.tsx#tasteSummary's own comment: "specific
+   *  interests, never bare categories") showed no such thing. `categoryAffinity` USED to count on
+   *  its own here — a raw, bulk, ONE-TIME write from onboarding's category swipe
+   *  (services/taste.ts#submitTasteSwipes) that Tune My Plot can never fully re-derive (a person
+   *  who's simply never revisited a territory in the granular picker at all still carries it,
+   *  forever, with no UI anywhere to see or clear it) — so a category the person swiped "yes" to
+   *  once, months ago, and has done nothing about since, could keep independently granting
+   *  eligibility to an entire category on Home/Explore, completely invisibly, regardless of what
+   *  the person's actual current, specific taste (interestAffinity) says. That directly
+   *  contradicts the one promise Profile itself makes about what "your taste" means. Category-
+   *  level affinity is kept on this type (`categoryAffinity` below) purely as a minor, non-gating
+   *  scoring input where a caller chooses to use it — it can no longer, by itself, make anything
+   *  eligible. */
   eligible: boolean;
   categoryAffinity: number;
   /** The single strongest matching specific interest, if any — not "some interest matched" but
@@ -322,12 +340,12 @@ export interface TasteRelevance {
  *  services/explore.ts (Explore's own "only show what's relevant" filter) and
  *  services/personalHome.ts (Home's personal feed) so "relevant" means exactly one thing across
  *  the app, not two definitions that can quietly drift apart. An Experience is eligible the
- *  moment ANY of these is true: (1) its own category has positive affinity, (2) at least one of
- *  its real interest tags (experienceInterestTags below — provider subcategories + a scoped
- *  keyword scan, never invented) has positive affinity, or (3) it textually matches one of the
- *  viewer's own free-text signals. A negative/absent signal on all three is NOT eligible — this
- *  is a hard gate, not a soft reorder (see match.ts's own scorer for the softer, additive
- *  version Crew recommendations use instead). */
+ *  moment EITHER of these is true: (1) at least one of its real interest tags
+ *  (experienceInterestTags below — provider subcategories + a scoped keyword scan, never
+ *  invented) has positive affinity, or (2) it textually matches one of the viewer's own free-text
+ *  signals. See TasteRelevance's own `eligible` doc comment for why bare category-level affinity
+ *  is deliberately NOT a third way in here any more — a hard gate, not a soft reorder (see
+ *  match.ts's own scorer for the softer, additive version Crew recommendations use instead). */
 export function evaluateTasteRelevance(
   experience: { category: string; subcategories: unknown; name: string; description: string },
   categoryAffinity: Record<string, number>,
@@ -349,7 +367,8 @@ export function evaluateTasteRelevance(
   const freeTextHit = freeTextSignals.find((s) => experienceMatchesFreeText(experience, s.text));
 
   return {
-    eligible: catScore > 0 || matchedInterestAffinity > 0 || Boolean(freeTextHit),
+    // Deliberately NOT `|| catScore > 0` any more — see this type's own `eligible` doc comment.
+    eligible: matchedInterestAffinity > 0 || Boolean(freeTextHit),
     categoryAffinity: catScore,
     matchedInterestId,
     matchedInterestAffinity,
