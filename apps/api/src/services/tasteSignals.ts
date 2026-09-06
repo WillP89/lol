@@ -301,12 +301,67 @@ export function categoryToTasteKey(category: string): string {
   return map[category] ?? category.toLowerCase();
 }
 
+// Real, live-reported gap this closes, found the moment the plain territory-category fallback
+// below first shipped: a taxonomy territory can list MORE THAN ONE real category (Food covers
+// RESTAURANT, DAY_ACTIVITY AND COMMUNITY; Outdoors & Active covers DAY_ACTIVITY AND FITNESS) — so
+// two people with completely unrelated interests (one picks a food interest, the other picks
+// 'walking') both got DAY_ACTIVITY implied, and DAY_ACTIVITY inventory started leaking across
+// both of them, re-breaking the exact "three genuinely different people, one shared pool, must
+// see genuinely different homes" acceptance test this whole session's work was proving
+// (test/personalHome.test.ts). Precomputed once here: which categories belong to EXACTLY ONE
+// territory across the whole taxonomy — only those are ever safe to imply from a single interest
+// pick without risk of pulling in a category some OTHER, unrelated interest also happens to
+// share. CLUBBING (Music + Nightlife) and DAY_ACTIVITY (Food + Outdoors) are the only two
+// currently ambiguous; every other category in the taxonomy belongs to exactly one territory.
+const UNAMBIGUOUS_CATEGORIES: ReadonlySet<string> = (() => {
+  const territoryCountByCategory = new Map<string, number>();
+  for (const territory of TASTE_TAXONOMY) {
+    for (const category of territory.categories) {
+      territoryCountByCategory.set(category, (territoryCountByCategory.get(category) ?? 0) + 1);
+    }
+  }
+  return new Set([...territoryCountByCategory.entries()].filter(([, count]) => count === 1).map(([category]) => category));
+})();
+
+/** Given a person's CURRENT, specific interestAffinity, the set of real inventory categories
+ *  those interests unambiguously imply — via each interest's own taxonomy territory (e.g.
+ *  'boxing' and 'mma' both live under the 'sport' territory, whose own `categories` is
+ *  `['SPORT']`; 'street_food' and 'restaurants' both live under 'food', whose `categories` is
+ *  `['RESTAURANT', 'DAY_ACTIVITY', 'COMMUNITY']` — RESTAURANT and COMMUNITY are both returned,
+ *  DAY_ACTIVITY is not, since a DIFFERENT territory also claims it — see
+ *  `UNAMBIGUOUS_CATEGORIES`'s own comment). Real, live-reported gap this closes: real provider
+ *  inventory (Ticketmaster, Skiddle, PredictHQ) essentially never happens to use Plot's own
+ *  specific taxonomy wording in an Experience's name/description/subcategories — "0
+ *  recommendations" for an account with real, current interests set (boxing, MMA, restaurants,
+ *  street food) is otherwise a real, likely outcome the moment `experienceInterestTags`' literal-
+ *  text match finds nothing, even though there's genuinely relevant SPORT/RESTAURANT inventory
+ *  sitting right there. Picking a specific interest is still picking that interest's own
+ *  category — this is never a route back to the bare, unclearable, one-time onboarding-swipe
+ *  signal `evaluateTasteRelevance` deliberately stopped trusting (see its own comment): every
+ *  category this returns is backed by a CURRENT, positive, specific interest the person picked
+ *  themselves, today, in Tune My Plot — not a stale swipe with no UI to see or revise it. */
+export function categoriesImpliedByInterests(interestAffinity: Record<string, number>): Set<string> {
+  const categories = new Set<string>();
+  for (const [interestId, affinity] of Object.entries(interestAffinity)) {
+    if (affinity <= 0) continue;
+    const territory = TASTE_INTEREST_INDEX.get(interestId)?.territory;
+    if (!territory) continue;
+    for (const category of territory.categories) {
+      if (UNAMBIGUOUS_CATEGORIES.has(category)) categories.add(category);
+    }
+  }
+  return categories;
+}
+
 export interface TasteRelevance {
   /** Stage-A eligibility (see docs/DECISIONS.md#personal-home): true the moment a REAL, specific
    *  signal — a specific interest tag, or a literal free-text match — is positive. This is
-   *  the ONE eligibility rule every individual-facing surface (Explore, Home) shares; Crew
+   *  the ONE STRICT eligibility rule every individual-facing surface (Explore, Home) shares; Crew
    *  scoring (match.ts#scoreExperiencesForCrew) is deliberately separate — a Crew's own
    *  aggregate/DNA/preference signals mean something different from any one member's.
+   *  Deliberately does NOT fold in `impliedByInterestId` below — that's a distinct, LAST-RESORT
+   *  widening a caller opts into explicitly (see its own doc comment for why), never baked into
+   *  the strict definition of "eligible" itself.
    *
    *  Real, live-reported bug this fixes (third round on the same root cause): "It should ONLY
    *  show events they're interested in (MMA, Boxing, Street food, Restaurants)" — Home kept
@@ -333,19 +388,47 @@ export interface TasteRelevance {
   matchedInterestId: string | null;
   matchedInterestAffinity: number;
   matchedFreeText: string | null;
+  /** Fourth round, immediately after the fix above shipped: "my account has boxing, MMA,
+   *  restaurants and street food set... it says 0 recommendations... this needs to actually show
+   *  events." Dropping bare categoryAffinity from `eligible` was correct, but a HARD requirement
+   *  that `experienceInterestTags` literally find "boxing"/"street food" etc. in an Experience's
+   *  own text turned out to be far stricter than real provider data can meet — real SPORT/
+   *  RESTAURANT inventory overwhelmingly doesn't happen to use Plot's own specific wording, so a
+   *  person with entirely real, current, specific interests set could still legitimately see
+   *  nothing at all. Set only when NO real interest tag literally matched (`matchedInterestId` is
+   *  null) but this Experience's own category is implied by one of the viewer's CURRENT, specific
+   *  interests anyway (`categoriesImpliedByInterests` above) — never a route back to the bare,
+   *  stale onboarding signal `eligible` itself excludes.
+   *
+   *  Deliberately NOT folded into `eligible` above: a taxonomy territory can span several
+   *  genuinely different real-world categories (Culture covers THEATRE, CINEMA AND ART_CULTURE;
+   *  Food covers RESTAURANT, DAY_ACTIVITY AND COMMUNITY) — a person who picks 'museums'
+   *  specifically does not thereby mean "show me touring theatre shows too". Baking this
+   *  unconditionally into eligibility re-broke exactly the personalisation-engine acceptance test
+   *  this whole session's work was proving (test/personalHome.test.ts: three genuinely different
+   *  people, sharing one inventory pool, must see genuinely different homes) — a shared, multi-
+   *  category territory would leak a completely different real category into someone's Home
+   *  purely because DIFFERENT interest under the SAME territory tests eligible via a literal tag
+   *  match. Callers (personalHome.ts, explore.ts) instead use this as an explicit LAST-RESORT
+   *  widening — only when the strict `eligible` set comes up completely empty for someone who
+   *  does have real, current interest signal — so it only ever fills a genuine void, never
+   *  contaminates an already-working, specific personalisation with an unrelated category from
+   *  the same broad territory. */
+  impliedByInterestId: string | null;
 }
 
 /** THE canonical "does this belong to this person at all" check — Stage A of the two-stage
  *  eligibility-then-ranking model (docs/DECISIONS.md#personal-home). Used by both
  *  services/explore.ts (Explore's own "only show what's relevant" filter) and
  *  services/personalHome.ts (Home's personal feed) so "relevant" means exactly one thing across
- *  the app, not two definitions that can quietly drift apart. An Experience is eligible the
- *  moment EITHER of these is true: (1) at least one of its real interest tags
+ *  the app, not two definitions that can quietly drift apart. An Experience is STRICTLY eligible
+ *  the moment EITHER of these is true: (1) at least one of its real interest tags
  *  (experienceInterestTags below — provider subcategories + a scoped keyword scan, never
  *  invented) has positive affinity, or (2) it textually matches one of the viewer's own free-text
- *  signals. See TasteRelevance's own `eligible` doc comment for why bare category-level affinity
- *  is deliberately NOT a third way in here any more — a hard gate, not a soft reorder (see
- *  match.ts's own scorer for the softer, additive version Crew recommendations use instead). */
+ *  signals. See TasteRelevance's own `eligible` and `impliedByInterestId` doc comments for the
+ *  full reasoning, including why the latter is a separate, opt-in, last-resort widening rather
+ *  than a third way into `eligible` itself — a hard gate, not a soft reorder (see match.ts's own
+ *  scorer for the softer, additive version Crew recommendations use instead). */
 export function evaluateTasteRelevance(
   experience: { category: string; subcategories: unknown; name: string; description: string },
   categoryAffinity: Record<string, number>,
@@ -366,13 +449,33 @@ export function evaluateTasteRelevance(
 
   const freeTextHit = freeTextSignals.find((s) => experienceMatchesFreeText(experience, s.text));
 
+  // Only computed/consulted when the literal-tag match above found nothing — a real interest tag
+  // match is always more specific and always takes priority (see the `matchedInterestId` branch
+  // above and scoreForIndividual's own reason-picking order). Gated on `UNAMBIGUOUS_CATEGORIES`
+  // (see its own comment) so this never implies a category a DIFFERENT, unrelated territory also
+  // claims — the exact cross-contamination this same widening caused when it first shipped.
+  let impliedByInterestId: string | null = null;
+  if (!matchedInterestId && UNAMBIGUOUS_CATEGORIES.has(experience.category)) {
+    let bestImpliedAffinity = 0;
+    for (const [interestId, affinity] of Object.entries(interestAffinity)) {
+      if (affinity <= bestImpliedAffinity) continue;
+      const territory = TASTE_INTEREST_INDEX.get(interestId)?.territory;
+      if (territory?.categories.some((c) => c === experience.category)) {
+        bestImpliedAffinity = affinity;
+        impliedByInterestId = interestId;
+      }
+    }
+  }
+
   return {
-    // Deliberately NOT `|| catScore > 0` any more — see this type's own `eligible` doc comment.
+    // Deliberately NOT `|| catScore > 0` and NOT `|| Boolean(impliedByInterestId)` — see this
+    // type's own `eligible` and `impliedByInterestId` doc comments for why each is excluded.
     eligible: matchedInterestAffinity > 0 || Boolean(freeTextHit),
     categoryAffinity: catScore,
     matchedInterestId,
     matchedInterestAffinity,
     matchedFreeText: freeTextHit?.text ?? null,
+    impliedByInterestId,
   };
 }
 
