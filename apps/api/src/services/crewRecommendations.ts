@@ -6,6 +6,7 @@ import { scoreExperiencesForCrew, getCrewExcludedExperienceIds, type MatchOption
 import { createRecommendationPlanForCrew } from './plan';
 import { sendSystemMessage } from './chat';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
+import { interestLabel } from '@plot/shared';
 import { Prisma } from '@prisma/client';
 import type { CrewRecommendation, CrewRecommendationStatus } from '@prisma/client';
 
@@ -424,11 +425,16 @@ export async function generateRecommendationForCrew(crewId: string, opts: { guar
       if (!alreadySpoken) {
         const settings = await getOrCreateSettings(crewId);
         const city = typeof evaluation.details.city === 'string' ? evaluation.details.city : null;
-        const preferenceLabel = settings.categoryPreferences.length > 0
-          ? settings.categoryPreferences.map((c) => c.replace(/_/g, ' ').toLowerCase()).join(' or ')
-          : settings.interestPreferences.length > 0
-            ? 'what you told us you\'re into'
-            : null;
+        // Real, live-reported bug this fixes: an interest-only Crew (no categoryPreferences set
+        // at all) got "We don't have any what you told us you're into events near London" — a
+        // placeholder phrase substituted directly into the sentence instead of the Crew's actual
+        // interest(s). `interestLabel` (the same taxonomy lookup match.ts's own scoring reasons
+        // use) turns an id like 'sushi' into its real display label, so this always names what
+        // the Crew actually picked, category or interest, never a generic stand-in.
+        const preferenceLabel = [
+          ...settings.categoryPreferences.map((c) => c.replace(/_/g, ' ').toLowerCase()),
+          ...settings.interestPreferences.map((id) => interestLabel(id).toLowerCase()),
+        ].join(' or ') || null;
         const near = city ? ` near ${city}` : '';
         const body = preferenceLabel
           ? `We don't have any ${preferenceLabel} events${near} that we can honestly recommend yet — we're still looking, and we'll message the moment something turns up.`

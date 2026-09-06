@@ -266,6 +266,78 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
     expect(announcement!.body).not.toContain('Personal-Taste Comedy Night');
   });
 
+  /**
+   * Real, live-reported bug: a Crew set an INTEREST-only preference (no whole category ticked)
+   * and got "We don't have any [preference] events near London that we can honestly recommend
+   * yet" — in a city with genuinely deep real inventory. Root cause: `experienceInterestTags`
+   * only matches an interest by literally finding one of its synonyms in an Experience's own
+   * subcategories/name/description text, and real provider data essentially never happens to use
+   * Plot's own specific taxonomy wording — so an interest-only preference could match zero real
+   * experiences even when the category it belongs to (services/match.ts's own
+   * `categoriesImpliedByInterests`, from `@plot/shared`'s TASTE_INTEREST_INDEX) has plenty. This
+   * seeds a real RESTAURANT experience whose name/description contain NONE of the 'brunch'
+   * interest's own synonyms, so the literal-tag path alone would find nothing — proving the
+   * category-implied-by-interest fallback is what actually delivers it.
+   */
+  test('an interest-only preference still finds real inventory in its own category when no experience literally uses that wording', async () => {
+    await resetDatabase();
+    await seedExperience('Riverside Evening Special', 'RESTAURANT', 'Waterside Rooms');
+
+    const owner = await setUpMemberNoTaste('interest-only-owner@plot-test.invalid');
+    const mate = await setUpMemberNoTaste('interest-only-mate@plot-test.invalid');
+    const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name: 'Interest Only Crew', defaultCity: STAFFORD.city } });
+    const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
+
+    // No categoryPreferences at all — interest-only, exactly the real-reported scenario.
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crew.id}/recommendation-settings`,
+      headers: { cookie: owner.cookie },
+      payload: { interestPreferences: ['brunch'] },
+    });
+    await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
+    const { messages } = messagesRes.json() as { messages: { body: string }[] };
+    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    expect(announcement).toBeDefined();
+    expect(announcement!.body).toContain('Riverside Evening Special');
+    // Never the broken "We don't have any [placeholder] events" honest-empty message.
+    expect(messages.some((m) => m.body.includes("don't have any"))).toBe(false);
+  });
+
+  /**
+   * Real, live-reported bug (the exact grammar): "We don't have any what you told us you're into
+   * events near London" — a literal placeholder phrase substituted into the sentence instead of
+   * the Crew's actual interest. Forces the honest-empty path (a genuinely unmatched interest, in
+   * a category with zero real inventory here) and asserts the real interest label appears,
+   * grammatically, in its place.
+   */
+  test('the honest "nothing yet" message names the Crew\'s actual interest, never a broken placeholder phrase', async () => {
+    await resetDatabase();
+    const owner = await setUpMemberNoTaste('honest-label-owner@plot-test.invalid');
+    const mate = await setUpMemberNoTaste('honest-label-mate@plot-test.invalid');
+    const crewRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner.cookie }, payload: { name: 'Honest Label Crew', defaultCity: 'Truro' } });
+    const { crew } = crewRes.json() as { crew: { id: string; inviteCode: string } };
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/crews/${crew.id}/recommendation-settings`,
+      headers: { cookie: owner.cookie },
+      payload: { interestPreferences: ['brunch'] },
+    });
+    await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
+    const { messages } = messagesRes.json() as { messages: { body: string }[] };
+    const honestMessage = messages.find((m) => m.body.includes("don't have any"));
+    expect(honestMessage).toBeDefined();
+    expect(honestMessage!.body).toContain('brunch');
+    expect(honestMessage!.body).not.toContain('what you told us');
+  });
+
   test('genuinely zero candidates (nothing in radius) still honestly delivers nothing fabricated — but never silence either', async () => {
     await resetDatabase();
     // No experience seeded at all this time — and Truro has no coverage in any of the three

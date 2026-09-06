@@ -10,7 +10,7 @@ import { track } from './analytics';
 import { sendExperienceToCrew } from './plan';
 import { experienceInterestTags, experienceMatchesFreeText, categoryToTasteKey, type FreeTextSignal } from './tasteSignals';
 import { assertCrewPreferencesSet } from './crewPreferencesGate';
-import { interestLabel } from '@plot/shared';
+import { interestLabel, TASTE_INTEREST_INDEX } from '@plot/shared';
 import type { Experience, TasteProfile, Plan } from '@prisma/client';
 
 export interface MatchReason {
@@ -178,12 +178,37 @@ export async function scoreExperiencesForCrew(
   // unchanged for those), it can never again override the restriction itself. Empty preferences
   // (a Crew that hasn't said anything explicit) keeps the original, fully member-derived
   // behaviour — nothing to restrict to yet.
+  // REAL, LIVE-REPORTED BUG this same filter went on to cause: a Crew picked a specific INTEREST
+  // (not a whole category) — "we don't have any [interest] events near London that we can
+  // honestly recommend yet" for a city with genuinely deep real inventory. Root cause:
+  // `experienceInterestTags` only ever matches an interest by literally finding one of its
+  // synonyms in an Experience's own subcategories/name/description text — real provider data
+  // (Ticketmaster, Skiddle, PredictHQ) essentially never carries Plot's own taxonomy's specific
+  // wording, so an interest-only preference could legitimately match zero real experiences even
+  // in a city with hundreds of genuinely relevant ones. A Crew choosing a specific interest is
+  // still choosing that interest's own parent categories (`TASTE_INTEREST_INDEX`'s own
+  // `territory.categories` — e.g. picking a food interest under the "Food & Drink" territory is
+  // still, at minimum, choosing RESTAURANT) — so those categories pass this hard gate too,
+  // exactly as if the Crew had ticked the category box directly. This never widens what an
+  // interest-only Crew can be sent beyond categories THEY THEMSELVES implied by their own pick —
+  // still never comedy for a food-only Crew — it only stops a real category match from being
+  // thrown out purely because live inventory doesn't happen to use Plot's own interest wording.
+  // A literal interest-tag match still scores and reads as more specific below (`interest_match`/
+  // `crew_interest_preference`) — this only affects which candidates reach scoring at all.
+  const categoriesImpliedByInterests = new Set<string>();
+  for (const interestId of crewInterestPreferences) {
+    for (const category of TASTE_INTEREST_INDEX.get(interestId)?.territory.categories ?? []) {
+      categoriesImpliedByInterests.add(category);
+    }
+  }
+
   const crewHasExplicitPreference = crewCategoryPreferences.size > 0 || crewInterestPreferences.size > 0;
   const filteredCandidates = !crewHasExplicitPreference
     ? candidates
     : candidates.filter(
         (experience) =>
           crewCategoryPreferences.has(experience.category) ||
+          categoriesImpliedByInterests.has(experience.category) ||
           experienceInterestTags(experience).some((tag) => crewInterestPreferences.has(tag)),
       );
 
