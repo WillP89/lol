@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { track } from './analytics';
-import { TASTE_INTEREST_INDEX, TASTE_TAXONOMY, interestsForCategory, type TasteInterest } from '@plot/shared';
+import { TASTE_INTEREST_INDEX, TASTE_TAXONOMY, interestsForCategory, CATCH_ALL_CATEGORIES, type TasteInterest } from '@plot/shared';
 import type { TasteProfile } from '@prisma/client';
 
 /**
@@ -313,6 +313,14 @@ export function categoryToTasteKey(category: string): string {
 // pick without risk of pulling in a category some OTHER, unrelated interest also happens to
 // share. CLUBBING (Music + Nightlife) and DAY_ACTIVITY (Food + Outdoors) are the only two
 // currently ambiguous; every other category in the taxonomy belongs to exactly one territory.
+// REAL, LIVE-REPORTED BUG this same set closes (found via the Crew-side equivalent of this exact
+// widening, services/match.ts#scoreExperiencesForCrew): COMMUNITY belongs to exactly one
+// territory (Food) by the count above, so it would otherwise pass as "unambiguous" — but every
+// live provider adapter (Ticketmaster, Eventbrite, PredictHQ, Skiddle, OpenStreetMap) ALSO uses
+// COMMUNITY as its universal fallback for anything it can't confidently classify at all, so
+// "this Experience is COMMUNITY" carries none of the real signal every other category here does.
+// See @plot/shared's CATCH_ALL_CATEGORIES for the full provider-by-provider evidence — excluded
+// here for the same reason match.ts excludes it from its own implied-category set.
 const UNAMBIGUOUS_CATEGORIES: ReadonlySet<string> = (() => {
   const territoryCountByCategory = new Map<string, number>();
   for (const territory of TASTE_TAXONOMY) {
@@ -320,7 +328,11 @@ const UNAMBIGUOUS_CATEGORIES: ReadonlySet<string> = (() => {
       territoryCountByCategory.set(category, (territoryCountByCategory.get(category) ?? 0) + 1);
     }
   }
-  return new Set([...territoryCountByCategory.entries()].filter(([, count]) => count === 1).map(([category]) => category));
+  return new Set(
+    [...territoryCountByCategory.entries()]
+      .filter(([category, count]) => count === 1 && !(CATCH_ALL_CATEGORIES as ReadonlySet<string>).has(category))
+      .map(([category]) => category),
+  );
 })();
 
 /** Given a person's CURRENT, specific interestAffinity, the set of real inventory categories

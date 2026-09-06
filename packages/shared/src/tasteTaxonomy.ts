@@ -264,3 +264,26 @@ export function interestsForCategory(category: string): TasteInterest[] {
   }
   return out;
 }
+
+/**
+ * REAL, LIVE-REPORTED BUG this exists to close: a brand-new Crew set its preferences to street
+ * food / food festivals / wine bars, and the very first thing Plot ever sent it was a grime
+ * artist's tour date — a category so unrelated it would "turn the user straight off" (verbatim).
+ * Root cause: COMMUNITY sits in the `food` territory's own `categories` list (a genuine street-
+ * food market that a provider can't classify any more specifically still needs a home), but it is
+ * ALSO the one category every single live provider adapter (Ticketmaster, Eventbrite, PredictHQ,
+ * Skiddle, OpenStreetMap — see each one's own `mapCategory`/`mapEventCode`) falls back to for
+ * ANYTHING it cannot confidently classify at all, regardless of what the thing actually is. So
+ * "this Experience is COMMUNITY" carries none of the confidence every other category in this
+ * taxonomy carries (LIVE_MUSIC, SPORT, RESTAURANT, etc. are only ever assigned from a genuine,
+ * specific provider signal) — it just as often means "an under-tagged live-music night" as it
+ * does "a genuine community market". Callers that widen a person's or Crew's eligible categories
+ * from an interest pick's *territory* alone (apps/api's services/match.ts for Crews,
+ * services/tasteSignals.ts for individual Home/Explore) must never grant that widening for a
+ * category in this set — only a real, literal interest/text match (the event's own name/
+ * description actually saying something food-related) is trustworthy enough evidence for one.
+ * Every other category in a territory's `categories` list stays a safe, confidence-carrying
+ * signal on its own; this is deliberately the ONE exception, not a general "distrust categories"
+ * mechanism.
+ */
+export const CATCH_ALL_CATEGORIES: ReadonlySet<TasteExperienceCategory> = new Set(['COMMUNITY']);

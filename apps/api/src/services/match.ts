@@ -10,7 +10,7 @@ import { track } from './analytics';
 import { sendExperienceToCrew } from './plan';
 import { experienceInterestTags, experienceMatchesFreeText, categoryToTasteKey, type FreeTextSignal } from './tasteSignals';
 import { assertCrewPreferencesSet } from './crewPreferencesGate';
-import { interestLabel, TASTE_INTEREST_INDEX } from '@plot/shared';
+import { interestLabel, TASTE_INTEREST_INDEX, CATCH_ALL_CATEGORIES } from '@plot/shared';
 import type { Experience, TasteProfile, Plan } from '@prisma/client';
 
 export interface MatchReason {
@@ -195,9 +195,22 @@ export async function scoreExperiencesForCrew(
   // thrown out purely because live inventory doesn't happen to use Plot's own interest wording.
   // A literal interest-tag match still scores and reads as more specific below (`interest_match`/
   // `crew_interest_preference`) — this only affects which candidates reach scoring at all.
+  // THIRD real, live-reported bug this same filter went on to cause: a Crew set its preferences
+  // to street food / food festivals / wine bars — the very first thing Plot sent it was a grime
+  // artist's tour date. Root cause: COMMUNITY sits in the food territory's own `categories` list,
+  // but every live provider adapter also uses COMMUNITY as its universal fallback for anything it
+  // can't confidently classify at all (see @plot/shared's CATCH_ALL_CATEGORIES for the full
+  // rationale and the provider-by-provider evidence) — so an under-tagged live-music night with
+  // no genuine food/drink content whatsoever was, as far as this filter could tell, indistinguishable
+  // from a real street-food market. `CATCH_ALL_CATEGORIES` is excluded from the implied-by-territory
+  // set for exactly this reason: a food interest still gets full credit for a COMMUNITY-categorized
+  // experience that ACTUALLY, LITERALLY mentions food (the `experienceInterestTags` check below
+  // still applies to every category, catch-all or not) — it just can no longer ride in on category
+  // membership alone, with zero other evidence it has anything to do with what the Crew asked for.
   const categoriesImpliedByInterests = new Set<string>();
   for (const interestId of crewInterestPreferences) {
     for (const category of TASTE_INTEREST_INDEX.get(interestId)?.territory.categories ?? []) {
+      if (CATCH_ALL_CATEGORIES.has(category)) continue;
       categoriesImpliedByInterests.add(category);
     }
   }
