@@ -128,7 +128,12 @@ describe('event deduplication: the actual "Jorja Smith DJ Set" duplicate, end to
     // two would be testing something this test was never actually about.
     const seededJorjas = experiences.filter((e) => e.name === 'Jorja Smith DJ Set' && e.listings?.some((l) => l.externalUrl.includes('/Jorja%20Smith%20DJ%20Set-')));
     expect(seededJorjas).toHaveLength(1);
-    // The genuinely different event is untouched.
-    expect(experiences.filter((e) => e.name === 'Bicep')).toHaveLength(1);
+    // The genuinely different event is untouched — scoped the same deliberate way as the Jorja
+    // assertion above, for the same reason: real ambient Staffordshire mock inventory can
+    // legitimately reuse "Bicep" as an artist name too (a real, separate event, not a duplicate
+    // of this test's own fixture), and this test was never about deduping unrelated real
+    // listings that only happen to share a name.
+    const seededBiceps = experiences.filter((e) => e.name === 'Bicep' && e.listings?.some((l) => l.externalUrl.includes('/Bicep-')));
+    expect(seededBiceps).toHaveLength(1);
   });
 });

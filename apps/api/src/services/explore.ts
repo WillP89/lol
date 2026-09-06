@@ -59,8 +59,12 @@ async function finishExploreList(rows: ExperienceWithVenue[], userId?: string, o
   const categoryAffinity = (tasteProfile.categoryAffinity as Record<string, number>) ?? {};
   const interestAffinity = (tasteProfile.interestAffinity as Record<string, number>) ?? {};
   const freeTextSignals = ((tasteProfile.freeTextSignals as unknown as FreeTextSignal[]) ?? []);
-  const hasSignal =
-    Object.values(categoryAffinity).some((v) => v > 0) || Object.values(interestAffinity).some((v) => v > 0) || freeTextSignals.length > 0;
+  // Deliberately NOT `|| Object.values(categoryAffinity).some(...)` any more — same real,
+  // live-reported bug and fix as personalHome.ts#hasSignal and tasteSignals.ts#evaluateTasteRelevance's
+  // own `eligible`: a stale, one-time, unclearable onboarding category swipe could trigger
+  // filtering on its own, hiding everything outside a category the person's actual current taste
+  // (interestAffinity) says nothing about.
+  const hasSignal = Object.values(interestAffinity).some((v) => v > 0) || freeTextSignals.length > 0;
 
   // A stable sort: JS's Array#sort is guaranteed stable, so ties (same affinity, including the
   // common "no signal for this category" 0 case) keep their original chronological order rather

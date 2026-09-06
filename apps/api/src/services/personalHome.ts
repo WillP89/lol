@@ -56,15 +56,6 @@ const INTEREST_ROW_THRESHOLD = 0.5;
 // from, let alone send it to a specific Crew from there.
 type ExperienceWithVenue = Experience & { venue: Venue | null; listings: { externalUrl: string }[] };
 
-// A small, Home-specific label set for the category-level reason line only ("Because you're
-// into Live music") — the specific-interest reason (matchedInterestId) is almost always the more
-// precise one when both are available; see scoreForIndividual's own ordering.
-const CATEGORY_LABEL: Record<string, string> = {
-  LIVE_MUSIC: 'live music', CLUBBING: 'clubbing', RESTAURANT: 'food', BAR: 'bars & drinks',
-  COMEDY: 'comedy', THEATRE: 'theatre', CINEMA: 'cinema', ART_CULTURE: 'art & culture',
-  SPORT: 'sport', FITNESS: 'fitness', FESTIVAL: 'festivals', DAY_ACTIVITY: 'days out', COMMUNITY: 'local events',
-};
-
 export interface HomeReason {
   code: string;
   label: string;
@@ -154,14 +145,16 @@ function scoreForIndividual(
   let score = 0;
   const reasons: HomeReason[] = [];
 
+  // Real, live-reported bug this fixes (third round on the same root cause — see
+  // evaluateTasteRelevance's own `eligible` doc comment): a bare category-level "Because you're
+  // into comedy" reason kept appearing for a person whose actual, current taste (Profile's own
+  // "Your taste" summary, built from interestAffinity alone) never included it — a stale,
+  // one-time onboarding swipe with no UI to see or clear it, contradicting what Profile itself
+  // promises. `relevance.categoryAffinity` is no longer read here at all — a specific interest
+  // match is the only way an item earns a reason or a score bump from taste in Home.
   if (relevance.matchedInterestId && relevance.matchedInterestAffinity > 0) {
     score += relevance.matchedInterestAffinity * 45;
     reasons.push({ code: 'interest_match', label: `Because you like ${interestLabel(relevance.matchedInterestId)}` });
-  } else if (relevance.categoryAffinity > 0.3) {
-    score += relevance.categoryAffinity * 30;
-    reasons.push({ code: 'category_affinity', label: `Because you're into ${CATEGORY_LABEL[experience.category] ?? experience.category.toLowerCase()}` });
-  } else if (relevance.categoryAffinity > 0) {
-    score += relevance.categoryAffinity * 30;
   }
 
   if (relevance.matchedFreeText) {
@@ -273,10 +266,16 @@ export async function buildPersonalHome(userId: string, opts: { debug?: boolean 
     homeLat: profile?.homeLat ?? null,
     homeLng: profile?.homeLng ?? null,
   };
-  const hasSignal =
-    Object.values(ctx.categoryAffinity).some((v) => v > 0) ||
-    Object.values(ctx.interestAffinity).some((v) => v > 0) ||
-    ctx.freeTextSignals.length > 0;
+  // Deliberately NOT `|| Object.values(ctx.categoryAffinity).some(...)` any more — see
+  // evaluateTasteRelevance's own `eligible` doc comment for the full reasoning. A person who's
+  // only ever done onboarding's one-time category swipe and never touched Tune My Plot's
+  // specific-interest picker at all genuinely has no CURRENT, specific taste signal yet — showing
+  // them a page that CLAIMS `personalized: true` off that alone, then filtering by it, is exactly
+  // the dishonesty this flag exists to prevent (see this file's own top comment). They get the
+  // same honest, unpersonalised fallback below (quality/freshness only — `scoreForIndividual` no
+  // longer reads categoryAffinity either, see its own comment) as a genuinely brand-new account,
+  // until they tell Plot something more specific via Tune My Plot.
+  const hasSignal = Object.values(ctx.interestAffinity).some((v) => v > 0) || ctx.freeTextSignals.length > 0;
 
   const windowStart = new Date();
   const windowEnd = new Date();
