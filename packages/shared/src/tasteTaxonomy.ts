@@ -325,3 +325,40 @@ export const UNAMBIGUOUS_CATEGORIES: ReadonlySet<TasteExperienceCategory> = (() 
       .map(([category]) => category),
   );
 })();
+
+/**
+ * REAL, LIVE-REPORTED BUG this exists to close — the most severe one yet: a person told Plot
+ * "I love drill", and Plot showed them a Sam Smith event captioned "because you're into drill".
+ * Root cause: `music` is by far the taxonomy's most genre-diverse territory — LIVE_MUSIC and
+ * FESTIVAL between them bundle roughly thirty genuinely distinct, often mutually-exclusive
+ * genres (a drill fan and a classical fan share nothing except both having picked something
+ * under "music") — so the bare "any positive interest implies its whole territory's categories"
+ * shortcut every other territory safely relies on (`UNAMBIGUOUS_CATEGORIES` above,
+ * apps/api's tasteSignals.ts#categoriesImpliedByInterests, match.ts's own Crew-side equivalent)
+ * is uniquely dangerous here: it grants a bare LIVE_MUSIC/FESTIVAL event to ANYONE with ANY
+ * positive music-territory interest, genre completely ignored.
+ *
+ * `TERRITORIES_REQUIRING_EXPLICIT_RELATION` opts a territory OUT of that blanket category-
+ * membership shortcut entirely — currently just `music`, the one territory broad and diverse
+ * enough for it to produce genuinely wrong, specific claims rather than merely-broad ones.
+ * `RELATED_INTERESTS` is what a territory in that set falls back to instead: a small,
+ * intentionally sparse, hand-curated map of genuinely close sibling interests — real, specific,
+ * testable relationships (brief's own worked example: drill and grime are the same UK scene,
+ * commonly enjoyed by the same fans), never inferred from shared category membership. Consulted
+ * only against an experience's own LITERAL matched interest tags (`experienceInterestTags`) —
+ * this still requires real textual evidence the event is actually that related genre, never a
+ * fabricated match. An interest with no entry here has NO close relations; that is the safe
+ * default (see this file's own module comment: "a description that never mentions food should
+ * return no food interests" — the same honesty rule applies here: an interest simply not
+ * matching anything specific is honest, not a bug to paper over with an invented relation).
+ * Deliberately small to start — grow it only with real, defensible, specific relationships, never
+ * to "make more things eligible" as a goal in itself.
+ */
+export const TERRITORIES_REQUIRING_EXPLICIT_RELATION: ReadonlySet<string> = new Set(['music']);
+
+export const RELATED_INTERESTS: Readonly<Record<string, readonly string[]>> = {
+  drill: ['grime'],
+  grime: ['drill'],
+  hip_hop: ['rnb'],
+  rnb: ['hip_hop'],
+};

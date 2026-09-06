@@ -10,7 +10,7 @@ import { track } from './analytics';
 import { sendExperienceToCrew } from './plan';
 import { experienceInterestTags, experienceMatchesFreeText, categoryToTasteKey, type FreeTextSignal } from './tasteSignals';
 import { assertCrewPreferencesSet } from './crewPreferencesGate';
-import { interestLabel, TASTE_INTEREST_INDEX, UNAMBIGUOUS_CATEGORIES } from '@plot/shared';
+import { interestLabel, TASTE_INTEREST_INDEX, UNAMBIGUOUS_CATEGORIES, TERRITORIES_REQUIRING_EXPLICIT_RELATION, RELATED_INTERESTS } from '@plot/shared';
 import type { Experience, TasteProfile, Plan, Venue } from '@prisma/client';
 
 export interface MatchReason {
@@ -274,9 +274,18 @@ export async function scoreExperiencesForCrew(
   // through on its own real merit (the `experienceInterestTags` check below applies regardless of
   // whether a category is ambiguous) — only the "same territory, no other evidence" shortcut is
   // restricted to categories no OTHER territory or provider-fallback pattern could also produce.
+  // FOURTH real, live-reported bug: "I love drill" -> Sam Smith, captioned "because you're into
+  // drill". `music` bundles ~30 genuinely distinct, often mutually-exclusive genres under
+  // LIVE_MUSIC/FESTIVAL — bare category membership is never enough evidence on its own for a
+  // territory this broad, so a Crew whose interest picks fall under `music`
+  // (`TERRITORIES_REQUIRING_EXPLICIT_RELATION`) get NO blanket category grant here at all — only
+  // an explicit, curated close relation (`RELATED_INTERESTS`), checked below against what the
+  // candidate's own text actually, literally supports.
   const categoriesImpliedByInterests = new Set<string>();
   for (const interestId of crewInterestPreferences) {
-    for (const category of TASTE_INTEREST_INDEX.get(interestId)?.territory.categories ?? []) {
+    const territory = TASTE_INTEREST_INDEX.get(interestId)?.territory;
+    if (!territory || TERRITORIES_REQUIRING_EXPLICIT_RELATION.has(territory.id)) continue;
+    for (const category of territory.categories) {
       if (!UNAMBIGUOUS_CATEGORIES.has(category)) continue;
       categoriesImpliedByInterests.add(category);
     }
@@ -285,12 +294,21 @@ export async function scoreExperiencesForCrew(
   const crewHasExplicitPreference = crewCategoryPreferences.size > 0 || crewInterestPreferences.size > 0;
   const filteredCandidates = !crewHasExplicitPreference
     ? candidates
-    : candidates.filter(
-        (experience) =>
-          crewCategoryPreferences.has(experience.category) ||
-          categoriesImpliedByInterests.has(experience.category) ||
-          experienceInterestTags(experience).some((tag) => crewInterestPreferences.has(tag)),
-      );
+    : candidates.filter((experience) => {
+        if (crewCategoryPreferences.has(experience.category)) return true;
+        if (categoriesImpliedByInterests.has(experience.category)) return true;
+        const tags = experienceInterestTags(experience);
+        if (tags.some((tag) => crewInterestPreferences.has(tag))) return true;
+        // The explicit-relation fallback for territories requiring one (see this block's own
+        // comment above) — a real, specific, curated sibling relationship (e.g. drill/grime),
+        // never a fabricated match: still requires the candidate's own text to literally support
+        // the related interest.
+        for (const interestId of crewInterestPreferences) {
+          const relatives = RELATED_INTERESTS[interestId] ?? [];
+          if (relatives.some((rel) => tags.includes(rel))) return true;
+        }
+        return false;
+      });
 
   const scored: MatchOption[] = [];
   for (const experience of filteredCandidates) {
