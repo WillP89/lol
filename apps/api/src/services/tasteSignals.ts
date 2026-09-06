@@ -136,18 +136,52 @@ export async function applyInterestUpdates(
   const existing = await prisma.tasteProfile.findUnique({ where: { userId } });
   const current = (existing?.interestAffinity as Record<string, number> | undefined) ?? {};
   const next = { ...current };
+  const touchedTerritoryIds = new Set<string>();
   for (const u of updates) {
-    if (!TASTE_INTEREST_INDEX.has(u.interestId)) continue; // never store an id the taxonomy doesn't recognise
+    const entry = TASTE_INTEREST_INDEX.get(u.interestId);
+    if (!entry) continue; // never store an id the taxonomy doesn't recognise
+    touchedTerritoryIds.add(entry.territory.id);
     if (u.strength === 'open') {
       delete next[u.interestId]; // true neutral — never a residual weight that outlives the tap that cleared it
     } else {
       next[u.interestId] = STRENGTH_WEIGHT[u.strength];
     }
   }
+
+  // Real, live-reported bug this fixes: "it should not show live music on the home page if live
+  // music is not a preference set at profile level" — TasteProfile.categoryAffinity is a
+  // SEPARATE, older store, bulk-written once by onboarding's category swipe
+  // (services/taste.ts#submitTasteSwipes) and never otherwise editable — Tune My Plot only ever
+  // wrote interestAffinity, above. So clearing every specific music interest here left the
+  // ORIGINAL onboarding-era categoryAffinity.live_music sitting there untouched, and
+  // evaluateTasteRelevance's eligibility gate (`catScore > 0 || matchedInterestAffinity > 0 ||
+  // freeTextHit`) kept treating EVERY live-music event as eligible regardless of what Tune My
+  // Plot now shows selected — a category the picker itself displays as fully cleared kept
+  // leaking through on a completely separate, invisible signal. Once a person touches a
+  // territory here at all, its categories are considered owned by this granular editor from then
+  // on: if NO interest anywhere in that territory (not just the ones this call touched) still has
+  // a positive affinity, the stale category-level affinity for every category it covers is
+  // cleared too — unless a DIFFERENT territory that still has real positive signal also covers
+  // that same category (one category can belong to more than one territory, e.g. DAY_ACTIVITY
+  // under both Food and Outdoors & Active).
+  const categoryAffinity = { ...((existing?.categoryAffinity as Record<string, number> | undefined) ?? {}) };
+  for (const territoryId of touchedTerritoryIds) {
+    const territory = TASTE_TAXONOMY.find((t) => t.id === territoryId);
+    if (!territory) continue;
+    const territoryStillHasSignal = territory.interests.some((i) => (next[i.id] ?? 0) > 0);
+    if (territoryStillHasSignal) continue;
+    for (const category of territory.categories) {
+      const coveredByAnotherTerritory = TASTE_TAXONOMY.some(
+        (t) => t.id !== territoryId && t.categories.includes(category) && t.interests.some((i) => (next[i.id] ?? 0) > 0),
+      );
+      if (!coveredByAnotherTerritory) delete categoryAffinity[categoryToTasteKey(category)];
+    }
+  }
+
   const profile = await prisma.tasteProfile.upsert({
     where: { userId },
-    update: { interestAffinity: next },
-    create: { userId, categoryAffinity: {}, interestAffinity: next, budgetMaxMinor: DEFAULT_BUDGET_MAX_MINOR, travelRadiusMeters: DEFAULT_TRAVEL_RADIUS_METERS },
+    update: { interestAffinity: next, categoryAffinity },
+    create: { userId, categoryAffinity, interestAffinity: next, budgetMaxMinor: DEFAULT_BUDGET_MAX_MINOR, travelRadiusMeters: DEFAULT_TRAVEL_RADIUS_METERS },
   });
   await track('TasteInterestUpdated', { userId, count: updates.length }, { userId });
   return profile;

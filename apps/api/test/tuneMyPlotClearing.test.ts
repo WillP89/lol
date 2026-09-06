@@ -135,3 +135,126 @@ describe('Tune My Plot: clearing an interest actually clears it, not just adds t
     expect(profile.interestAffinity.jazz).toBe(1); // untouched
   });
 });
+
+/**
+ * Real, live-reported bug, one level deeper than the interest-clearing fix above: "The homepage
+ * does not then auto update and only show events in that category! ... it should not show live
+ * music on the home page if live music is not a preference set at profile level." Root cause:
+ * TasteProfile.categoryAffinity is a SEPARATE, older store, bulk-written exactly once by
+ * onboarding's category swipe (services/taste.ts#submitTasteSwipes) and never otherwise
+ * editable — Tune My Plot only ever wrote interestAffinity. So a person who swiped "yes" to Live
+ * Music during onboarding, then went into Tune My Plot and cleared every specific music interest
+ * they'd picked, still had the ORIGINAL onboarding-era categoryAffinity.live_music sitting there
+ * untouched — and evaluateTasteRelevance's eligibility gate treats ANY positive categoryAffinity
+ * as enough to keep the whole category eligible, regardless of what Tune My Plot now shows
+ * selected.
+ */
+describe('Tune My Plot clearing a whole territory also releases the stale onboarding-era category signal', () => {
+  test('clearing every music interest stops Home showing live music at all — even one from the original onboarding swipe', async () => {
+    await resetDatabase();
+    await seedExperience('Untagged Arena Live Music Night', 'LIVE_MUSIC', []); // no interest tag at all — only category-level affinity can carry this one
+
+    const cookie = await loginByEmail('category-leak-owner@plot-test.invalid');
+    await app.inject({
+      method: 'POST',
+      url: '/users/me/profile',
+      headers: { cookie },
+      payload: { displayName: 'category-leak', homeCity: STAFFORD.city, homeLat: STAFFORD.lat, homeLng: STAFFORD.lng },
+    });
+
+    // The real onboarding flow: a bulk category swipe, "yes" to live_music.
+    await app.inject({
+      method: 'POST',
+      url: '/users/me/taste',
+      headers: { cookie },
+      payload: {
+        swipes: [{ category: 'live_music', choice: 'yes' as const }],
+        budget: { minMinor: 1000, maxMinor: 8000, currency: 'GBP' },
+        travelRadiusMeters: 24000,
+        energyPreference: 'MEDIUM',
+      },
+    });
+
+    // Confirms the untagged event is genuinely eligible purely on category-level signal before
+    // Tune My Plot ever gets touched — otherwise this test wouldn't be exercising the real bug.
+    const beforeRes = await app.inject({ method: 'GET', url: '/home/personalized', headers: { cookie } });
+    const before = beforeRes.json() as { forYou: { experience: { name: string } }[] };
+    expect(before.forYou.some((s) => s.experience.name === 'Untagged Arena Live Music Night')).toBe(true);
+
+    // Go into Tune My Plot's Music territory, pick a specific interest, then clear it — leaving
+    // Music with zero positive interest signal, exactly the reported flow.
+    await app.inject({
+      method: 'POST',
+      url: '/users/me/taste/interests',
+      headers: { cookie },
+      payload: { updates: [{ interestId: 'rock', strength: 'love' }] },
+    });
+    const clearRes = await app.inject({
+      method: 'POST',
+      url: '/users/me/taste/interests',
+      headers: { cookie },
+      payload: { updates: [{ interestId: 'rock', strength: 'open' }] },
+    });
+    const profile = (clearRes.json() as { tasteProfile: { categoryAffinity: Record<string, number> } }).tasteProfile;
+    // The stale onboarding-era category signal is gone too, not just the interest.
+    expect(profile.categoryAffinity.live_music).toBeUndefined();
+
+    const afterRes = await app.inject({ method: 'GET', url: '/home/personalized', headers: { cookie } });
+    const after = afterRes.json() as { forYou: { experience: { name: string } }[] };
+    expect(after.forYou.some((s) => s.experience.name === 'Untagged Arena Live Music Night')).toBe(false);
+  });
+
+  test('a category still covered by a DIFFERENT territory with real signal is never cleared out from under it', async () => {
+    await resetDatabase();
+    // DAY_ACTIVITY is covered by both the 'food' territory (markets, street food) and the
+    // 'outdoors_active' territory — clearing every food interest must never silently kill a
+    // DAY_ACTIVITY preference that's genuinely still alive via Outdoors & Active.
+    const cookie = await loginByEmail('category-shared-owner@plot-test.invalid');
+    await app.inject({
+      method: 'POST',
+      url: '/users/me/profile',
+      headers: { cookie },
+      payload: { displayName: 'category-shared', homeCity: STAFFORD.city, homeLat: STAFFORD.lat, homeLng: STAFFORD.lng },
+    });
+    // Onboarding-era category signal on BOTH categories 'food' covers, same as a real "yes" swipe
+    // to Restaurants and Days out — the stale signal this test proves survives (or doesn't).
+    await app.inject({
+      method: 'POST',
+      url: '/users/me/taste',
+      headers: { cookie },
+      payload: {
+        swipes: [{ category: 'restaurant', choice: 'yes' as const }, { category: 'day_activity', choice: 'yes' as const }],
+        budget: { minMinor: 1000, maxMinor: 8000, currency: 'GBP' },
+        travelRadiusMeters: 24000,
+        energyPreference: 'MEDIUM',
+      },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/users/me/taste/interests',
+      headers: { cookie },
+      payload: {
+        updates: [
+          { interestId: 'markets', strength: 'love' }, // 'food' territory
+          { interestId: 'walking', strength: 'love' }, // 'outdoors_active' territory, also covers DAY_ACTIVITY
+        ],
+      },
+    });
+
+    const clearRes = await app.inject({
+      method: 'POST',
+      url: '/users/me/taste/interests',
+      headers: { cookie },
+      payload: { updates: [{ interestId: 'markets', strength: 'open' }] }, // clears ALL of 'food's own positive signal
+    });
+    const profile = (clearRes.json() as { tasteProfile: { categoryAffinity: Record<string, number>; interestAffinity: Record<string, number> } }).tasteProfile;
+    expect(profile.interestAffinity.markets).toBeUndefined();
+    expect(profile.interestAffinity.walking).toBe(1); // untouched
+    // RESTAURANT (only ever covered by 'food') is fair game to clear along with it...
+    expect(profile.categoryAffinity.restaurant).toBeUndefined();
+    // ...but DAY_ACTIVITY (also covered by the still-alive 'outdoors_active' territory) must
+    // survive — clearing one territory's own interest must never reach into a category another
+    // territory still has a real, live claim on.
+    expect(profile.categoryAffinity.day_activity).toBe(1);
+  });
+});

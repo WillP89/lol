@@ -126,13 +126,24 @@ export function TuneMyPlotSheet({
   }, [allInterests, query]);
 
   async function cycleInterest(interestId: string) {
-    const current = local[interestId] ?? null;
-    const next: Strength = current === null ? 'like' : current === 'like' ? 'love' : null;
+    const previous = local[interestId] ?? null;
+    const next: Strength = previous === null ? 'like' : previous === 'like' ? 'love' : null;
     setLocal((prev) => ({ ...prev, [interestId]: next }));
-    // A cleared interest still needs a real write — 'open' carries a small positive weight
-    // server-side (see tasteSignals.ts's STRENGTH_WEIGHT) rather than deleting the key, so
-    // clearing here sends 'open' rather than skipping the call.
-    await api.post('/users/me/taste/interests', { updates: [{ interestId, strength: next ?? 'open' }] }).catch(() => {});
+    // A cleared interest still needs a real write — 'open' means true neutral server-side (see
+    // tasteSignals.ts#applyInterestUpdates) rather than skipping the call, so clearing here sends
+    // 'open' rather than nothing.
+    //
+    // Real, live-reported gap this closes: "it sometimes takes a few clicks and attempts" — a
+    // failed write here used to be swallowed silently, leaving the pill showing the NEW state
+    // (optimistic) while the server still had the OLD one; re-opening the sheet later would then
+    // reset it back, reading as "my tap didn't take" with no visible reason why. Reverting the
+    // optimistic state on failure at least makes a failed tap visibly bounce back immediately —
+    // honest about not having taken, rather than silently lying about it until the next reload.
+    try {
+      await api.post('/users/me/taste/interests', { updates: [{ interestId, strength: next ?? 'open' }] });
+    } catch {
+      setLocal((prev) => ({ ...prev, [interestId]: previous }));
+    }
   }
 
   async function addFreeText(text: string) {
