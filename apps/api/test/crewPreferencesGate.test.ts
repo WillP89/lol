@@ -97,7 +97,7 @@ describe('crew preferences gate: nothing happens on a Crew until its own prefere
   test('the immediate 1->2-member join trigger delivers nothing — preferences were never set', async () => {
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crewId}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    expect(messages.some((m) => m.body.includes('Plot found something'))).toBe(false);
+    expect(messages.some((m) => m.body.includes(' — /plans/'))).toBe(false);
   });
 
   test('POST find-us-something is refused with a clear, actionable 400 — not a silent empty list', async () => {
@@ -138,7 +138,7 @@ describe('crew preferences gate: nothing happens on a Crew until its own prefere
 
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crewId}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('Stafford Gate Test Comedy Night');
   });

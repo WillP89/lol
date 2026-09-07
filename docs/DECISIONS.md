@@ -2358,3 +2358,63 @@ Every row above is a real, concrete ask (who, what access, why) rather than a de
 any of them is a genuine company decision (and, for most, a commercial-terms conversation), not
 an engineering task this session can complete unilaterally. See each provider's own file
 (`docs/providers/ticketing.md`, `restaurants.md`) for the fuller research trail already on record.
+
+## #crew-ticketed-first-recommendations
+
+**Live, direct product feedback after the hard-gate rebuild above shipped**: "I need ticketed
+only events I think, for this to work... as a first event send, this just doesn't cut it, it
+MUST be a paid event, ticketed event... if there's no ticketed events within the distance from
+the location provided, in-line with the preference, then send one as local as possible (closest
+match) and preface it with 'there's not much in your area right now, so how about this'... don't
+think we need to include or focus on unpaid, no ticket events. This kills the app a bit for me."
+
+A real ticket is now the PRIMARY criterion for Plot's own Crew recommendation — a genuine
+preference and tiering rule, not a hard exclusion (the product spec explicitly wants an honest
+fallback, never silence, when nothing ticketed exists).
+
+- **`services/opportunityIntent.ts#isTicketedEvent`** — `true` only for a real `EVENT_PROVIDER`
+  source (Ticketmaster/Skiddle/PredictHQ/Eventbrite, plus the test-environment's own
+  `mock_ticketing` stand-in — see `providers/mock/ticketingProvider.ts`'s own header, "shaped
+  like a real ticketing aggregator response") with a real price and not sold out. A `PLACE_
+  PROVIDER` listing (OpenStreetMap/FHRS/Google Places/Foursquare) is never ticketed — it has no
+  booking integration at all — whatever its price field happens to hold.
+- **`services/match.ts#scoreExperiencesForCrew`** — a real scoring bonus (`ticketed_event`,
+  +14) for any ticketed candidate, so a real ticket floats to the top of the manual "Find us
+  something"/"Suggest something" flows' own ranking too, not just the automatic engine's
+  separate tiering below.
+- **`services/crewRecommendations.ts#pickBest`** — the actual tiering rule the automatic engine
+  (and its `guaranteeFirst` first-moment safety net) both use: pick the highest-scoring TICKETED
+  candidate from the eligible pool when one exists; only fall back to the highest-scoring
+  candidate overall (ticketed or not) when nothing ticketed cleared every other gate — flagging
+  that fallback (`usedTicketedFallback`) so the message can be honest about it.
+- **The honest preface** (`TICKETED_FALLBACK_PREFACE = "There's not much in your area right now,
+  so how about this"`) replaces the normal confident "Plot found something your Crew might like"
+  lead-in — on BOTH the chat announcement (`services/plan.ts#createRecommendationPlanForCrew`)
+  and the stored `CrewRecommendation.reasonText` explanation — exactly when, and only when, the
+  tiering above genuinely had to fall back. Never shown when a real ticket was available; never
+  omitted when it wasn't.
+- **Client-side regex generalised** (`apps/web/src/app/crews/[id]/page.tsx`,
+  `apps/web/src/lib/messagePreview.ts`) — the announcement-detection regex used to be anchored to
+  the one fixed "Plot found something your Crew might like" phrase; a second real lead-in phrase
+  would have silently rendered as a bare text bubble instead of the rich event card (the exact
+  "format drift" failure mode these files' own comments already warned about from an earlier
+  pass, for a different reason). Now matches the announcement's actual structural shape
+  (`: "<title>" — /plans/<slug>`) regardless of which honest lead-in produced it.
+
+**What this deliberately did NOT build**: a separate "Something Free for the Crew" surface the
+live feedback floated as a maybe ("maybe we have a section... I don't mind events like the one
+that's just been sent... but as a FIRST event send, this doesn't cut it") — explicitly
+speculative in the feedback itself, and a genuine new product surface (where it would live, how
+it's triggered) rather than a scoring/gating fix. Free, non-ticketed inventory is still real,
+valid Plot inventory — it is simply never the DEFAULT choice for Plot's one proactive
+recommendation slot any more, exactly as asked.
+
+Regression coverage: `test/unit/opportunityIntent.test.ts` (`isTicketedEvent` classification, 5
+new cases) and `test/crewTicketedFirstRecommendation.test.ts` (2 integration tests — a real
+ticketed candidate beats a non-ticketed one even when the non-ticketed one might otherwise rank
+close; and the honest fallback preface, verified on both the chat message and the stored
+`reasonText`, when nothing ticketed exists). Six existing tests asserting the old fixed
+"Plot found something" substring were updated to check the real, shared structural marker
+(`' — /plans/'`, present in both lead-ins) instead of one specific phrase — not a description of
+new behaviour those tests didn't already assert, just no longer coupled to which of the two
+honest framings actually applies. Full suite: 413/413 passing. Typecheck clean (api + web).

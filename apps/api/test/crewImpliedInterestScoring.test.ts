@@ -99,7 +99,7 @@ describe('a candidate admitted only via an implied Crew interest still gets a re
 
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('The Wellington');
   });
@@ -133,7 +133,7 @@ describe('a candidate admitted only via an implied Crew interest still gets a re
 
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('Ringside Fight Night');
   });

@@ -173,6 +173,15 @@ function generateMockCatalogue(city: string): MockTicketingRaw[] {
       soldOutPct: Math.floor(rand() * 100),
       imageUrl: null,
       tags: {
+        // `provider: 'mock_ticketing'` — recognised by services/opportunityIntent.ts as a
+        // ticketed EVENT_PROVIDER source (see that file's own EVENT_PROVIDER_IDS comment):
+        // this adapter is deliberately shaped like a real ticketed-events feed (real price
+        // ranges, a real per-listing sold-out percentage — see this file's own header), the
+        // honest test-environment stand-in for Ticketmaster/DICE, not a permanent-place or
+        // free listing. Without this, the test suite's own mock inventory would never be
+        // recognised as "ticketed" at all, and every automatic recommendation delivered in
+        // tests would incorrectly read as the honest-fallback case.
+        provider: 'mock_ticketing',
         energy: cat === 'COMEDY' ? 'medium' : 'high',
         crowd: rand() > 0.5 ? 'mainstream' : 'alternative',
         indoorOutdoor: 'indoor',

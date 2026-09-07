@@ -108,7 +108,7 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
 
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('Stafford Open Mic Comedy');
   });
@@ -171,7 +171,7 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
 
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('The Crew\'s Actual Preference Gig');
     expect(announcement!.body).not.toContain('Untailored Comedy Night');
@@ -260,7 +260,7 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
 
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('Stafford Street Food Market');
     expect(announcement!.body).not.toContain('Personal-Taste Comedy Night');
@@ -300,7 +300,7 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
 
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('Riverside Evening Special');
     // Never the broken "We don't have any [placeholder] events" honest-empty message.
@@ -384,7 +384,7 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
 
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('Stafford Street Food Festival');
   });
@@ -485,7 +485,7 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
     // Never a fabricated event card...
-    expect(messages.some((m) => m.body.includes('Plot found something'))).toBe(false);
+    expect(messages.some((m) => m.body.includes(' — /plans/'))).toBe(false);
     // ...but real, live-reported gap this closes: "I made a new crew... nothing has been sent to
     // the crew yet. Why? It should be immediately" — a genuinely empty candidate pool (the Crew's
     // own explicit preference is now a hard filter, services/match.ts) used to mean total,

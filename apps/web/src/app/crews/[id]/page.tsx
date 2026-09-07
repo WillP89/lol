@@ -178,7 +178,14 @@ const COMPOSER_MAX_HEIGHT = 140;
 // instead of a plan card — caught via a real multi-user Playwright run, not code reading. See
 // docs/DECISIONS.md#crew-auto-recommendations.
 const MEMBER_PLAN_ANNOUNCEMENT = /^Sent "(.+)" to the Crew — \/plans\/([a-zA-Z0-9-]+)$/;
-const RECOMMENDATION_PLAN_ANNOUNCEMENT = /^Plot found something your Crew might like: "(.+)" — \/plans\/([a-zA-Z0-9-]+)$/;
+// Deliberately NOT anchored to one fixed lead-in phrase — services/plan.ts#
+// createRecommendationPlanForCrew now sends an honest, different lead-in ("There's not much in
+// your area right now, so how about this") whenever it had to fall back to a non-ticketed
+// candidate (see docs/DECISIONS.md#crew-recommendation-architecture). Still requires the exact
+// `: "..." — /plans/<slug>` shape, which MEMBER_PLAN_ANNOUNCEMENT's own format never produces
+// (no colon before its quoted title), so the two can't collide. See lib/messagePreview.ts's own
+// copy of this same regex/comment — kept in sync by hand, same as before this change.
+const RECOMMENDATION_PLAN_ANNOUNCEMENT = /^.+: "(.+)" — \/plans\/([a-zA-Z0-9-]+)$/;
 function matchPlanAnnouncement(body: string): { title: string; slug: string } | null {
   const memberMatch = body.match(MEMBER_PLAN_ANNOUNCEMENT);
   if (memberMatch) return { title: memberMatch[1], slug: memberMatch[2] };

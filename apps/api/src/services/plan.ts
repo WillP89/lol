@@ -147,6 +147,7 @@ export async function createRecommendationPlanForCrew(
   crewId: string,
   experienceId: string,
   systemUserId: string,
+  opts: { preface?: string } = {},
 ): Promise<{ plan: Plan; messageId: string }> {
   const experience = await prisma.experience.findUniqueOrThrow({ where: { id: experienceId } });
   const members = await prisma.crewMember.findMany({ where: { crewId, status: 'ACTIVE' } });
@@ -169,10 +170,18 @@ export async function createRecommendationPlanForCrew(
   // wrong, just missed in the icon-system audit because this is a chat message string, not a
   // rendered icon (the EventCard badge itself was already fixed to IconGathering). Client-side
   // regex match (RECOMMENDATION_PLAN_ANNOUNCEMENT) updated to match.
+  //
+  // `opts.preface`, when set, REPLACES the default "Plot found something..." lead-in — real,
+  // live product requirement: "if there's no ticketed events... send one as local as possible
+  // and preface it with 'there's not much in your area right now, so how about this'... show
+  // effort to match the user's requirements first, if not, preface whichever event it sends
+  // through." Passed by crewRecommendations.ts#generateRecommendationForCrew exactly when it had
+  // to fall back to a non-ticketed candidate — never set otherwise, so the normal, confident
+  // "Plot found something" framing is unchanged for every real ticketed match.
   const message = await sendSystemMessage(
     crewId,
     systemUserId,
-    `Plot found something your Crew might like: "${plan.title}" — /plans/${plan.publicSlug}`,
+    `${opts.preface ?? 'Plot found something your Crew might like'}: "${plan.title}" — /plans/${plan.publicSlug}`,
   );
 
   return { plan, messageId: message.id };
