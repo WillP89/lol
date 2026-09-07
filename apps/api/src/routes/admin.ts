@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { config } from '../lib/config';
 import { syncAllProviders, backfillImageQuality, backfillMissingImages, backfillVenueCities } from '../services/inventorySync';
+import { providerRegistry } from '../providers/registry';
 import { buildCanonicalKey } from '../services/entityResolution';
 import { computeQualityScore } from '../services/qualityScoring';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
@@ -32,9 +33,35 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
+  // Real gap this closes: registry.ts's own comment promised this endpoint would surface "is a
+  // real live provider actually configured, or is this city silently running on mock/OSM-only
+  // data" — but it only ever returned DB rows already synced, which is empty (or just whichever
+  // mock/OSM rows exist) whenever a key was never set, since an unconfigured adapter isn't even
+  // registered (see registry.ts's own `liveTicketedProviders`) and so never gets the chance to
+  // write a row at all. `registered` now reports the actual truth for every adapter this process
+  // currently has — live or mock, and exactly why (`healthCheck()`'s own real error, e.g.
+  // "TICKETMASTER_API_KEY not configured") — so "why is there no real boxing/MMA inventory
+  // anywhere" is answerable by hitting this endpoint, not by guessing at env vars.
   app.get('/providers', async (_request, reply) => {
     const providers = await prisma.provider.findMany({ include: { _count: { select: { listings: true } } } });
-    return reply.send({ providers });
+    const registered = await Promise.all(
+      providerRegistry.map(async (adapter) => ({
+        id: adapter.id,
+        displayName: adapter.displayName,
+        categories: adapter.categories,
+        isLive: adapter.isLive,
+        health: await adapter.healthCheck().catch((err) => ({ status: 'DOWN' as const, error: err instanceof Error ? err.message : String(err), checkedAt: new Date() })),
+      })),
+    );
+    // The categories NO currently-registered live adapter covers at all — e.g. SPORT has no
+    // source whatsoever unless Ticketmaster, Skiddle, or PredictHQ is configured with a real
+    // key; mock/OSM never cover it. Making this explicit is the whole point: a category with
+    // zero coverage here can never return real inventory, anywhere, for anyone, no matter how
+    // correct the matching/eligibility logic is — that's a data gap, not a bug to debug further.
+    const liveCategories = new Set(registered.filter((r) => r.isLive).flatMap((r) => r.categories));
+    const allCategories = [...new Set(providerRegistry.flatMap((a) => a.categories))];
+    const categoriesWithNoLiveSource = allCategories.filter((c) => !liveCategories.has(c));
+    return reply.send({ providers, registered, categoriesWithNoLiveSource });
   });
 
   app.post('/sync', async (request, reply) => {
