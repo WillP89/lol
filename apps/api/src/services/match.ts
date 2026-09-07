@@ -48,7 +48,11 @@ export const identityRanker: LearnedRanker = {
   },
 };
 
-const CANDIDATE_WINDOW_DAYS = 21;
+// Exported (not just a local const) so the admin inventory-probe diagnostic (routes/admin.ts)
+// can report, per real event a live provider returns, whether it actually falls inside the
+// window Crew recommendations search at all — rather than a second, hand-duplicated "21" that
+// could silently drift from the real value this file actually uses.
+export const CANDIDATE_WINDOW_DAYS = 21;
 const RESULT_COUNT = 3;
 // The onboarding default (see onboarding/page.tsx) — used whenever we need a radius and no
 // member has a real TasteProfile.travelRadiusMeters yet, so a brand-new Crew still gets a

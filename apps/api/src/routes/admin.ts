@@ -7,8 +7,9 @@ import { syncAllProviders, backfillImageQuality, backfillMissingImages, backfill
 import { providerRegistry } from '../providers/registry';
 import { buildCanonicalKey } from '../services/entityResolution';
 import { computeQualityScore } from '../services/qualityScoring';
-import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
+import { UK_FALLBACK_CENTER, resolveCityCenter } from '../data/ukPlaces';
 import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, getOrCreateSettings, explainCrewRecommendation, PLOT_SYSTEM_EMAIL, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from '../services/crewRecommendations';
+import { CANDIDATE_WINDOW_DAYS } from '../services/match';
 import { runMessageNotificationSweep, runMessageNotificationSweepIfDue, MESSAGE_NOTIFICATION_SWEEP_DUE_INTERVAL_MS } from '../services/messageNotifications';
 
 /**
@@ -62,6 +63,93 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const allCategories = [...new Set(providerRegistry.flatMap((a) => a.categories))];
     const categoriesWithNoLiveSource = allCategories.filter((c) => !liveCategories.has(c));
     return reply.send({ providers, registered, categoriesWithNoLiveSource });
+  });
+
+  /**
+   * Real, live-reported question this exists to answer directly rather than by guessing: "the
+   * Ticketmaster key is confirmed live — other events show up — so why does boxing/MMA never
+   * appear?" `/providers` above only ever confirms a key is CONFIGURED; it never actually asks
+   * a live provider what it currently has. This calls `fetchListings`+`mapToCanonical` on every
+   * currently-registered adapter directly — bypassing the DB, quality scoring, and dedup
+   * entirely — over a WIDE window (default 90 days, `days` query param), then reports each
+   * result's real classified category/genre and, critically, whether it actually falls inside
+   * `CANDIDATE_WINDOW_DAYS` (21 — the real window Crew recommendations and Explore search) or
+   * only within this endpoint's own wider probe window. A real event that exists on Ticketmaster
+   * but is scheduled 6 weeks out is a genuinely different problem (the recommendation window is
+   * too narrow for an infrequent category) from Ticketmaster having nothing at all — this
+   * endpoint is what tells the two apart instead of leaving it a guess.
+   */
+  app.get('/inventory-probe', async (request, reply) => {
+    const Schema = z.object({
+      city: z.string().default(UK_FALLBACK_CENTER.name),
+      days: z.coerce.number().int().positive().max(180).default(90),
+      // Free-text filter against the event name/venue/genre — case-insensitive substring match,
+      // e.g. `q=boxing` or `q=mma`. Optional; omitting it returns everything a provider has.
+      q: z.string().optional(),
+      provider: z.string().optional(), // filter to one adapter id, e.g. `ticketmaster`
+    });
+    const parsed = Schema.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const { city, days, q, provider } = parsed.data;
+
+    const center = resolveCityCenter(city);
+    const fromDate = new Date();
+    const toDate = new Date();
+    toDate.setDate(toDate.getDate() + days);
+    const recommendationWindowEnd = new Date();
+    recommendationWindowEnd.setDate(recommendationWindowEnd.getDate() + CANDIDATE_WINDOW_DAYS);
+
+    const adapters = providerRegistry.filter((a) => !provider || a.id === provider);
+    const perProvider = await Promise.all(
+      adapters.map(async (adapter) => {
+        if (!adapter.isLive) return { id: adapter.id, isLive: false, error: null, matched: 0, events: [] as unknown[] };
+        try {
+          const raw = await adapter.fetchListings({ city, fromDate, toDate });
+          const mapped = raw
+            .map((listing) => {
+              try {
+                return adapter.mapToCanonical(listing);
+              } catch (err) {
+                return { __error: err instanceof Error ? err.message : String(err) } as never;
+              }
+            })
+            .filter((m): m is ReturnType<typeof adapter.mapToCanonical> => !(m as { __error?: string }).__error);
+          const needle = q?.toLowerCase();
+          const filtered = needle
+            ? mapped.filter((m) => m.name.toLowerCase().includes(needle) || m.subcategories.some((s) => s.toLowerCase().includes(needle)) || m.description.toLowerCase().includes(needle))
+            : mapped;
+          return {
+            id: adapter.id,
+            isLive: true,
+            error: null,
+            fetchedTotal: mapped.length,
+            matched: filtered.length,
+            events: filtered
+              .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
+              .slice(0, 100)
+              .map((m) => ({
+                name: m.name,
+                category: m.category,
+                subcategories: m.subcategories,
+                venueName: m.venueName,
+                startsAt: m.startsAt,
+                withinRecommendationWindow: m.startsAt <= recommendationWindowEnd,
+                externalUrl: m.externalUrl,
+              })),
+          };
+        } catch (err) {
+          return { id: adapter.id, isLive: true, error: err instanceof Error ? err.message : String(err), matched: 0, events: [] as unknown[] };
+        }
+      }),
+    );
+
+    return reply.send({
+      city,
+      center,
+      probeWindowDays: days,
+      recommendationWindowDays: CANDIDATE_WINDOW_DAYS,
+      providers: perProvider,
+    });
   });
 
   app.post('/sync', async (request, reply) => {
