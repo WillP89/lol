@@ -7,7 +7,10 @@ import { haversineKm } from '../lib/geo';
 import { placesWithinRadiusKm } from '../data/ukPlaces';
 import type { Experience, Venue } from '@prisma/client';
 
-const EXPLORE_WINDOW_DAYS = 21;
+// See match.ts's own CANDIDATE_WINDOW_DAYS (kept in sync with this value deliberately) for the
+// full reasoning — real inventory is already synced 60 days out; this used to discard the last
+// 39 of those days at query time for no real product reason.
+const EXPLORE_WINDOW_DAYS = 45;
 const EXPLORE_LIMIT = 200;
 
 // Venue is a nullable FK on Experience at the schema level (see prisma/schema.prisma) even
