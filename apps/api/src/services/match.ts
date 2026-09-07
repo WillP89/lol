@@ -390,6 +390,33 @@ export async function scoreExperiencesForCrew(
     if (matchedCrewInterest) {
       score += 18;
       reasons.push({ code: 'crew_interest_preference', label: `Your Crew set ${interestLabel(matchedCrewInterest)} as a preference` });
+    } else if (categoriesImpliedByInterests.has(experience.category)) {
+      // REAL, LIVE-REPORTED BUG this closes: "no boxing or mma or street food or food festivals
+      // or wine bars events near Birmingham" for a Crew whose members had never set boxing/street
+      // food events elsewhere — real Birmingham inventory (OSM bars/restaurants, mock restaurant
+      // fixtures) WAS passing the hard filter above via `categoriesImpliedByInterests` (see its
+      // own comment), but scored ZERO taste-signal reason: `matchedCrewInterest` only ever fires
+      // on a LITERAL tag match, and every OTHER taste-signal reason in this function is either
+      // the Crew's own explicit WHOLE-CATEGORY pick (`crew_preference`, above) or an individual
+      // MEMBER's own unrelated personal taste (`category_affinity`/`interest_match`) — neither is
+      // what actually let this candidate through the hard filter. With no real reason attached,
+      // `hasTasteSignal` (crewRecommendations.ts) never counted it as taste-matched, so it could
+      // pass the candidate pool and STILL never be delivered — passing the filter and being
+      // eligible to send were never the same thing. Find which of the Crew's own interest picks
+      // implied this category and credit it honestly (smaller than a literal match — this is a
+      // territory-level inference, not "you asked for exactly this").
+      let impliedByCrewInterestId: string | null = null;
+      for (const interestId of crewInterestPreferences) {
+        const territory = TASTE_INTEREST_INDEX.get(interestId)?.territory;
+        if (territory && !TERRITORIES_REQUIRING_EXPLICIT_RELATION.has(territory.id) && territory.categories.includes(experience.category)) {
+          impliedByCrewInterestId = interestId;
+          break;
+        }
+      }
+      if (impliedByCrewInterestId) {
+        score += 15;
+        reasons.push({ code: 'crew_interest_preference', label: `Matches your Crew's ${interestLabel(impliedByCrewInterestId)} preference` });
+      }
     }
 
     // Free-text signals ("Fred again..") — matched LITERALLY against this Experience's own name/

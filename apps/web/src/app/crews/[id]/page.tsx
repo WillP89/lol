@@ -14,6 +14,7 @@ import { TabBarV2 } from '@/components/TabBarV2';
 import { PersonAvatar, CrewMark } from '@/components/Avatar';
 import { MediaUploadButton } from '@/components/MediaUploadButton';
 import { CrewTuneSheet } from '@/components/CrewTuneSheet';
+import { LocationSearch, type UkPlaceResult } from '@/components/LocationSearch';
 import { IconSpark, IconPlace, IconPoll, IconCalendar, IconFlag, IconLock, IconGathering, IconAddPerson } from '@/components/icons';
 import { identityPair } from '@/lib/identity';
 
@@ -136,6 +137,17 @@ interface CrewDetail {
   members: { role: string; user: { id: string; displayName: string | null; email: string; avatarUrl?: string | null } }[];
   dna: { confidence: string; topCategories: string[]; medianSpendMinor: number; bestNights: string[]; usualAreas: string[] } | null;
   plans: Plan[];
+  // This Crew's own explicit centre point (PATCH /crews/:id/location) — separate from any
+  // member's homeCity/homeLat/homeLng. Real, live-reported bug this exists to fix: a Crew
+  // created before this feature shipped (or one whose members never set a home location at
+  // all) silently fell back to a single hardcoded UK-wide default city for recommendation
+  // scoping, so "we don't have any [real, findable] events near you" could be flatly wrong —
+  // see docs/DECISIONS.md#crew-location. `defaultCity` is a display label only; `latitude`/
+  // `longitude` (nullable — unset means "derive from members' own locations", unchanged from
+  // before this feature) are what actually feeds match.ts's distance scoring.
+  defaultCity: string | null;
+  latitude: number | null;
+  longitude: number | null;
   // The caller's OWN per-Crew email-digest preference (PATCH /crews/:id/notifications) — see
   // that route's own comment for why this rides along on the same GET rather than a second
   // round-trip.
@@ -793,6 +805,16 @@ export default function CrewPage() {
   // UI consumer until this pass. Lazily loaded alongside recSettings.
   const [crewTaste, setCrewTaste] = useState<{ topInterests: { interestId: string; label: string; overlapCount: number; totalMembers: number; hasConflict: boolean }[] } | null>(null);
   const [tuneCrewOpen, setTuneCrewOpen] = useState(false);
+  // Real, live-reported bug this fixes: a Crew that predates the location feature (or whose
+  // members never set a home location) had no way to give Plot an explicit centre point at
+  // all — it silently fell back to a single hardcoded UK-wide default, which could make a
+  // genuinely well-covered city come back "we don't have any events near you". This lets any
+  // member set/change it after the fact, not just at Crew creation. See PATCH
+  // /crews/:id/location and match.ts's memberCoords.
+  const [editingLocation, setEditingLocation] = useState(false);
+  const [locationPick, setLocationPick] = useState<UkPlaceResult | null>(null);
+  const [savingLocation, setSavingLocation] = useState(false);
+  const [locationSaveError, setLocationSaveError] = useState<string | null>(null);
 
   // Real gap found via live multi-user testing: `crew` (and therefore `activePlan`/
   // `upcomingPlan`, the header's own member list/image, and the top-of-page context strip's
@@ -1370,6 +1392,27 @@ export default function CrewPage() {
     const current = recSettings.interestPreferences;
     const next = current.includes(interestId) ? current.filter((v) => v !== interestId) : [...current, interestId];
     patchRecSettings({ interestPreferences: next });
+  }
+  /** Sets/changes this Crew's own explicit location — PATCH /crews/:id/location. Any active
+   * member can call it (same rule as recommendation-settings), not just the owner. */
+  async function saveCrewLocation() {
+    if (!locationPick || !crew) return;
+    setSavingLocation(true);
+    setLocationSaveError(null);
+    try {
+      const res = await api.patch<{ crew: { defaultCity: string | null; latitude: number | null; longitude: number | null } }>(`/crews/${crewId}/location`, {
+        defaultCity: locationPick.name,
+        latitude: locationPick.lat,
+        longitude: locationPick.lng,
+      });
+      setCrew((prev) => (prev ? { ...prev, ...res.crew } : prev));
+      setEditingLocation(false);
+      setLocationPick(null);
+    } catch (err) {
+      setLocationSaveError(err instanceof ApiError ? err.message : 'Could not save that — check your connection and try again.');
+    } finally {
+      setSavingLocation(false);
+    }
   }
   async function copyInvite() {
     if (!inviteUrl) return;
@@ -2182,6 +2225,56 @@ export default function CrewPage() {
             </p>
             {recSettings.enabled && (
               <>
+                {/* Real, live-reported bug: a Crew that predates this feature (or whose members
+                    never set a home location) had no explicit centre point at all — Plot silently
+                    fell back to a single hardcoded UK-wide default, which could make a genuinely
+                    well-covered city come back "we don't have any events near you". This lets any
+                    member set/change it right here, not just at Crew creation. */}
+                <div className="v2-dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>Where</div>
+                {!editingLocation ? (
+                  <button
+                    type="button"
+                    onClick={() => { setEditingLocation(true); setLocationSaveError(null); }}
+                    className="v2-tap-feedback"
+                    style={{ width: '100%', textAlign: 'left', border: 'none', background: 'var(--v2-bg-deep)', color: 'var(--v2-ink)', fontSize: 13, fontWeight: 700, padding: '10px 12px', borderRadius: 12, cursor: 'pointer', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}
+                  >
+                    <span>{crew.defaultCity ? crew.defaultCity : 'Not set — using members’ own locations'}</span>
+                    <span className="v2-dim" style={{ fontSize: 11.5, fontWeight: 700 }}>{crew.defaultCity ? 'Change' : 'Set location'}</span>
+                  </button>
+                ) : (
+                  <div style={{ marginBottom: 14 }}>
+                    <LocationSearch placeholder="Search a town or city…" onSelect={(place) => setLocationPick(place)} initialValue={crew.defaultCity ?? ''} />
+                    {locationPick && (
+                      <p className="v2-muted" style={{ fontSize: 11.5, margin: '8px 0 0' }}>
+                        Selected: <strong>{locationPick.name}</strong>{locationPick.region ? `, ${locationPick.region}` : ''}
+                      </p>
+                    )}
+                    {locationSaveError && (
+                      <p style={{ color: 'var(--v2-error)', fontSize: 11.5, margin: '8px 0 0', fontWeight: 600 }}>{locationSaveError}</p>
+                    )}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                      <button
+                        type="button"
+                        onClick={saveCrewLocation}
+                        disabled={!locationPick || savingLocation}
+                        className="v2-btn v2-btn-brand v2-tap-feedback"
+                        style={{ flex: 1 }}
+                      >
+                        {savingLocation ? 'Saving…' : 'Save'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setEditingLocation(false); setLocationPick(null); setLocationSaveError(null); }}
+                        disabled={savingLocation}
+                        className="v2-btn v2-btn-ghost v2-tap-feedback"
+                        style={{ flex: 1 }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="v2-dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>How often</div>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
                   {[1, 2, 3, 4].map((n) => (
