@@ -154,7 +154,7 @@ describe('automatic Crew recommendations: real personalisation, not a fake carou
     const owner = await loginByEmail('rec-comedy-owner@plot-test.invalid');
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${comedyCrewId}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('Stafford Comedy Night');
 
@@ -172,7 +172,7 @@ describe('automatic Crew recommendations: real personalisation, not a fake carou
     const owner = await loginByEmail('rec-sport-owner@plot-test.invalid');
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${sportCrewId}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('Sunday 5-a-side');
 
@@ -207,7 +207,7 @@ describe('automatic Crew recommendations: real personalisation, not a fake carou
     const owner = await loginByEmail('rec-sport-owner@plot-test.invalid');
     const plansRes = await app.inject({ method: 'GET', url: `/crews/${sportCrewId}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = plansRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'))!;
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'))!;
     const slug = announcement.body.match(/\/plans\/([a-zA-Z0-9-]+)$/)![1];
 
     const planRes = await app.inject({ method: 'GET', url: `/plans/public/${slug}` });
@@ -231,7 +231,7 @@ describe('automatic Crew recommendations: real personalisation, not a fake carou
     const sportOwner = await loginByEmail('rec-sport-owner@plot-test.invalid');
     const sportMessagesRes = await app.inject({ method: 'GET', url: `/crews/${sportCrewId}/messages`, headers: { cookie: sportOwner.cookie } });
     const { messages } = sportMessagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'))!;
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'))!;
     const slug = announcement.body.match(/\/plans\/([a-zA-Z0-9-]+)$/)![1];
     const planRes = await app.inject({ method: 'GET', url: `/plans/public/${slug}` });
     const { recommendation } = planRes.json() as { recommendation: { id: string } | null };

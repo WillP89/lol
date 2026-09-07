@@ -5,6 +5,7 @@ import {
   derivePlanWorthiness,
   isPlanWorthyForCrew,
   deriveBookingType,
+  isTicketedEvent,
 } from '../../src/services/opportunityIntent';
 
 /**
@@ -136,5 +137,29 @@ describe('deriveBookingType', () => {
   test('an UNKNOWN-source listing with a real price is a booking link; without one, no booking required', () => {
     expect(deriveBookingType(experience({ tags: {}, priceMinMinor: 3000 }))).toBe('BOOKING_LINK_AVAILABLE');
     expect(deriveBookingType(experience({ tags: {}, priceMinMinor: null }))).toBe('NO_BOOKING_REQUIRED');
+  });
+});
+
+describe('isTicketedEvent — the actual "ticketed only" gate the product spec demands', () => {
+  test('a real EVENT_PROVIDER listing with a real price is ticketed', () => {
+    expect(isTicketedEvent(experience({ tags: { provider: 'ticketmaster' }, priceMinMinor: 2000 }))).toBe(true);
+    expect(isTicketedEvent(experience({ tags: { provider: 'skiddle' }, priceMinMinor: 1500 }))).toBe(true);
+  });
+
+  test('an EVENT_PROVIDER listing with no price (an RSVP, not a ticket) is NOT ticketed', () => {
+    expect(isTicketedEvent(experience({ tags: { provider: 'predicthq' }, priceMinMinor: null }))).toBe(false);
+  });
+
+  test('a PLACE_PROVIDER listing (a permanent venue, never a real ticket) is never ticketed, price or not', () => {
+    expect(isTicketedEvent(experience({ tags: { provider: 'openstreetmap' }, priceMinMinor: null }))).toBe(false);
+    expect(isTicketedEvent(experience({ tags: { provider: 'google_places' }, priceMinMinor: 5000 }))).toBe(false);
+  });
+
+  test('a sold-out listing is never ticketed, even from a real event provider with a real price', () => {
+    expect(isTicketedEvent(experience({ tags: { provider: 'ticketmaster' }, priceMinMinor: 2000, bookingStatus: 'SOLD_OUT' }))).toBe(false);
+  });
+
+  test('an UNKNOWN-source listing (manual curation, mock providers) is never ticketed, real price or not', () => {
+    expect(isTicketedEvent(experience({ tags: {}, priceMinMinor: 3000 }))).toBe(false);
   });
 });

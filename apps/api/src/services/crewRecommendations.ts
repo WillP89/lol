@@ -7,7 +7,7 @@ import { createRecommendationPlanForCrew } from './plan';
 import { sendSystemMessage } from './chat';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { interestLabel } from '@plot/shared';
-import { derivePlanWorthiness, deriveBookingType, deriveSourceKind } from './opportunityIntent';
+import { derivePlanWorthiness, deriveBookingType, deriveSourceKind, isTicketedEvent } from './opportunityIntent';
 import { Prisma } from '@prisma/client';
 import type { CrewRecommendation, CrewRecommendationStatus } from '@prisma/client';
 
@@ -194,6 +194,15 @@ function lowerFirst(s: string): string {
   return s.charAt(0).toLowerCase() + s.slice(1);
 }
 
+// Real, live product requirement, stated plainly: "if there's no ticketed events within the
+// distance... in-line with the preference, then send one as local as possible (closest match)
+// and preface it with 'there's not much in your area right now, so how about this' ... It needs
+// to show effort to match the users requirements first, if not, preface whichever event it sends
+// through." One shared string — the chat announcement (createRecommendationPlanForCrew) and the
+// stored `reasonText` (below) both use it, so the honest caveat shows up wherever a member might
+// see why this was sent, not just in the chat line.
+export const TICKETED_FALLBACK_PREFACE = "There's not much in your area right now, so how about this";
+
 /** A real, specific, multi-clause explanation — never the raw score, never a fabricated
  * "insight", every clause traceable to a reason the scorer actually produced (brief §"Why This")
  * example: not "Because your Crew likes music" (tells you nothing) but "2/3 of you are into UK
@@ -201,8 +210,10 @@ function lowerFirst(s: string): string {
  * "yeah, that actually is us." Picks the single strongest, most specific signal available as the
  * lead clause (a literal free-text match beats a specific-interest match beats a bare category
  * match — more specific claims are more trustworthy), then one supporting context clause. Never
- * asserts a code that isn't actually in `option.reasons`. */
-function explanationFor(option: MatchOption): string {
+ * asserts a code that isn't actually in `option.reasons`. `isTicketedFallback` prepends the same
+ * honest caveat `createRecommendationPlanForCrew`'s chat message uses — see
+ * `TICKETED_FALLBACK_PREFACE`'s own comment. */
+function explanationFor(option: MatchOption, opts: { isTicketedFallback?: boolean } = {}): string {
   const byCode = new Map(option.reasons.map((r) => [r.code, r]));
   const categoryLabel = option.experience.category.replace(/_/g, ' ').toLowerCase();
 
@@ -230,7 +241,8 @@ function explanationFor(option: MatchOption): string {
     secondary = `${byCode.get('high_availability')!.label.toLowerCase()} that night`;
   }
 
-  return secondary ? `${primary}, and ${secondary}.` : `${primary}.`;
+  const explanation = secondary ? `${primary}, and ${secondary}.` : `${primary}.`;
+  return opts.isTicketedFallback ? `${TICKETED_FALLBACK_PREFACE} — ${lowerFirst(explanation)}` : explanation;
 }
 
 async function resolveCrewCityForSweep(crewId: string): Promise<string> {
@@ -256,6 +268,27 @@ export interface CrewEligibilityResult {
   outcome: RecommendationOutcome | 'eligible';
   details: Record<string, unknown>;
   best?: MatchOption;
+  // True when `best` is NOT a real ticketed event and a real ticketed one genuinely wasn't
+  // available among this Crew's own eligible candidates — never true just because a ticketed
+  // one scored slightly lower. See generateRecommendationForCrew's own use of this: the honest
+  // "there's not much in your area right now" preface only appears when this is true, never
+  // fabricated, never omitted when it should show. See this file's own `pickBest` comment.
+  usedTicketedFallback?: boolean;
+}
+
+/** THE TIERING RULE this whole rebuild exists to enforce: "I need ticketed only events... don't
+ *  think we need to focus on unpaid, no ticket events" — a real ticket first, always, and a
+ *  non-ticketed fallback only when genuinely nothing ticketed clears the Crew's own eligibility
+ *  bar. Never a hard exclusion (the product spec explicitly wants an honest fallback, not
+ *  silence) — this picks the highest-scoring TICKETED candidate from `pool` when one exists,
+ *  and only falls back to the highest-scoring candidate overall (ticketed or not) when it
+ *  doesn't, flagging that fallback so the caller can preface the message honestly. Sorts its own
+ *  copy of `pool` — never assumes the caller already sorted it. */
+function pickBest(pool: MatchOption[]): { best: MatchOption | undefined; usedTicketedFallback: boolean } {
+  const sorted = [...pool].sort((a, b) => b.matchScore - a.matchScore);
+  const ticketed = sorted.find((o) => isTicketedEvent(o.experience));
+  if (ticketed) return { best: ticketed, usedTicketedFallback: false };
+  return { best: sorted[0], usedTicketedFallback: sorted.length > 0 };
 }
 async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: boolean } = {}): Promise<CrewEligibilityResult> {
   const settings = await getOrCreateSettings(crewId);
@@ -439,8 +472,13 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     // pool this function sees is already correctly scoped, so `inRadius` is now a safe last
     // resort here too, not a second place the same bug could sneak back in.
     const tasteMatchedPool = withTaste.length > 0 ? withTaste : inRadius;
-    const bestAvailable = [...tasteMatchedPool].sort((a, b) => b.matchScore - a.matchScore)[0];
-    return { outcome: 'eligible', details: { ...details, guaranteedFirst: true, guaranteedFirstHadTasteSignal: withTaste.length > 0 }, best: bestAvailable };
+    const { best: bestAvailable, usedTicketedFallback } = pickBest(tasteMatchedPool);
+    return {
+      outcome: 'eligible',
+      details: { ...details, guaranteedFirst: true, guaranteedFirstHadTasteSignal: withTaste.length > 0 },
+      best: bestAvailable,
+      usedTicketedFallback,
+    };
   }
 
   if (eligible.length === 0) {
@@ -450,7 +488,8 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     return { outcome: 'no_eligible_candidate', details };
   }
 
-  return { outcome: 'eligible', details, best: eligible[0] };
+  const { best, usedTicketedFallback } = pickBest(eligible);
+  return { outcome: 'eligible', details, best, usedTicketedFallback };
 }
 
 /**
@@ -533,14 +572,16 @@ export async function generateRecommendationForCrew(crewId: string, opts: { guar
   }
 
   const systemUserId = await getPlotSystemUserId();
-  const { plan, messageId } = await createRecommendationPlanForCrew(crewId, best.experience.id, systemUserId);
+  const { plan, messageId } = await createRecommendationPlanForCrew(crewId, best.experience.id, systemUserId, {
+    preface: evaluation.usedTicketedFallback ? TICKETED_FALLBACK_PREFACE : undefined,
+  });
 
   const recommendation = await prisma.crewRecommendation.create({
     data: {
       crewId,
       experienceId: best.experience.id,
       score: best.matchScore,
-      reasonText: explanationFor(best),
+      reasonText: explanationFor(best, { isTicketedFallback: evaluation.usedTicketedFallback }),
       status: 'SENT',
       planId: plan.id,
     },
@@ -551,7 +592,13 @@ export async function generateRecommendationForCrew(crewId: string, opts: { guar
     { crewId, experienceId: best.experience.id, score: best.matchScore },
     { crewId, planId: plan.id },
   );
-  logRecommendationOutcome(crewId, 'delivered', { experienceId: best.experience.id, score: best.matchScore, planId: plan.id });
+  logRecommendationOutcome(crewId, 'delivered', {
+    experienceId: best.experience.id,
+    score: best.matchScore,
+    planId: plan.id,
+    isTicketedEvent: isTicketedEvent(best.experience),
+    usedTicketedFallback: Boolean(evaluation.usedTicketedFallback),
+  });
   void messageId; // kept on the created CrewMessage itself; not stored redundantly here
 
   return recommendation;

@@ -49,8 +49,12 @@ import type { Experience, ExperienceCategory } from '@prisma/client';
 export const PLACE_PROVIDER_IDS = new Set(['openstreetmap', 'fhrs', 'google_places', 'foursquare']);
 
 // Real ticketed/RSVP'd event sources — every row carries a genuinely dated, provider-supplied
-// occasion, not a computed placeholder.
-export const EVENT_PROVIDER_IDS = new Set(['ticketmaster', 'skiddle', 'predicthq', 'eventbrite']);
+// occasion, not a computed placeholder. `mock_ticketing` is the test-environment stand-in for
+// Ticketmaster/DICE (see providers/mock/ticketingProvider.ts's own header — "shaped like a real
+// ticketing aggregator response", real price ranges, a real sold-out percentage) — recognised
+// here so the ticketed-first tiering (crewRecommendations.ts) and its own test suite exercise
+// the exact same real logic a live key would, rather than a second parallel test-only rule.
+export const EVENT_PROVIDER_IDS = new Set(['ticketmaster', 'skiddle', 'predicthq', 'eventbrite', 'mock_ticketing']);
 
 export type SourceKind = 'EVENT_PROVIDER' | 'PLACE_PROVIDER' | 'UNKNOWN';
 
@@ -226,4 +230,20 @@ export function deriveBookingType(
   // exists, so this is closer to a genuine booking than a bare walk-in, but never claimed as a
   // live ticket.
   return experience.priceMinMinor !== null ? 'BOOKING_LINK_AVAILABLE' : 'NO_BOOKING_REQUIRED';
+}
+
+/**
+ * Real, live product requirement, stated plainly: "I need ticketed only events... don't think we
+ * need to include or focus on unpaid, no ticket events. This kills the app a bit for me." A
+ * genuine ticket — a real dated occasion (`EVENT_PROVIDER`) with a real price — is the strongest
+ * possible proof this is worth interrupting a Crew's chat for: someone has to actually pay and
+ * show up, which a permanent place listing or a free/undated one can never demonstrate. Used as
+ * a PREFERENCE (a real scoring boost, see match.ts) and a TIERING rule (crewRecommendations.ts
+ * picks from the ticketed subset first, only falling back to the best non-ticketed eligible
+ * candidate — clearly prefaced when it does — when zero ticketed options exist) — never a hard
+ * exclusion, since the honest fallback the product spec explicitly asks for ("send one as local
+ * as possible... preface it") requires non-ticketed candidates to still be reachable when that's
+ * genuinely all that exists near this Crew right now. */
+export function isTicketedEvent(experience: Pick<Experience, 'bookingStatus' | 'priceMinMinor' | 'tags'>): boolean {
+  return deriveBookingType(experience) === 'TICKET_AVAILABLE';
 }

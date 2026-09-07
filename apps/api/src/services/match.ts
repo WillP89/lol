@@ -11,7 +11,7 @@ import { sendExperienceToCrew } from './plan';
 import { experienceInterestTags, experienceMatchesFreeText, categoryToTasteKey, type FreeTextSignal } from './tasteSignals';
 import { assertCrewPreferencesSet } from './crewPreferencesGate';
 import { interestLabel, TASTE_INTEREST_INDEX, UNAMBIGUOUS_CATEGORIES, TERRITORIES_REQUIRING_EXPLICIT_RELATION, RELATED_INTERESTS } from '@plot/shared';
-import { isPlanWorthyForCrew } from './opportunityIntent';
+import { isPlanWorthyForCrew, isTicketedEvent } from './opportunityIntent';
 import type { Experience, TasteProfile, Plan, Venue } from '@prisma/client';
 
 export interface MatchReason {
@@ -596,6 +596,22 @@ export async function scoreExperiencesForCrew(
 
     // Quality/freshness bonus, small — a tiebreaker, not a driver.
     score += experience.qualityScore * 0.1;
+
+    // REAL, LIVE PRODUCT REQUIREMENT: "I need ticketed only events... don't think we need to
+    // include or focus on unpaid, no ticket events. This kills the app a bit for me." A real
+    // ticket is the strongest evidence a candidate is actually worth interrupting a Crew's chat
+    // for — someone has to pay and show up, which a permanent place listing (Caffè Nero's own
+    // failure mode) or an undated free listing can never demonstrate. A genuine preference, not
+    // a hard exclusion: crewRecommendations.ts's own tiering (ticketed candidates considered
+    // first, a non-ticketed one only ever chosen — and honestly prefaced — when literally
+    // nothing ticketed clears every other gate) is what actually enforces "ticketed first,
+    // never silently"; this score bump is what makes the SAME preference hold for the manual
+    // "Find us something"/"Suggest something" flows' own top-3 ranking, so a real ticket wins
+    // there too, not just in the automatic sweep's own separate tiering logic.
+    if (isTicketedEvent(experience)) {
+      score += 14;
+      reasons.push({ code: 'ticketed_event', label: 'Real tickets available' });
+    }
 
     scored.push({
       experience,

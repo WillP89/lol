@@ -152,7 +152,7 @@ describe('a Crew\'s own explicit location finds real inventory near it, however 
 
     const messagesRes = await app.inject({ method: 'GET', url: `/crews/${crew.id}/messages`, headers: { cookie: owner.cookie } });
     const { messages } = messagesRes.json() as { messages: { body: string }[] };
-    const announcement = messages.find((m) => m.body.includes('Plot found something'));
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toContain('Real London Street Food Market');
     // Never the honest-empty message either — real inventory genuinely exists here.
