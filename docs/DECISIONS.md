@@ -2213,3 +2213,148 @@ pexels.com/api and set `PEXELS_API_KEY` in Render's environment variables, then 
 the next scheduled `backfillMissingImages` run or trigger one immediately via
 `POST /admin/missing-image-backfill` (`x-admin-key` header, same admin gate as every other admin
 route).
+
+## #crew-recommendation-architecture
+
+**The live-reported failure this rebuild traces back to**: a brand-new Crew — Stafford, 25-mile
+radius, specific Crew preferences set — had Plot automatically send **Caffè Nero in London** as
+its recommendation. Not a Caffè-Nero-specific bug and not patched as one (explicitly directed
+not to) — two independent, real architectural gaps, both root-caused and fixed:
+
+### Failure 1 — the location "hard gate" wasn't actually hard
+
+`services/match.ts#scoreExperiencesForCrew` computes `withinRadius: boolean | null` per
+candidate — `null` meaning "distance genuinely unknown" (no venue coordinates, or no location
+signal to measure from at all), explicitly documented as "never treated as near or far." But the
+automatic engine's own filter (`services/crewRecommendations.ts#evaluateCrewEligibility`) read
+`o.withinRadius !== false` — which is **true** for `null` — so an unknown distance silently
+passed the radius gate exactly like a confirmed-near one. Whenever a Crew's own explicit location
+hadn't yet been read at the moment scoring ran (or no member had a home location set either), the
+entire candidate pool — ordered by quality score alone, zero geographic relevance — became
+"eligible," and a merely quality-decent, real Experience located hundreds of miles away could
+win. Two fixes, not a patch:
+
+1. **The filter itself**: `crewRecommendations.ts` now requires `withinRadius === true` — a
+   candidate must be **positively confirmed** in-radius to reach the automatic engine at all.
+   Fail closed on unknown, never fail open, on a hard eligibility gate.
+2. **The anchor itself**: `Crew.latitude`/`.longitude`, once set, is now the **sole** distance
+   anchor for this calculation — never blended with an individual member's personal home
+   location the way it used to be (member homes are still the fallback, exactly as before, when
+   the Crew has no explicit location of its own — see `dispersedCrewRadius.test.ts`, unaffected).
+   Real bug this specifically closes: one member's own home happening to be near an out-of-area
+   candidate could previously make it read as "in radius" for the WHOLE Crew, even though the
+   Crew had explicitly declared it was based somewhere else — the opposite of what "setting the
+   location should be part of creating a group" was supposed to guarantee.
+3. **A new absolute precondition**: `evaluateCrewEligibility` now refuses to even attempt an
+   automatic recommendation until a real location anchor exists (`outcome: 'location_not_set'`)
+   — same status as the existing `preferences_not_set` gate. "No ranking weight capable of
+   overcoming an unknown location" is enforced by never scoring against one in the first place,
+   not by hoping every downstream filter remembers to treat `null` correctly.
+4. **The manual flows get the Crew's own radius too**: `scoreExperiencesForCrew` (shared by
+   "Find us something"/"Suggest something" as well as the automatic sweep) used to only receive
+   the Crew's own `travelRadiusMeters` setting when the automatic engine explicitly passed it —
+   the two manual flows silently fell through to a member-taste-profile median or the generic
+   onboarding default instead, meaning a Crew's own explicit 25-mile setting could be ignored by
+   its own members manually asking Plot to look. Now the Crew's own setting is the real default
+   for every caller, an explicit override (still used by the automatic engine's own diagnostics)
+   the only thing that can supersede it.
+
+Regression coverage: `test/crewRecommendationHardGates.test.ts` — the literal "Caffè Nero in
+London" case, the location gate proven independently of plan-worthiness (a genuinely plan-worthy
+London festival, still rejected purely for distance, with the debugger naming
+`OUTSIDE_CREW_RADIUS`), real distance-precision proof (Stafford → Birmingham centre is genuinely
+~24 miles — deliberately tested right at the edge of a 25-mile radius, not just an obviously-far
+case), a genuinely-nearby Staffordshire venue proven eligible, and the `location_not_set`
+precondition itself.
+
+### Failure 2 — a genuine "place exists nearby" was never the same thing as a "plan"
+
+Even a candidate that IS in-radius and category-matching can still be the wrong thing to push
+into a Crew's chat unprompted: "there's a Caffè Nero nearby" is not a reason a friendship group
+makes a plan. New module `services/opportunityIntent.ts` classifies every Crew-facing candidate
+on two internal (never user-facing — no fabricated numeric score shown to anyone) axes:
+
+- **`SourceKind`** — `EVENT_PROVIDER` (Ticketmaster/Skiddle/PredictHQ/Eventbrite — a real, dated,
+  ticketed/RSVP'd occasion) vs. `PLACE_PROVIDER` (OpenStreetMap/FHRS/Google Places/Foursquare —
+  a permanent venue listing with a *synthetic* `startsAt`, computed by each adapter's own
+  `nextSensibleTime()`, never a genuine occasion) vs. `UNKNOWN` (manual curation, every mock
+  provider — an operator-vetted or test fixture, deliberately never penalised the way an
+  unreviewed place-provider row is). A real, already-present fact (`Experience.tags.provider`),
+  not a guess or an LLM classification.
+- **`PlanWorthiness`** (`VERY_LOW`..`VERY_HIGH`) — a category baseline (FESTIVAL/LIVE_MUSIC/
+  COMEDY/THEATRE/SPORT default high; RESTAURANT/BAR/CLUBBING/FITNESS/COMMUNITY default medium),
+  downgraded to LOW when a `PLACE_PROVIDER` source gives zero specific reason to go (no
+  festival/market/tasting/pop-up/etc. wording in the candidate's own name/description), restored
+  to HIGH when that specialness signal genuinely exists in the candidate's own text, and
+  force-floored to `VERY_LOW` — regardless of anything else — for a well-known UK chain name
+  (Caffè Nero, Starbucks, a fast-food chain; deliberately NOT a broad word like "coffee" or
+  "pub", and deliberately NOT flagging real group-dinner chains like Wagamama/Nando's).
+
+`MIN_PLAN_WORTHINESS_FOR_CREW = 'MEDIUM'` is a **hard pre-scoring filter** on every Crew-facing
+flow that shares `scoreExperiencesForCrew` — the automatic sweep AND the manual "Find us
+something"/"Suggest something" flows, since all three are Plot placing a bet into a Crew's own
+conversation, the same bar. Deliberately does **not** touch Explore (`services/explore.ts`) or
+Home (`services/personalHome.ts`) — those stay the broad, intentional-search and personal-taste
+surfaces the product model calls for; a place database is not an event recommendation engine
+*for the Crew engine specifically*, but it's still real, valid Plot inventory everywhere else.
+
+Regression coverage: `test/unit/opportunityIntent.test.ts` (pure classification logic) and the
+second half of `test/crewRecommendationHardGates.test.ts` (a Caffè Nero seeded genuinely
+*inside* the Crew's own radius — isolating plan-worthiness from location entirely — is still
+excluded, while a real specialness-flagged candidate the same distance away is not).
+
+### The debugger
+
+`services/crewRecommendations.ts#evaluateCrewEligibility` now returns a `topCandidates` trail
+(top 10 by score across the whole scored pool) alongside its outcome — per candidate: distance,
+source kind, plan-worthiness (+ its own reasons), booking type, match score, and every reason it
+was rejected (`OUTSIDE_CREW_RADIUS` / `DISTANCE_UNKNOWN` / `NO_TASTE_SIGNAL` /
+`BELOW_CONFIDENCE_THRESHOLD` / `ALREADY_RECOMMENDED_OR_SHARED`). Surfaced today via the existing
+`GET /admin/users/lookup?email=...` diagnostic (each Crew's `rightNow.topCandidates`) — the same
+endpoint already used to answer "why hasn't this Crew gotten a recommendation yet," now able to
+answer "why was THIS specific candidate rejected" too, without inventing a second endpoint.
+
+### What this pass deliberately did NOT build, and why
+
+The live instruction that triggered this rebuild asked for a genuinely large rearchitecture —
+booking-funnel analytics (impression → response → lock → booking-click → confirmed booking),
+GMV/revenue-per-locked-plan tracking, a fresh from-scratch pass researching every UK "high-intent
+bookable" inventory source, and a formal outcome-learning loop beyond what already exists. Scoped
+honestly rather than half-built across all of it:
+
+- **Outcome learning already exists** (`match.ts#buildLearningBias`) — a Crew's own past
+  MORE_LIKE_THIS/NOT_FOR_US/WRONG_VIBE responses already bias its own future scoring. What's
+  NOT built: the richer "this Crew says live music but repeatedly books UK rap under £40 on
+  Saturdays" pattern-mining the spec describes — a real, larger project once there's enough
+  real booking-click/lock history to mine, not something to fabricate signal for now.
+- **Funnel/GMV analytics**: `RecommendationShown`/`CrewRecommendationDelivered`/
+  `CrewRecommendationResponded` events already exist (`services/analytics.ts`) and already cover
+  impression → response. Lock → booking-click → confirmed-booking attribution, and a real
+  GMV/revenue-per-locked-plan rollup, do not exist yet — a genuine, scoped follow-up (the
+  `Booking` model already has the fields to support it; nothing here needed to change to make
+  that true).
+- **Fresh inventory research** (product spec Parts 19–21): the honest state of UK "genuinely
+  self-serve, high-intent, bookable" event sources was already thoroughly researched across
+  `docs/providers/ticketing.md`, `restaurants.md`, and `food-and-places.md` over several earlier
+  passes — DICE, Resident Advisor, Songkick, Bandsintown, Meetup, OpenTable, Resy, SevenRooms are
+  all real, valuable inventory this product genuinely wants, and all are partner-gated, not
+  self-serve. Re-litigating that research from scratch was out of scope for this pass; what
+  WOULD change the picture is exactly what the table below is for.
+
+### Providers requiring a partnership are a business-development action, not "not shippable"
+
+| Provider | Who to contact | Access needed | Why it matters | Inventory it adds | Commercial potential |
+|---|---|---|---|---|---|
+| **OpenTable** | OpenTable for Restaurants partnerships (via their developer/partner portal) | Partner API agreement — the Availability API is not self-serve | The single biggest real-time RESERVABLE_VENUE gap this product has — actual live table availability, not a synthetic "next sensible time" | Real bookable restaurant tables, UK-wide, with live slot availability | Real affiliate/booking-fee terms exist for OpenTable partners — genuine GMV potential once integrated |
+| **Resy** | Resy for Restaurants / American Express (Resy's parent) partnerships | Partner API agreement | Same shape of gap as OpenTable, different (often more premium/independent) restaurant coverage | Live bookable tables, especially strong in higher-end UK dining | Partner commercial terms, unconfirmed without direct contact |
+| **SevenRooms** | SevenRooms partnerships/API team | Partner API agreement | A genuinely different reservation platform's own independent venue base (many bars/clubs, not just restaurants) | Live bookable tables + events at SevenRooms venues | Partner commercial terms, unconfirmed without direct contact |
+| **DICE** | DICE for Venues / DICE partnerships | Partner API agreement (their public site offers no self-serve developer key) | The dominant UK independent-venue/grassroots gig ticketing platform — exactly the "small local gig" inventory Ticketmaster/Skiddle systematically under-cover | Real ticketed gigs at independent UK venues, especially strong for exactly the drill/UK rap/underground scene this product's own test Crews are built around | DICE runs its own ticketing fees — a real affiliate conversation worth having directly |
+| **Resident Advisor** | RA's own advertising/partnerships contact | Partner API agreement (no public self-serve key) | The dominant electronic/club-night listings platform in the UK | Real club nights, warehouse parties, electronic lineups | Ticket-link affiliate potential, unconfirmed without direct contact |
+| **Songkick** | Songkick (owned by Warner Music Group) partnerships | Partner API agreement (their public API was deprecated for new self-serve keys) | Broad concert-listing aggregation across many venues/promoters at once | Concert listings this product doesn't otherwise reach | Historically had an affiliate ticket-link program — worth re-confirming current terms |
+| **Bandsintown** | Bandsintown partnerships (email-based application, not self-serve) | A manually-issued `app_id` | Artist-centric tour-date coverage — strong for "an artist a member follows is playing near here" | Real tour dates, cross-referenced against artist follows | Historically affiliate-friendly; needs a direct conversation to confirm |
+| **Meetup** | Meetup's own Pro API / partnerships team | A commercial "Pro API" agreement (general free access closed years ago) | Real community/interest-group events (the genuinely "oddball local" inventory outside ticketed nightlife/dining) | Grassroots meetups, hobby groups, community events | Not a ticketing platform — no commission model, purely a coverage play |
+
+Every row above is a real, concrete ask (who, what access, why) rather than a dead end — pursuing
+any of them is a genuine company decision (and, for most, a commercial-terms conversation), not
+an engineering task this session can complete unilaterally. See each provider's own file
+(`docs/providers/ticketing.md`, `restaurants.md`) for the fuller research trail already on record.
