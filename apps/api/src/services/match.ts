@@ -409,17 +409,39 @@ export async function scoreExperiencesForCrew(
       // eligible to send were never the same thing. Find which of the Crew's own interest picks
       // implied this category and credit it honestly (smaller than a literal match — this is a
       // territory-level inference, not "you asked for exactly this").
+      //
+      // FIFTH real, live-reported bug this closes — the SAME "because you're into drill" mistake
+      // as the music fix, just for SPORT: this branch used to always name the FIRST qualifying
+      // crew interest specifically ("Matches your Crew's Boxing preference") even when the
+      // candidate had zero textual evidence of being that specific sport — a boxing label on a
+      // rugby match is exactly as dishonest as a drill label on Sam Smith. Fixed the same way:
+      // only name a specific interest when `tags` (the candidate's own real genre/subcategory
+      // text) genuinely supports it — either the interest itself, or a real, curated sibling
+      // (`RELATED_INTERESTS` — e.g. a Crew picked MMA, this is literally tagged Boxing, real fan
+      // overlap, worth an honest cross-suggestion). With no textual evidence for anything specific,
+      // fall back to a genuinely honest, non-specific territory-level label ("Matches your Crew's
+      // Sport interests") — the eligibility (this candidate is shown at all) is unchanged, only
+      // the CLAIM the caption makes is now never bigger than the real evidence backs.
       let impliedByCrewInterestId: string | null = null;
+      let relatedSiblingId: string | null = null;
+      let territoryLabelForGenericFallback: string | null = null;
       for (const interestId of crewInterestPreferences) {
         const territory = TASTE_INTEREST_INDEX.get(interestId)?.territory;
-        if (territory && !TERRITORIES_REQUIRING_EXPLICIT_RELATION.has(territory.id) && territory.categories.includes(experience.category)) {
+        if (!territory || TERRITORIES_REQUIRING_EXPLICIT_RELATION.has(territory.id) || !territory.categories.includes(experience.category)) continue;
+        if (!territoryLabelForGenericFallback) territoryLabelForGenericFallback = territory.label;
+        const sibling = (RELATED_INTERESTS[interestId] ?? []).find((rel) => tags.includes(rel));
+        if (sibling) {
           impliedByCrewInterestId = interestId;
+          relatedSiblingId = sibling;
           break;
         }
       }
-      if (impliedByCrewInterestId) {
+      if (relatedSiblingId && impliedByCrewInterestId) {
+        score += 16;
+        reasons.push({ code: 'crew_interest_preference', label: `You said ${interestLabel(impliedByCrewInterestId)} — this is ${interestLabel(relatedSiblingId)}, closely related` });
+      } else if (territoryLabelForGenericFallback) {
         score += 15;
-        reasons.push({ code: 'crew_interest_preference', label: `Matches your Crew's ${interestLabel(impliedByCrewInterestId)} preference` });
+        reasons.push({ code: 'crew_interest_preference', label: `Matches your Crew's ${territoryLabelForGenericFallback} interests` });
       }
     }
 

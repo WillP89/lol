@@ -361,4 +361,14 @@ export const RELATED_INTERESTS: Readonly<Record<string, readonly string[]>> = {
   grime: ['drill'],
   hip_hop: ['rnb'],
   rnb: ['hip_hop'],
+  // Real, live-reported ask: a Crew that picked MMA sees a genuine boxing card come up (both
+  // combat sports, real fan overlap) — Plot should say so honestly ("you said MMA — this is
+  // boxing, closely related"), not either hide it or silently caption it as if it were literally
+  // MMA. `sport` itself stays a normal UNAMBIGUOUS_CATEGORIES territory (not moved into
+  // TERRITORIES_REQUIRING_EXPLICIT_RELATION — unlike music's ~30 genres, its own hard eligibility
+  // gate is still just one category, SPORT, and real provider genre tags are reliably present —
+  // see match.ts's own consumer of this entry for exactly how it's used to keep the REASON
+  // honest without narrowing which real inventory a Crew can be shown at all).
+  boxing: ['mma'],
+  mma: ['boxing'],
 };
