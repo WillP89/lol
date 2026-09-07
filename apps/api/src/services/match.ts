@@ -11,6 +11,7 @@ import { sendExperienceToCrew } from './plan';
 import { experienceInterestTags, experienceMatchesFreeText, categoryToTasteKey, type FreeTextSignal } from './tasteSignals';
 import { assertCrewPreferencesSet } from './crewPreferencesGate';
 import { interestLabel, TASTE_INTEREST_INDEX, UNAMBIGUOUS_CATEGORIES, TERRITORIES_REQUIRING_EXPLICIT_RELATION, RELATED_INTERESTS } from '@plot/shared';
+import { isPlanWorthyForCrew } from './opportunityIntent';
 import type { Experience, TasteProfile, Plan, Venue } from '@prisma/client';
 
 export interface MatchReason {
@@ -24,12 +25,26 @@ export interface MatchOption {
   reasons: MatchReason[];
   availableMemberCount: number;
   totalMemberCount: number;
-  // null = distance couldn't be computed (no venue coords, or no member has a home location
-  // set) — genuinely unknown, never treated as "near" or "far". Used by the automatic
-  // recommendation engine (services/crewRecommendations.ts) to hard-filter on travel radius;
-  // the manual "Find us something"/"Suggest something" flows only use it as a soft scoring
-  // input, since a member actively browsing should still be able to see something further out.
+  // null = distance couldn't be computed (no venue coords, or no location anchor at all) —
+  // genuinely unknown, never treated as "near" or "far". THE FIX for the "Caffè Nero in
+  // London sent to a 25-mile Stafford Crew" bug: the automatic recommendation engine
+  // (services/crewRecommendations.ts) used to hard-filter with `!== false`, which treats this
+  // `null` exactly like "near" — an unknown distance silently passed the radius gate instead of
+  // being rejected. Fixed there to require `=== true` (fail closed on unknown), and fixed here
+  // at the source: when the Crew has its own explicit location set (Crew.latitude/longitude),
+  // that is now the SOLE anchor for this calculation — never blended with a member's personal
+  // home location, so one member happening to live near an out-of-area candidate can no longer
+  // "rescue" it for a Crew that has explicitly declared where IT is. See
+  // docs/DECISIONS.md#crew-recommendation-architecture. The manual "Find us something"/"Suggest
+  // something" flows still use this as a soft scoring input only (a member actively browsing can
+  // see something further out) — the automatic engine is the one that must never be wrong here.
   withinRadius: boolean | null;
+  // The real, computed distance in miles from this Crew's location anchor to the candidate's
+  // venue — null under the exact same "genuinely unknown" conditions as `withinRadius`. Exposed
+  // (not just folded into a reason label) so the recommendation debugger
+  // (GET /admin/crews/:id/explain-recommendation) and the client can show a real "X miles away",
+  // never a fabricated one — product spec's own "HOW FAR?" requirement.
+  distanceMiles: number | null;
 }
 
 /**
@@ -125,7 +140,7 @@ export async function scoreExperiencesForCrew(
     // the automatic-sweep path. A Crew with no settings row yet (never touched the Recommendation
     // settings UI) simply has no preference — this reads, never creates, so a brand-new Crew's
     // first score isn't blocked on a settings write.
-    prisma.crewRecommendationSettings.findUnique({ where: { crewId }, select: { categoryPreferences: true, interestPreferences: true } }),
+    prisma.crewRecommendationSettings.findUnique({ where: { crewId }, select: { categoryPreferences: true, interestPreferences: true, travelRadiusMeters: true } }),
     // THE LEARNING LOOP (brief §"PASS teaches Plot nothing" — this is the fix). Every past
     // response this Crew has given a CrewRecommendation, joined to what that Experience actually
     // was — turned into a per-category/per-interest bias applied to THIS scoring pass only (never
@@ -151,21 +166,31 @@ export async function scoreExperiencesForCrew(
     .filter((tp): tp is TasteProfile => Boolean(tp));
   // Never expose a member's precise home coordinates to the Crew (see docs/DECISIONS.md#uk-
   // wide-location) — this stays server-side, used only to compute a distance, never returned.
+  //
+  // REAL, LIVE-REPORTED BUG this closes ("Crew: STAFFORD, 25-mile radius... Plot sent CAFFÈ
+  // NERO IN LONDON"): a Crew's own explicit location used to be folded IN ADDITION TO every
+  // member's personal home location, all treated as one undifferentiated pool of "reference
+  // points, nearest wins". That meant a single member whose own personal home happened to be
+  // near an out-of-area candidate could make it read as "in radius" for the WHOLE Crew, even
+  // though the Crew itself had explicitly declared it was based somewhere else entirely — the
+  // opposite of what "setting the location... should be part of creating a group" was supposed
+  // to guarantee. Once a Crew has its own explicit location, that IS the Crew's answer to "where
+  // are we" — same principle already applied to categoryPreferences/interestPreferences (an
+  // explicit Crew-level pick is authoritative, member signal still ranks WITHIN it, never
+  // overrides it). Member home locations remain the fallback ONLY when the Crew has no explicit
+  // location of its own — exactly the pre-existing behaviour for a Crew that never set one (see
+  // dispersedCrewRadius.test.ts).
+  const crewHasExplicitLocation = crewLocation !== null && crewLocation.latitude !== null && crewLocation.longitude !== null;
   const memberCoords: { homeLat: number; homeLng: number }[] = [];
-  for (const m of members) {
-    const p = m.user.profile;
-    if (p && p.homeLat !== null && p.homeLng !== null) {
-      memberCoords.push({ homeLat: p.homeLat, homeLng: p.homeLng });
+  if (crewHasExplicitLocation) {
+    memberCoords.push({ homeLat: crewLocation!.latitude!, homeLng: crewLocation!.longitude! });
+  } else {
+    for (const m of members) {
+      const p = m.user.profile;
+      if (p && p.homeLat !== null && p.homeLng !== null) {
+        memberCoords.push({ homeLat: p.homeLat, homeLng: p.homeLng });
+      }
     }
-  }
-  // The Crew's own explicit location, folded into the same reference-point pool the geographic
-  // candidate prefilter and the final nearest-distance scoring both already use below — setting
-  // it works exactly like adding one more person who lives right there: it can make a candidate
-  // near that point "in radius" even when literally no member's own home is nearby, without
-  // displacing any member's own real location as a signal (see Crew.latitude/.longitude's own
-  // schema comment for the live product requirement this closes).
-  if (crewLocation && crewLocation.latitude !== null && crewLocation.longitude !== null) {
-    memberCoords.push({ homeLat: crewLocation.latitude, homeLng: crewLocation.longitude });
   }
 
   const windowStart = new Date();
@@ -236,7 +261,19 @@ export async function scoreExperiencesForCrew(
   }
 
   const dnaTopCategories = new Set((dna?.topCategories as string[] | undefined) ?? []);
+  // REAL GAP this closes: the Crew's own explicit `travelRadiusMeters` (product spec's own
+  // "Crew location + travel radius are known") used to only ever reach scoring via the
+  // AUTOMATIC engine explicitly passing it as `radiusMetersOverride` — the manual "Find us
+  // something"/"Suggest something" flows (this function's other two callers) never read it at
+  // all, silently falling all the way through to a member-taste-profile median or the generic
+  // onboarding default instead. A Crew that explicitly set a 25-mile radius could still have its
+  // own manual "Find us something" evaluate against the unrelated ~15-mile onboarding default —
+  // found writing this rebuild's own location regression tests. `opts.radiusMetersOverride`
+  // still wins when a caller passes one explicitly (evaluateCrewEligibility does, for its own
+  // diagnostic clarity); everyone else now gets the Crew's own real setting as the default,
+  // before ever falling back to member taste profiles or the generic default.
   const radiusMeters = opts.radiusMetersOverride
+    ?? recommendationSettings?.travelRadiusMeters
     ?? (medianOf(tasteProfiles.map((tp) => tp.travelRadiusMeters).filter((r) => r > 0)) || DEFAULT_RADIUS_METERS);
   const radiusMiles = radiusMeters / 1609.34;
 
@@ -310,7 +347,7 @@ export async function scoreExperiencesForCrew(
   }
 
   const crewHasExplicitPreference = crewCategoryPreferences.size > 0 || crewInterestPreferences.size > 0;
-  const filteredCandidates = !crewHasExplicitPreference
+  const preferenceFilteredCandidates = !crewHasExplicitPreference
     ? candidates
     : candidates.filter((experience) => {
         if (crewCategoryPreferences.has(experience.category)) return true;
@@ -327,6 +364,20 @@ export async function scoreExperiencesForCrew(
         }
         return false;
       });
+
+  // PART TWO of the "Caffè Nero in London" fix — the location gate above stops the WRONG PLACE;
+  // this stops the RIGHT PLACE, WRONG REASON case: a genuinely in-radius, category-matching
+  // candidate that is still not a reason a friend group makes a plan (a generic coffee chain, an
+  // ordinary permanent venue with nothing specific going on). A HARD gate, not a scoring
+  // penalty — "the recommendation itself should carry weight" only holds if Plot never has to
+  // choose between a great match and a merely-adjacent one and can lose. Applies to every
+  // Crew-facing flow that shares this scorer (the automatic sweep AND the manual "Find us
+  // something"/"Suggest something" flows — all three are Plot placing a bet into this Crew's own
+  // conversation, the same bar) — never Explore or Home, which stay deliberately broad (see
+  // services/explore.ts / personalHome.ts, and opportunityIntent.ts's own header). See
+  // docs/DECISIONS.md#crew-recommendation-architecture for the full reasoning and the exact
+  // regression test this closes.
+  const filteredCandidates = preferenceFilteredCandidates.filter((experience) => isPlanWorthyForCrew(experience));
 
   const scored: MatchOption[] = [];
   for (const experience of filteredCandidates) {
@@ -508,9 +559,11 @@ export async function scoreExperiencesForCrew(
     const strongAffinity = interestScore >= 24 || Math.max(0, effectiveCategoryAffinity) >= 0.6;
     const effectiveRadiusMiles = strongAffinity ? radiusMiles * 1.6 : radiusMiles;
     let withinRadius: boolean | null = null;
+    let distanceMiles: number | null = null;
     if (experience.venue && memberCoords.length > 0) {
       const distances = memberCoords.map((c) => haversineMiles(c.homeLat, c.homeLng, experience.venue!.latitude, experience.venue!.longitude));
       const nearestMiles = Math.min(...distances);
+      distanceMiles = nearestMiles;
       withinRadius = nearestMiles <= effectiveRadiusMiles;
       if (nearestMiles <= effectiveRadiusMiles) {
         // Closer scores higher, capped at 15 — a tiebreaker among in-radius options, not a
@@ -551,6 +604,7 @@ export async function scoreExperiencesForCrew(
       availableMemberCount: availableCount,
       totalMemberCount: userIds.length,
       withinRadius,
+      distanceMiles,
     });
   }
 

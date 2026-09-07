@@ -7,6 +7,7 @@ import { createRecommendationPlanForCrew } from './plan';
 import { sendSystemMessage } from './chat';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { interestLabel } from '@plot/shared';
+import { derivePlanWorthiness, deriveBookingType, deriveSourceKind } from './opportunityIntent';
 import { Prisma } from '@prisma/client';
 import type { CrewRecommendation, CrewRecommendationStatus } from '@prisma/client';
 
@@ -21,6 +22,7 @@ import type { CrewRecommendation, CrewRecommendationStatus } from '@prisma/clien
 type RecommendationOutcome =
   | 'disabled'
   | 'preferences_not_set'
+  | 'location_not_set'
   | 'weekly_cap_reached'
   | 'too_few_members'
   | 'no_eligible_candidate'
@@ -267,6 +269,43 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     return { outcome: 'preferences_not_set', details: {} };
   }
 
+  // A SECOND absolute gate, same status as preferences: "Crew location + travel radius are
+  // known" before Plot does anything automatic — this is the product model, not an optional
+  // nicety. Diagnostic-only fetch, mirrors what scoreExperiencesForCrew computes internally for
+  // the actual radius calculation (services/match.ts) — real gap found investigating "afterRadius:
+  // 0 for every candidate, on every multi-member Crew" in production: this is the one piece of
+  // context that number alone can't show (a member's real home city vs. coordinates), so it's
+  // surfaced directly rather than requiring a second round of guessing.
+  const [crewLocation, memberLocations] = await Promise.all([
+    prisma.crew.findUnique({ where: { id: crewId }, select: { latitude: true, longitude: true } }),
+    prisma.crewMember.findMany({
+      where: { crewId, status: 'ACTIVE' },
+      select: { user: { select: { email: true, profile: { select: { homeCity: true, homeLat: true, homeLng: true } } } } },
+    }),
+  ]);
+  const locationSummary = memberLocations.map((m) => ({
+    email: m.user.email,
+    homeCity: m.user.profile?.homeCity ?? null,
+    hasCoordinates: m.user.profile?.homeLat !== null && m.user.profile?.homeLat !== undefined,
+  }));
+  const crewHasExplicitLocation = crewLocation !== null && crewLocation.latitude !== null && crewLocation.longitude !== null;
+  const anyMemberHasHomeLocation = locationSummary.some((m) => m.hasCoordinates);
+  // REAL, LIVE-REPORTED BUG this closes ("Crew: STAFFORD, 25-mile radius... Plot sent CAFFÈ NERO
+  // IN LONDON"): when NO location signal existed at all (this Crew's own explicit location not
+  // yet set at the moment scoring ran, AND no member had a home location either),
+  // services/match.ts#scoreExperiencesForCrew could compute `withinRadius: null` for every
+  // single candidate — genuinely unknown, not "near" — and the OLD filter here
+  // (`!== false`) treated that null exactly like "in radius", so the entire candidate pool
+  // (quality-ordered, with zero geographic relevance at all) was eligible. Rather than patch the
+  // symptom, this refuses to even attempt an automatic recommendation until a real location
+  // anchor exists — "no ranking weight capable of overcoming" an unknown location is enforced by
+  // never scoring against one in the first place. See match.ts's own `withinRadius` comment for
+  // the second half of this fix (Crew's own explicit location becomes the SOLE anchor, never
+  // blended with a member's personal home, once it's set).
+  if (!crewHasExplicitLocation && !anyMemberHasHomeLocation) {
+    return { outcome: 'location_not_set', details: { memberLocations: locationSummary, crewHasExplicitLocation } };
+  }
+
   const since = new Date(Date.now() - LOOKBACK_DAYS_FOR_WEEKLY_CAP * 24 * 60 * 60 * 1000);
   const [recentCount, memberCount] = await Promise.all([
     prisma.crewRecommendation.count({ where: { crewId, createdAt: { gte: since } } }),
@@ -282,21 +321,6 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
 
   const city = await resolveCrewCityForSweep(crewId);
   await ensureInventory(city);
-
-  // Diagnostic-only, mirrors what scoreExperiencesForCrew computes internally for the actual
-  // radius filter (services/match.ts) — real gap found investigating "afterRadius: 0 for every
-  // candidate, on every multi-member Crew" in production: this is the one piece of context that
-  // number alone can't show (a member's real home city vs. coordinates, and the effective radius
-  // being applied), so it's surfaced directly rather than requiring a second round of guessing.
-  const memberLocations = await prisma.crewMember.findMany({
-    where: { crewId, status: 'ACTIVE' },
-    select: { user: { select: { email: true, profile: { select: { homeCity: true, homeLat: true, homeLng: true } } } } },
-  });
-  const locationSummary = memberLocations.map((m) => ({
-    email: m.user.email,
-    homeCity: m.user.profile?.homeCity ?? null,
-    hasCoordinates: m.user.profile?.homeLat !== null && m.user.profile?.homeLat !== undefined,
-  }));
 
   const scored = await scoreExperiencesForCrew(crewId, { radiusMetersOverride: settings.travelRadiusMeters });
 
@@ -323,9 +347,51 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
       ['category_affinity', 'crew_dna_match', 'crew_preference', 'interest_match', 'free_text_match', 'crew_interest_preference'].includes(r.code),
     );
   const notExcluded = scored.filter((o) => !excluded.has(o.experience.id));
-  const inRadius = notExcluded.filter((o) => o.withinRadius !== false);
+  // THE CORE FIX for "Caffè Nero in London sent to a 25-mile Stafford Crew": `withinRadius` is
+  // `boolean | null` — `null` means genuinely unknown (no venue coordinates, or no location
+  // anchor could be established), never "near". The OLD filter here (`!== false`) treated null
+  // exactly like true — an unknown distance silently passed the radius gate. Now requires
+  // `=== true`: a candidate must be POSITIVELY CONFIRMED within radius to reach the automatic
+  // engine at all — fail closed, never fail open, on a hard eligibility gate. See match.ts's own
+  // `withinRadius` comment for the other half of this fix (the Crew's own explicit location, once
+  // set, is the sole distance anchor — never blended with an individual member's personal home).
+  const inRadius = notExcluded.filter((o) => o.withinRadius === true);
   const withTaste = inRadius.filter(hasTasteSignal);
   const eligible = withTaste.filter((o) => o.matchScore >= MIN_RECOMMENDATION_SCORE);
+  // The recommendation debugger (product spec: "for each candidate show TITLE/DISTANCE/PLAN-
+  // WORTHINESS/BOOKABILITY/ELIGIBILITY/REJECTION REASON/FINAL RANKING SCORE") — real evidence
+  // for "why did #1 beat #2", not just whether #1 passed. Bounded to the top 10 BY SCORE across
+  // the whole (pre-radius-gate) scored pool, so a rejected-for-distance candidate like Caffè Nero
+  // still shows up in this trail with its real rejection reason, exactly the debugging case the
+  // spec calls for — never silently absent from the trail just because it was excluded from
+  // consideration. See routes/admin.ts's explain-recommendation endpoint, the only consumer.
+  const debugCandidates = [...scored]
+    .sort((a, b) => b.matchScore - a.matchScore)
+    .slice(0, 10)
+    .map((o) => {
+      const worthiness = derivePlanWorthiness(o.experience);
+      const rejectionReasons: string[] = [];
+      if (excluded.has(o.experience.id)) rejectionReasons.push('ALREADY_RECOMMENDED_OR_SHARED');
+      if (o.withinRadius !== true) rejectionReasons.push(o.withinRadius === false ? 'OUTSIDE_CREW_RADIUS' : 'DISTANCE_UNKNOWN');
+      if (!hasTasteSignal(o)) rejectionReasons.push('NO_TASTE_SIGNAL');
+      if (o.matchScore < MIN_RECOMMENDATION_SCORE) rejectionReasons.push('BELOW_CONFIDENCE_THRESHOLD');
+      return {
+        experienceId: o.experience.id,
+        title: o.experience.name,
+        category: o.experience.category,
+        distanceMiles: o.distanceMiles !== null ? Math.round(o.distanceMiles * 10) / 10 : null,
+        startsAt: o.experience.startsAt.toISOString(),
+        priceMinMinor: o.experience.priceMinMinor,
+        sourceKind: deriveSourceKind(o.experience),
+        planWorthiness: worthiness.level,
+        planWorthinessReasons: worthiness.reasons,
+        bookingType: deriveBookingType(o.experience),
+        matchScore: o.matchScore,
+        reasons: o.reasons,
+        eligible: rejectionReasons.length === 0,
+        rejectionReasons,
+      };
+    });
   const details = {
     city,
     memberLocations: locationSummary,
@@ -336,6 +402,7 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     afterTasteSignal: withTaste.length,
     bestScoreSeen: withTaste.length > 0 ? Math.max(...withTaste.map((o) => o.matchScore)) : null,
     scoreThreshold: MIN_RECOMMENDATION_SCORE,
+    topCandidates: debugCandidates,
   };
   if (opts.guaranteeFirst && eligible.length === 0 && inRadius.length > 0) {
     // Real, live product requirement: a brand-new Crew's very first moment must not come up
