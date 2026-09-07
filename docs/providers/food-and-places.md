@@ -33,7 +33,6 @@ from the code; everything marked LIVE below is implemented and registered today.
 | Provider | Verdict | Why |
 |---|---|---|
 | **Yelp Fusion** | Rejected | Moved to paid-only in 2024 (from $7.99/1000 calls) — no free tier exists any more for restaurant search or photos. |
-| **Foursquare Places API** | Rejected (for now) | Free tier (500 Pro calls/month + $200 credit, from June 2026) covers place *search*, but the **Photos endpoint is Premium-only**, no free tier — the one thing this directive cares about most. Revisit if a future pass needs richer place *metadata* without images; OpenStreetMap already covers the "real venue exists" need for free. |
 | **Spotify Web API** | Rejected | Researched current (Sept 2026) developer terms in detail: February–July 2026 changes require the app owner to hold an active **Premium subscription** just to keep Development Mode working, cap unapproved apps to **5 allowlisted users**, and gate Extended Quota (real end-user traffic) behind **250k+ monthly active users on an already-registered organisation**. Structurally incompatible with serving real Plot users at any real scale — not a "get a key" problem. |
 | **Bandsintown API** | Rejected (for now) | Not self-serve: requires emailing Bandsintown, describing the use case, and waiting for a manually-issued `app_id` — a real human approval step, not something obtainable in an automated session. If Will wants to pursue this: contact Bandsintown partnerships and provide `apps/api/src/providers/live/` as the integration pattern once an `app_id` exists. |
 | **OpenTable / Resy / SevenRooms** | Already documented rejected | See `docs/providers/restaurants.md` — all partner-gated, unchanged. |
@@ -49,8 +48,10 @@ from the code; everything marked LIVE below is implemented and registered today.
 | **Wikipedia (image enrichment)** | ✅ always (no key) | Yes | None | N/A (global) | Any (name-matched) | Yes, when a confident match exists | N/A | N/A | N/A — enrichment only, not a discovery source | Reasonable per Wikimedia's own etiquette guidance | Only fires on an exact/close name match; a disambiguation page or 404 correctly yields no image rather than a wrong one |
 | **TheSportsDB** | ✅ (shared free test key; `SPORTSDB_API_KEY` optional upgrade) | Yes | Free key (shared test key documented by TheSportsDB itself for light use) | Partial — skews toward larger/professional clubs | SPORT (image enrichment only, not discovery) | Yes, real team badges | N/A | N/A | N/A — enrichment only | Free-key result cap is 10 per query | Smaller/local teams often not in the database — falls through to Wikipedia enrichment on a miss; NOT used for discovery — see "Round 2" section below for why (fixtures are queried by league, not by location) |
 | **Eventbrite** | ❌ implemented, not registered | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | Public event search killed for new keys in 2020, official API support ended 2025 — confirmed dead, not a credential gap |
+| **UK Food Standards Agency (FHRS)** | ✅ always (no key) | Yes | None | England/Wales/NI only (not Scotland — see Round 3) | Restaurant, takeaway, mobile caterer, pub/bar/nightclub | No (falls into the enrichment chain) | Yes (real geocoded lat/lng) | No | Real Google Maps search for the address — FHRS gives no venue-page permalink | Not published; a national government register, not a live-polling API | See Round 3 below for the full writeup |
+| **Google Places API (New)** | ✅ (needs `GOOGLE_PLACES_API_KEY`) | Yes | Self-serve, pay-as-you-go past a free monthly credit | Yes, the best of any source here | Restaurant, cafe, bar, nightclub, bakery, takeaway | Yes — real venue-uploaded photos | Yes | Coarse 6-level enum only, never a real amount | Real Google Maps place URI | Billed per request past the free credit | See Round 3 below |
+| **Foursquare Places API v3** | ✅ (needs `FOURSQUARE_API_KEY`) | Yes | Self-serve, real free tier | Yes | Restaurant, bar, nightclub, cafe, bakery | No (Photos endpoint needs a second per-venue call this adapter doesn't make — see Round 3) | Yes | Coarse 1-4 tier only | Real venue website, else a Google Maps search | Real free-tier quota (see location.foursquare.com/developer) | See Round 3 below |
 | **Yelp Fusion** | ❌ | — | — | — | — | — | — | — | — | — | Paid-only since 2024, no free tier |
-| **Foursquare Places** | ❌ | — | — | — | — | — | — | — | — | — | Free tier excludes Photos (Premium-only) |
 | **Spotify Web API** | ❌ | — | — | — | — | — | — | — | — | — | 2026 Developer Mode changes cap unapproved apps at 5 users; Extended Quota needs 250k+ MAU |
 | **Bandsintown** | ❌ | — | — | — | — | — | — | — | — | — | Requires manually-approved `app_id`, not self-serve |
 | **OpenTable / Resy / SevenRooms** | ❌ | — | — | — | — | — | — | — | — | — | Partner-gated (see docs/providers/restaurants.md) |
@@ -130,19 +131,71 @@ than quietly hoping PredictHQ or OSM happens to cover it:
 
 | Provider | Verdict | Why |
 |---|---|---|
-| **Google Places API** | Recommended follow-up, not implemented | By far the broadest real category taxonomy (150+ place types — bowling, karting, escape rooms, motorcycle dealers, stadiums, the lot), with real photos and ratings. NOT implemented now because it's a genuine commercial decision, not a technical one: requires a billing account and is pay-per-request beyond a monthly free credit. Worth a dedicated follow-up pass once Will decides the cost is worth it for richer place data than OSM's patchier small-town tagging — a real tradeoff to make deliberately, not default into. |
+| **Google Places API** | Implemented in Round 3 (see below) | By far the broadest real category taxonomy, with real photos and ratings. Was a genuine commercial decision, not a technical one — see Round 3 for how that's handled (code-ready, key-gated, isLive false until GOOGLE_PLACES_API_KEY is actually set). |
 | **AllEvents.in API** | Candidate, unverified | Self-serve developer API (developer.allevents.in) with broad worldwide category coverage including community/hobby events, which could plausibly pick up grassroots UK listings OSM/PredictHQ miss. Data quality/depth for small UK towns specifically is unverified — this environment's egress block means it can't be tested here. Worth a real evaluation against a live key before committing engineering time to an adapter. |
 | **VisitEngland / VisitBritain tourism data** | Candidate, needs partner registration | Real UK tourism-board attraction/days-out listings — a strong fit for the DAY_ACTIVITY category specifically. Access is via their own partner/datahub registration (a business step, not a "get a key and go" self-serve flow), so this is a recommendation for Will to pursue directly rather than something this session can complete blind. |
 | **Meetup API** | Rejected (for now) | Meetup's public API closed for general free use years ago; current access is a restricted, commercial "Pro API" partnership, not self-serve — same shape of blocker as Bandsintown's manual `app_id`, just with a heavier commercial layer on top. |
 | **TheSportsDB as a discovery source (not just image enrichment)** | Rejected — real technical reason, not just unexplored | TheSportsDB's fixture endpoints are queried by LEAGUE (e.g. "English Premier League"), returning that league's next fixtures nationwide — there's no location-radius search. Using it for SPORT discovery would mean showing a Stafford Crew a fixture in a city hundreds of miles away with no real way to filter by "is this actually near this Crew" without a second lookup per team's home venue and a lot more engineering than the category gap currently justifies. Stays exactly where it already earns its keep: image enrichment by name (`lib/imageEnrichment.ts`), not discovery. |
 | **Ergast / Jolpica F1 API** | Considered, not worth it | Real, free, no key, gives the full F1 calendar — but F1 is a narrow slice of "motorsport", doesn't cover MotoGP/BTCC/grassroots motorbike events at all, and a UK Crew is realistically not travelling to an F1 race as a spontaneous "Plot found this" suggestion. Not a good ROI for a dedicated adapter. |
 
-**Still confirmed rejected from the first research pass, unchanged**: Yelp Fusion (paid-only since
-2024), Foursquare Places (Photos endpoint Premium-only), Spotify Web API (2026 terms
-structurally incompatible with real user volume), Bandsintown (manual `app_id` approval, not
-self-serve), OpenTable/Resy/SevenRooms (partner-gated — `docs/providers/restaurants.md`),
-DICE/Resident Advisor/Songkick (no public self-serve access — `docs/providers/ticketing.md`),
-Eventbrite (confirmed dead for new keys, not a credential gap).
+**Still confirmed rejected, unchanged**: Yelp Fusion (paid-only since 2024), Spotify Web API
+(2026 terms structurally incompatible with real user volume), Bandsintown (manual `app_id`
+approval, not self-serve), OpenTable/Resy/SevenRooms (partner-gated —
+`docs/providers/restaurants.md`), DICE/Resident Advisor/Songkick (no public self-serve access —
+`docs/providers/ticketing.md`), Eventbrite (confirmed dead for new keys, not a credential gap).
+**Foursquare Places is no longer in this rejected list** — see Round 3 immediately below for why
+the earlier rejection ("Photos endpoint is Premium-only") turned out not to be a real blocker.
+
+## Round 3 — "extensive research on every single open API" + shipping every real/key-ready tier
+
+Live, direct user request after Round 2 shipped: "the restaurants and food options right now are
+shocking and need major improvement to go live" plus an explicit ask to research and integrate
+every genuinely available open API, then "ship all tier". Three new real sources, all following
+the exact same `ProviderAdapter` pattern as every source above — nothing else in the codebase
+changed to add them:
+
+- **`providers/live/fhrs.ts`** (NEW, LIVE today, no key) — the UK Food Standards Agency's own
+  Food Hygiene Rating Scheme open data (`api.ratings.food.gov.uk`). Genuinely official UK
+  government data: every registered food business in England/Wales/NI, with a real name, address,
+  geocoded location, business type, and published hygiene rating. Registered as a SECOND,
+  independent restaurant/pub source alongside OpenStreetMap — `services/entityResolution.ts`'s
+  existing dedup handles the same real venue appearing in both national-register and crowd-mapped
+  data. Scotland is NOT covered (FHRS is England/Wales/NI only — Scotland publishes separately via
+  FHIS, not integrated here; a real, addressable follow-up if Scottish coverage becomes a live
+  gap). No opening hours, cuisine, price, or photos — a hygiene register, not a places-discovery
+  product; those fields are honestly left null/absent rather than guessed.
+- **`providers/live/googlePlaces.ts`** (NEW, code-ready, needs `GOOGLE_PLACES_API_KEY`) — the
+  Round 2 "recommended follow-up" now actually built. Places API (New) Nearby Search — the
+  broadest real category taxonomy and the only source here with real venue-uploaded photos (built
+  directly from the search response's own `photos[].name`, no second metadata request). Still
+  gated behind a real key because it's still a real, pay-as-you-go-past-a-free-credit budget
+  decision, not an engineering one — `isLive` stays `false`, and the adapter simply isn't
+  registered, until that key is actually set.
+- **`providers/live/foursquare.ts`** (NEW, code-ready, needs `FOURSQUARE_API_KEY`) — Round 1's
+  rejection ("Photos endpoint is Premium-only") turned out to be the wrong bar: Foursquare's real,
+  self-serve free tier *does* cover place search (name, category, address, coordinates, price
+  tier, rating) — this adapter simply never calls the Premium-only Photos endpoint, leaving
+  `imageUrl` honestly null (same posture as FHRS) rather than paying for something this pass
+  didn't need to prove Foursquare's real value: a genuinely independent venue graph from Google's,
+  historically strong specifically for nightlife/bars. Category matching is deliberately
+  TEXT-based (`categories[].name` strings), not Foursquare's numeric/hex category ID taxonomy —
+  an honest choice, not a shortcut: without a way to verify the current ID list against a live
+  key from this sandbox, a wrong hardcoded ID mapping would silently miscategorise real venues
+  with no visible symptom; text matching fails loudly (a venue just doesn't match) instead.
+
+**What "ship all tier" honestly means for each researched tier**:
+
+| Tier | Status | What's actually true right now |
+|---|---|---|
+| Tier 1 — free, no key (OpenStreetMap widening, FHRS) | **Shipped and live** | Real inventory flows the moment this deploys — no further action needed. |
+| Tier 2 — self-serve key, real free/pay-as-you-go tier (Google Places, Foursquare) | **Code-ready, key-gated** | Both adapters are implemented, tested, and registered — the moment `GOOGLE_PLACES_API_KEY` / `FOURSQUARE_API_KEY` is set on Render, real inventory flows with zero further code changes. Until then `isLive` is honestly `false` and neither is part of the live registry — no fabricated "connected" status. |
+| Tier 3 — partner-gated (OpenTable, Resy, SevenRooms, Bandsintown, DICE, Resident Advisor, Songkick, Meetup) | **Genuinely not shippable as code** | Each requires a manual partnership/approval step with a real human at that company — no key exists to plug in, however much of this adapter pattern is ready to receive one. See `docs/providers/restaurants.md` and `docs/providers/ticketing.md` for what pursuing each would actually take. |
+
+Also widened in this pass, same "free tier already live, just asking it for more" fix as Round
+2's OSM widening: `amenity=food_court`/`ice_cream` and specialty food shops
+(`shop=deli`/`bakery`/`butcher`/`greengrocer`/`seafood`/`cheese`/`chocolate`/`pastry`) now map to
+RESTAURANT, and `amenity=biergarten` now maps to BAR (`providers/live/openStreetMap.ts`,
+`MAX_RESULTS` raised 90→120 to make room).
 
 ## Why "final evidence" (real music/comedy/food photos rendering in the app) isn't in this
 document

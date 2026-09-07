@@ -58,7 +58,12 @@ const CULTURE_RADIUS_METERS = 9000; // museums/attractions/markets are sparser �
 // values were sitting unused in Overpass's own data the whole time. Widening the query, not
 // adding a new source, is the honest fix here: no new adapter's worth of uncertainty, just more
 // of a source already proven to work.
-const MAX_RESULTS = 90; // raised from 60 alongside the wider query so no one category starves the others
+const MAX_RESULTS = 120; // raised again alongside the food-specific widening below — see that comment
+// SECOND real, live-reported gap this file's widening closes: "the restaurants and food options
+// right now are shocking". `amenity=food_court`/`ice_cream` and specialty food shops
+// (`shop=deli`/`bakery`/`butcher`/`greengrocer`/`seafood`/`cheese`/`chocolate`/`pastry`) are
+// real, commonly-tagged, free OSM values this adapter never asked for — same "widen an already-
+// working source" fix as the widening above, applied specifically to food this time.
 
 interface OsmElement {
   type: 'node' | 'way' | 'relation';
@@ -80,8 +85,15 @@ function mapCategory(tags: Record<string, string>): ExperienceCategory {
   const amenity = tags.amenity;
   const tourism = tags.tourism;
   const leisure = tags.leisure;
-  if (amenity === 'bar' || amenity === 'pub') return 'BAR';
-  if (amenity === 'restaurant' || amenity === 'cafe' || amenity === 'fast_food' || amenity === 'marketplace') return 'RESTAURANT';
+  const shop = tags.shop;
+  if (amenity === 'bar' || amenity === 'pub' || amenity === 'biergarten') return 'BAR';
+  // REAL, LIVE-REPORTED GAP this widening closes: "the restaurants and food options right now
+  // are shocking" — `food_court`/`ice_cream` and the specialty food shops (`shop=deli`/`bakery`/
+  // `butcher`/`greengrocer`/`seafood`/`cheese`/`chocolate`/`pastry`) are real, commonly-tagged OSM
+  // values that were sitting unused even though this adapter already had a working, free,
+  // no-credential connection to the exact dataset that carries them.
+  if (amenity === 'restaurant' || amenity === 'cafe' || amenity === 'fast_food' || amenity === 'marketplace' || amenity === 'food_court' || amenity === 'ice_cream') return 'RESTAURANT';
+  if (shop === 'deli' || shop === 'bakery' || shop === 'butcher' || shop === 'greengrocer' || shop === 'seafood' || shop === 'cheese' || shop === 'chocolate' || shop === 'pastry') return 'RESTAURANT';
   // Real gap this closes: CLUBBING previously had exactly one real source (Skiddle's own CLUB
   // eventcode) — a real, well-tagged OSM amenity value costs nothing to add on top of that.
   if (amenity === 'nightclub') return 'CLUBBING';
@@ -102,10 +114,12 @@ function mapCategory(tags: Record<string, string>): ExperienceCategory {
 
 function label(tags: Record<string, string>): string {
   if (tags.amenity === 'marketplace') return 'Market';
+  if (tags.amenity === 'food_court') return 'Food court';
   if (tags.tourism === 'museum') return 'Museum';
   if (tags.tourism === 'gallery') return 'Gallery';
   if (tags.tourism === 'attraction') return 'Attraction';
   if (tags.leisure) return tags.leisure.replace(/_/g, ' ');
+  if (tags.shop) return tags.shop.replace(/_/g, ' ');
   return tags.cuisine ? tags.cuisine.split(';')[0].replace(/_/g, ' ') : (tags.amenity ?? 'Place').replace(/_/g, ' ');
 }
 
@@ -145,8 +159,9 @@ function directImageTag(tags: Record<string, string>): string | null {
 function buildQuery(center: UkPlace): string {
   const { lat, lng } = center;
   return `[out:json][timeout:25];(
-    node["amenity"~"^(restaurant|cafe|bar|pub|fast_food|nightclub)$"]["name"](around:${SEARCH_RADIUS_METERS},${lat},${lng});
-    way["amenity"~"^(restaurant|cafe|bar|pub|fast_food|nightclub)$"]["name"](around:${SEARCH_RADIUS_METERS},${lat},${lng});
+    node["amenity"~"^(restaurant|cafe|bar|pub|fast_food|nightclub|biergarten|food_court|ice_cream)$"]["name"](around:${SEARCH_RADIUS_METERS},${lat},${lng});
+    way["amenity"~"^(restaurant|cafe|bar|pub|fast_food|nightclub|biergarten|food_court|ice_cream)$"]["name"](around:${SEARCH_RADIUS_METERS},${lat},${lng});
+    node["shop"~"^(deli|bakery|butcher|greengrocer|seafood|cheese|chocolate|pastry)$"]["name"](around:${SEARCH_RADIUS_METERS},${lat},${lng});
     node["amenity"="marketplace"]["name"](around:${CULTURE_RADIUS_METERS},${lat},${lng});
     node["amenity"~"^(cinema|theatre)$"]["name"](around:${CULTURE_RADIUS_METERS},${lat},${lng});
     way["amenity"~"^(cinema|theatre)$"]["name"](around:${CULTURE_RADIUS_METERS},${lat},${lng});

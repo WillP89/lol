@@ -80,6 +80,18 @@ describe('openStreetMapProvider.mapToCanonical', () => {
     expect(withCommonsPage.imageSource).toBeNull();
   });
 
+  test('a food court, an ice cream parlour, and specialty food shops (deli/bakery/butcher/etc) all map to RESTAURANT — the "food options are shocking" widening', () => {
+    expect(openStreetMapProvider.mapToCanonical(rawNode({ name: 'The Food Hall', amenity: 'food_court' })).category).toBe('RESTAURANT');
+    expect(openStreetMapProvider.mapToCanonical(rawNode({ name: "Marco's Gelato", amenity: 'ice_cream' })).category).toBe('RESTAURANT');
+    expect(openStreetMapProvider.mapToCanonical(rawNode({ name: 'The Deli Counter', shop: 'deli' })).category).toBe('RESTAURANT');
+    expect(openStreetMapProvider.mapToCanonical(rawNode({ name: 'Village Bakery', shop: 'bakery' })).category).toBe('RESTAURANT');
+    expect(openStreetMapProvider.mapToCanonical(rawNode({ name: 'H. Smith Butchers', shop: 'butcher' })).category).toBe('RESTAURANT');
+  });
+
+  test('a biergarten maps to BAR, same as a pub', () => {
+    expect(openStreetMapProvider.mapToCanonical(rawNode({ name: 'The Beer Garden', amenity: 'biergarten' })).category).toBe('BAR');
+  });
+
   test('startsAt is always in the future, never a fixed slot presented as a real booking time', () => {
     const result = openStreetMapProvider.mapToCanonical(rawNode({ name: 'X', amenity: 'restaurant' }));
     expect(result.startsAt.getTime()).toBeGreaterThan(Date.now());
