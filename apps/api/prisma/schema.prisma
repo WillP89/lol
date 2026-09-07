@@ -592,6 +592,9 @@ enum ImageSource {
   WIKIPEDIA
   THESPORTSDB
   SKIDDLE
+  GOOGLE_PLACES // providers/live/googlePlaces.ts — a real photo the venue itself uploaded to its
+  // Google Business Profile, fetched via the Places API (New) Photos endpoint's own `name`
+  // reference — never a Places search-result thumbnail cached/rehosted elsewhere.
   CATEGORY_STOCK // lib/categoryStockImages.ts — a real, live-searched Wikimedia Commons photo
   // matching the listing's category (a real gig crowd, a real restaurant interior, …), tried only
   // once a specific artist/venue/team photo couldn't be found — the last resort before leaving

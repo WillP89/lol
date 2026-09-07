@@ -7,6 +7,9 @@ import { eventbriteProvider } from './live/eventbrite';
 import { skiddleProvider } from './live/skiddle';
 import { predictHqProvider } from './live/predicthq';
 import { openStreetMapProvider } from './live/openStreetMap';
+import { fhrsProvider } from './live/fhrs';
+import { googlePlacesProvider } from './live/googlePlaces';
+import { foursquareProvider } from './live/foursquare';
 import { config } from '../lib/config';
 
 void eventbriteProvider; // kept implemented, deliberately not registered — see the file's own comment
@@ -48,11 +51,28 @@ void eventbriteProvider; // kept implemented, deliberately not registered — se
  * that category, and that fact is surfaced to the client (GET /admin/providers, and Explore/
  * Discover's "sample events" banner) rather than silently presented as real inventory. See
  * docs/DECISIONS.md#real-events.
+ *
+ * `fhrsProvider` (UK Food Standards Agency FHRS open data — live/live/fhrs.ts) needs no
+ * credential either, same as OpenStreetMap, and is always registered alongside it as a SECOND,
+ * independent restaurant/pub source — entityResolution.ts's own dedup already handles the same
+ * real venue appearing in both. `googlePlacesProvider` and `foursquareProvider` are each real,
+ * genuinely different-shaped places sources again, but both are real commercial APIs requiring
+ * a key an operator has to go get (Google's is pay-as-you-go past a free credit; Foursquare has
+ * a genuine free tier) — each registers independently the moment its own key is configured,
+ * same "more than one runs at once" pattern as the ticketed sources above. See
+ * docs/providers/food-and-places.md for what each of these three actually gives, and their own
+ * files' header comments for the full research/trade-off writeup.
  */
 const liveTicketedProviders: ProviderAdapter[] = [
   ...(config.TICKETMASTER_API_KEY ? [ticketmasterProvider] : []),
   ...(config.SKIDDLE_API_KEY ? [skiddleProvider] : []),
   ...(config.PREDICTHQ_ACCESS_TOKEN ? [predictHqProvider] : []),
+];
+
+const livePlacesProviders: ProviderAdapter[] = [
+  fhrsProvider,
+  ...(config.GOOGLE_PLACES_API_KEY ? [googlePlacesProvider] : []),
+  ...(config.FOURSQUARE_API_KEY ? [foursquareProvider] : []),
 ];
 
 // Same convention already used for media storage (lib/mediaStorage.ts) and email
@@ -67,7 +87,7 @@ const isTestEnv = config.NODE_ENV === 'test';
 
 export const providerRegistry: ProviderAdapter[] = isTestEnv
   ? [mockTicketingProvider, mockRestaurantProvider, mockActivityProvider]
-  : [...(liveTicketedProviders.length > 0 ? liveTicketedProviders : [mockTicketingProvider]), openStreetMapProvider];
+  : [...(liveTicketedProviders.length > 0 ? liveTicketedProviders : [mockTicketingProvider]), openStreetMapProvider, ...livePlacesProviders];
 
 export const hasLiveProvider = providerRegistry.some((p) => p.isLive);
 

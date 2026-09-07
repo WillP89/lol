@@ -50,6 +50,18 @@ const EnvSchema = z.object({
   // the lack of a public click-through URL) and docs/providers/ticketing.md for the full writeup.
   // Self-serve signup: predicthq.com.
   PREDICTHQ_ACCESS_TOKEN: z.string().optional(),
+  // The highest-quality restaurant/bar/club discovery source researched for "the restaurants and
+  // food options right now are shocking" — real photos, real ratings, real opening hours, the
+  // best UK places coverage of any API. Pay-as-you-go past a monthly free credit, so genuinely
+  // gated behind a real budget decision, not just an engineering one. Self-serve at
+  // console.cloud.google.com — enable "Places API (New)", not the deprecated legacy Places API.
+  // See providers/live/googlePlaces.ts and docs/providers/food-and-places.md.
+  GOOGLE_PLACES_API_KEY: z.string().optional(),
+  // A genuinely different shape of places source from Google — Foursquare's own independent
+  // venue graph (still real, crowd-and-merchant-maintained coverage, historically strong for
+  // nightlife/bars). Self-serve free-tier key at location.foursquare.com/developer. See
+  // providers/live/foursquare.ts and docs/providers/food-and-places.md.
+  FOURSQUARE_API_KEY: z.string().optional(),
   // Optional upgrade path for lib/imageEnrichment.ts's SPORT-category image lookup — unset
   // falls back to TheSportsDB's own published free test key ("123"), which their docs
   // explicitly document as fine for light/testing use but not indefinite production volume.
@@ -166,6 +178,8 @@ export const providerReadiness = {
   eventbrite: Boolean(config.EVENTBRITE_API_KEY),
   openTable: Boolean(config.OPENTABLE_API_KEY),
   predicthq: Boolean(config.PREDICTHQ_ACCESS_TOKEN),
+  googlePlaces: Boolean(config.GOOGLE_PLACES_API_KEY),
+  foursquare: Boolean(config.FOURSQUARE_API_KEY),
   postmarkEmail: Boolean(config.POSTMARK_API_KEY),
   smtpEmail: Boolean(config.SMTP_HOST && config.SMTP_USER && config.SMTP_PASS),
   resendEmail: Boolean(config.RESEND_API_KEY),
