@@ -50,9 +50,23 @@ export const identityRanker: LearnedRanker = {
 
 // Exported (not just a local const) so the admin inventory-probe diagnostic (routes/admin.ts)
 // can report, per real event a live provider returns, whether it actually falls inside the
-// window Crew recommendations search at all — rather than a second, hand-duplicated "21" that
+// window Crew recommendations search at all — rather than a second, hand-duplicated value that
 // could silently drift from the real value this file actually uses.
-export const CANDIDATE_WINDOW_DAYS = 21;
+//
+// REAL, LIVE-REPORTED GAP this widening closes: `inventorySync.ts#syncAllProviders` already
+// fetches and stores a full 60 days of real inventory from every live provider on each sync —
+// that's a real, already-paid-for (Ticketmaster's own daily quota) fetch, not a hypothetical
+// one. This window used to be 21 days, discarding up to 39 days of ALREADY-INGESTED real
+// inventory at every single Crew's own matching pass for no real reason (no product rationale
+// for "21" ever existed — it was an unexamined technical default, not a deliberate "plans only
+// happen within 3 weeks" decision). For an infrequent, real category (a boxing/MMA card, a
+// specific niche festival) that only happens every month or two, this alone could be the entire
+// difference between "Plot found something" and a false "we don't have any... yet" — the event
+// was there the whole time, sitting in the database, just never looked at. 45 (not the full 60)
+// leaves real margin: a candidate found on day 44 stays inside the window until the next sync
+// naturally refreshes it, rather than aging out mid-week. See the admin inventory-probe's own
+// `recommendationWindowDays` field for confirming this value from a live deployment.
+export const CANDIDATE_WINDOW_DAYS = 45;
 const RESULT_COUNT = 3;
 // The onboarding default (see onboarding/page.tsx) — used whenever we need a radius and no
 // member has a real TasteProfile.travelRadiusMeters yet, so a brand-new Crew still gets a

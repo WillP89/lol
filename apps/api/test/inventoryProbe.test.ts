@@ -35,7 +35,7 @@ describe('GET /admin/inventory-probe', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as { city: string; recommendationWindowDays: number; providers: { id: string; isLive: boolean; events: unknown[] }[] };
     expect(body.city).toBe('Birmingham');
-    expect(body.recommendationWindowDays).toBe(21);
+    expect(body.recommendationWindowDays).toBe(45); // CANDIDATE_WINDOW_DAYS — widened from 21, see match.ts's own comment
     expect(body.providers.length).toBeGreaterThan(0);
     for (const p of body.providers) {
       expect(p.isLive).toBe(false); // NODE_ENV=test always runs the mock registry — see registry.ts
