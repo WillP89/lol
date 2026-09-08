@@ -625,7 +625,10 @@ export default function RecommendationDiagnosticsPage() {
                 mostRecentRecommendation={c.mostRecentRecommendation}
                 explain={c.rightNow}
                 adminKey={adminKey}
-                onRefresh={(fresh) => setEmailCrews((prev) => prev?.map((x) => (x.crewId === c.crewId ? { ...x, rightNow: fresh } : x)) ?? null)}
+                onRefresh={(fresh) => {
+                  setEmailCrews((prev) => prev?.map((x) => (x.crewId === c.crewId ? { ...x, rightNow: fresh } : x)) ?? null);
+                  loadRecent(adminKey);
+                }}
               />
             ))}
           </div>
@@ -657,12 +660,28 @@ export default function RecommendationDiagnosticsPage() {
             crewId={crewIdResult.crewId}
             explain={crewIdResult}
             adminKey={adminKey}
-            onRefresh={(fresh) => setCrewIdResult(fresh)}
+            onRefresh={(fresh) => {
+              setCrewIdResult(fresh);
+              loadRecent(adminKey);
+            }}
           />
         )}
 
         <section>
-          <div className="v2-eyebrow" style={{ marginBottom: 10 }}>Recently delivered, across every Crew</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+            <div className="v2-eyebrow" style={{ marginBottom: 0 }}>Recently delivered, across every Crew</div>
+            {/* Loads once on page open and after any Force/Sync check above — this covers
+                everything else (a delivery from the real automatic sweep, or from a different
+                browser tab) without needing a full page reload. */}
+            <button
+              type="button"
+              onClick={() => loadRecent(adminKey)}
+              disabled={recent === 'loading'}
+              style={{ background: 'none', border: 'none', padding: 0, color: 'var(--v2-brand)', fontSize: 12, fontWeight: 700, cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 2 }}
+            >
+              {recent === 'loading' ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
           {recent === 'loading' && <p className="v2-muted" style={{ fontSize: 13 }}>Loading…</p>}
           {recent === 'error' && <p style={{ color: 'var(--v2-error)', fontSize: 13 }}>Couldn&rsquo;t load recent deliveries.</p>}
           {Array.isArray(recent) && (
