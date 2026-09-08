@@ -112,7 +112,11 @@ interface PlanCardData {
   pulse: { inCount: number; maybeCount: number; outCount: number; totalMembers: number; level: number; status: string };
   // Present only when this Plan came from the automatic Crew recommendation engine, not a
   // member sharing something themselves — see docs/DECISIONS.md#crew-auto-recommendations.
-  recommendation?: { id: string; reasonText: string; status: string } | null;
+  recommendation?: { id: string; reasonText: string; status: string; confidence?: 'HIGH' | 'MEDIUM' | 'EXPLORATORY' } | null;
+  // The real, contextual "what wasn't right" options for THIS recommendation (services/
+  // recommendationLearning.ts#reasonOptionsFor) — only present alongside a recommendation, see
+  // docs/DECISIONS.md#crew-recommendation-learning-engine.
+  reasonOptions?: { code: string; label: string }[];
 }
 
 interface Plan {
@@ -250,7 +254,7 @@ function planStageCopy(status: string, pulse: PlanCardData['pulse'], proposerNam
  * open Plan gets its own one-tap "Lock it in" right here — the payoff moment shouldn't require
  * navigating away from the conversation it happened in. */
 function EventCard({
-  data, members, me, onLock, locking, justLocked, onVote, onExpandVoters, onRespondRecommendation,
+  data, members, me, onLock, locking, justLocked, onVote, onExpandVoters, onRespondRecommendation, respondAck,
 }: {
   data: PlanCardData;
   members: MemberLite[];
@@ -261,6 +265,9 @@ function EventCard({
   onVote: (planId: string, vote: 'in' | 'maybe' | 'out') => void;
   onExpandVoters: OpenVoterSheet;
   onRespondRecommendation: (recommendationId: string) => void;
+  // The real acknowledgment text for THIS recommendation, once responded — undefined until then,
+  // in which case a plain honest fallback shows instead (see its own use below).
+  respondAck?: string;
 }) {
   const exp = data.plan.experience;
   const lockable = LOCKABLE_STATUSES.has(data.plan.status);
@@ -383,7 +390,7 @@ function EventCard({
             Not quite right?
           </button>
         ) : (
-          <div className="v2-dim" style={{ padding: '0 14px 10px', fontSize: 11 }}>Thanks — noted for next time.</div>
+          <div className="v2-dim" style={{ padding: '0 14px 10px', fontSize: 11 }}>{respondAck ?? 'Thanks — noted for next time.'}</div>
         )
       )}
       {/* Who's actually in, converging visibly — and the real "who selected each state" fix: a
@@ -799,7 +806,17 @@ export default function CrewPage() {
   // Which recommendation's lightweight feedback sheet ("More like this" / "Not for us" / ...)
   // is currently open — see docs/DECISIONS.md#crew-auto-recommendations.
   const [respondingRecId, setRespondingRecId] = useState<string | null>(null);
+  // A SECOND, contextual sheet — real product requirement (docs/DECISIONS.md#crew-recommendation
+  // -learning-engine): tapping "Not for us" specifically asks a lightweight follow-up ("what
+  // wasn't right?") using THIS recommendation's own real reason options
+  // (services/recommendationLearning.ts#reasonOptionsFor), rather than treating every rejection
+  // as identical taste-signal. Every other action still submits directly from the first sheet.
+  const [notForUsRecId, setNotForUsRecId] = useState<string | null>(null);
   const [responding, setResponding] = useState(false);
+  // The real, natural acknowledgment the respond endpoint returns (recordRecommendationResponse's
+  // own `ack`) — keyed by recommendation id so each card shows what ACTUALLY changed for it,
+  // never a single generic "Thanks — noted for next time" line regardless of the response.
+  const [respondAckByRecId, setRespondAckByRecId] = useState<Record<string, string>>({});
   // The auto-recommendation system's Crew-level controls (on/off, frequency, travel range) -
   // fetched lazily the first time the Crew info sheet opens.
   const [recSettings, setRecSettings] = useState<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null; categoryPreferences: string[]; interestPreferences: string[] } | null>(null);
@@ -951,20 +968,26 @@ export default function CrewPage() {
   /** One of the lightweight recommendation-feedback actions — see docs/DECISIONS.md#crew-auto-
    * recommendations. Finds the card by recommendation id (not plan id — the caller only has
    * the recommendation's own id), marks it responded optimistically, then calls the real
-   * endpoint. */
-  async function respondToRecommendation(action: 'more_like_this' | 'not_for_us' | 'too_far' | 'too_expensive' | 'wrong_vibe') {
-    const recId = respondingRecId;
-    if (!recId) return;
+   * endpoint. `reasonCode` is only meaningful for 'not_for_us' (see notForUsRecId's own
+   * comment) — every other action ignores it. Captures the endpoint's own real acknowledgment
+   * text so the card can show exactly what changed, not a fixed generic line. */
+  async function respondToRecommendation(
+    recId: string,
+    action: 'more_like_this' | 'not_for_us' | 'too_far' | 'too_expensive' | 'wrong_vibe',
+    reasonCode?: string,
+  ) {
     const entry = Object.entries(planCards).find(([, v]) => v !== 'loading' && v !== 'error' && v.recommendation?.id === recId);
     setResponding(true);
     setRespondingRecId(null);
+    setNotForUsRecId(null);
     if (entry) {
       const [slug, data] = entry as [string, PlanCardData];
       const status = { more_like_this: 'MORE_LIKE_THIS', not_for_us: 'NOT_FOR_US', too_far: 'TOO_FAR', too_expensive: 'TOO_EXPENSIVE', wrong_vibe: 'WRONG_VIBE' }[action];
       setPlanCards((prev) => ({ ...prev, [slug]: { ...data, recommendation: { ...data.recommendation!, status } } }));
     }
     try {
-      await api.post(`/crews/${crewId}/recommendations/${recId}/respond`, { action });
+      const { ack } = await api.post<{ ack?: string }>(`/crews/${crewId}/recommendations/${recId}/respond`, { action, reasonCode });
+      if (ack) setRespondAckByRecId((prev) => ({ ...prev, [recId]: ack }));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not send that.');
       // Not reverted — a failed feedback POST isn't worth resurrecting the buttons over; the
@@ -1822,6 +1845,7 @@ export default function CrewPage() {
                         onVote={votePlanCard}
                         onExpandVoters={openVoterSheet}
                         onRespondRecommendation={(recId) => setRespondingRecId(recId)}
+                        respondAck={cardData.recommendation ? respondAckByRecId[cardData.recommendation.id] : undefined}
                       />
                     ) : planMatch && cardData === 'loading' ? (
                       <div className="v2-skeleton" style={{ width: 260, height: 120, borderRadius: 16 }} />
@@ -2566,7 +2590,9 @@ export default function CrewPage() {
       </BottomSheet>
 
       {/* Lightweight recommendation feedback — brief's exact five controls. Deliberately a
-          plain list, not a form: one tap, done. */}
+          plain list, not a form: one tap, done. "Not for us" specifically opens the SECOND,
+          contextual sheet below rather than submitting directly — every other action still
+          submits immediately from here. */}
       <BottomSheet open={respondingRecId !== null} onClose={() => setRespondingRecId(null)}>
         <div className="v2-eyebrow" style={{ marginBottom: 14 }}>What&rsquo;s wrong with this one?</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -2579,7 +2605,15 @@ export default function CrewPage() {
           ] as const).map(([action, label]) => (
             <button
               key={action}
-              onClick={() => respondToRecommendation(action)}
+              onClick={() => {
+                if (action === 'not_for_us') {
+                  const recId = respondingRecId;
+                  setRespondingRecId(null);
+                  setNotForUsRecId(recId);
+                  return;
+                }
+                if (respondingRecId) respondToRecommendation(respondingRecId, action);
+              }}
               disabled={responding}
               className="v2-card v2-tap-feedback"
               style={{ padding: '13px 16px', border: 'none', textAlign: 'left', cursor: 'pointer', width: '100%', fontWeight: 700, fontSize: 14 }}
@@ -2587,6 +2621,33 @@ export default function CrewPage() {
               {label}
             </button>
           ))}
+        </div>
+      </BottomSheet>
+
+      {/* The contextual "what wasn't right?" follow-up — real reason options for THIS specific
+          recommendation (services/recommendationLearning.ts#reasonOptionsFor), generated from its
+          actual category/price, never a fixed irrelevant list. A quick, honest "Something else"
+          always still submits a plain NOT_FOR_US with no reason attached. */}
+      <BottomSheet open={notForUsRecId !== null} onClose={() => setNotForUsRecId(null)}>
+        <div className="v2-eyebrow" style={{ marginBottom: 14 }}>What wasn&rsquo;t right?</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {(() => {
+            const entry = notForUsRecId
+              ? Object.values(planCards).find((v) => v !== 'loading' && v !== 'error' && v.recommendation?.id === notForUsRecId)
+              : undefined;
+            const options = entry && entry !== 'loading' && entry !== 'error' ? entry.reasonOptions ?? [] : [];
+            return options.map((opt) => (
+              <button
+                key={opt.code}
+                onClick={() => notForUsRecId && respondToRecommendation(notForUsRecId, 'not_for_us', opt.code)}
+                disabled={responding}
+                className="v2-card v2-tap-feedback"
+                style={{ padding: '13px 16px', border: 'none', textAlign: 'left', cursor: 'pointer', width: '100%', fontWeight: 700, fontSize: 14 }}
+              >
+                {opt.label}
+              </button>
+            ));
+          })()}
         </div>
       </BottomSheet>
 

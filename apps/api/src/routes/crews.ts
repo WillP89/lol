@@ -4,7 +4,8 @@ import { requireUser } from '../middleware/auth';
 import { createCrew, joinCrewByInviteCode, listCrewsForUser, getCrewDetail, getCrewPreviewByInviteCode, isCrewMember, removeCrewMember, leaveCrew, markCrewRead, setEmailNotificationsEnabled, updateCrewLocation, CrewMembershipError } from '../services/crew';
 import { sendCrewMessage, listCrewMessages, toggleReaction, createPoll, votePoll, ChatError } from '../services/chat';
 import { track } from '../services/analytics';
-import { getOrCreateSettings, updateSettings, respondToRecommendation, generateRecommendationForCrew, RecommendationError } from '../services/crewRecommendations';
+import { getOrCreateSettings, updateSettings, generateRecommendationForCrew } from '../services/crewRecommendations';
+import { recordRecommendationResponse, RecommendationResponseError, reasonOptionsFor } from '../services/recommendationLearning';
 import { computeCrewTasteSummary } from '../services/crewTaste';
 import { interpretTasteDescription, AiTasteSetupUnavailableError } from '../services/aiTasteSetup';
 import { saveUpload, deleteUpload, readMultipartUpload, MediaValidationError, MediaStorageUnavailableError } from '../lib/mediaStorage';
@@ -487,8 +488,14 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ settings, applied: selection });
   });
 
+  // `reasonCode`/`reasonText` are only meaningful for 'not_for_us' — the contextual "what wasn't
+  // right" follow-up (see recommendationLearning.ts#reasonOptionsFor) — but accepted for any
+  // action so the client never has to conditionally shape the request body; recordRecommendation
+  // Response itself ignores them for every other action (see its own normalizedReasonCode).
   const RespondSchema = z.object({
     action: z.enum(['more_like_this', 'not_for_us', 'too_far', 'too_expensive', 'wrong_vibe']),
+    reasonCode: z.string().max(60).optional(),
+    reasonText: z.string().max(280).optional(),
   });
   app.post('/crews/:id/recommendations/:recId/respond', async (request, reply) => {
     if (!requireUser(request, reply)) return;
@@ -498,13 +505,36 @@ export async function crewRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
 
     try {
-      const recommendation = await respondToRecommendation(id, recId, request.user.id, parsed.data.action);
-      return reply.send({ recommendation });
+      const { recommendation, ack } = await recordRecommendationResponse(
+        id,
+        recId,
+        request.user.id,
+        parsed.data.action,
+        parsed.data.reasonCode,
+        parsed.data.reasonText,
+      );
+      return reply.send({ recommendation, ack });
     } catch (err) {
-      if (err instanceof RecommendationError) {
+      if (err instanceof RecommendationResponseError) {
         return reply.code(err.code === 'not_found' ? 404 : 400).send({ error: err.code, message: err.message });
       }
       throw err;
     }
+  });
+
+  // The real, contextual "what wasn't right" options for one specific recommendation (see
+  // reasonOptionsFor's own header) — a separate GET rather than embedding on every recommendation
+  // payload, since the web client only needs these the moment someone taps "Not for us".
+  app.get('/crews/:id/recommendations/:recId/reason-options', async (request, reply) => {
+    if (!requireUser(request, reply)) return;
+    const { id, recId } = request.params as { id: string; recId: string };
+    if (!(await isCrewMember(id, request.user.id))) return reply.code(403).send({ error: 'forbidden' });
+    const recommendation = await prisma.crewRecommendation.findUnique({
+      where: { id: recId },
+      select: { crewId: true, experience: { select: { category: true, priceMinMinor: true } } },
+    });
+    if (!recommendation || recommendation.crewId !== id) return reply.code(404).send({ error: 'not_found' });
+    if (!recommendation.experience) return reply.send({ options: [] });
+    return reply.send({ options: reasonOptionsFor(recommendation.experience) });
   });
 }

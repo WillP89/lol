@@ -226,6 +226,44 @@ describe('automatic Crew recommendations: real personalisation, not a fake carou
     expect(updated.respondedAt).not.toBeNull();
   });
 
+  test('reason-options are contextual to the actual recommendation, and NOT_FOR_US with a reasonCode returns a matching, non-technical ack', async () => {
+    // Logs in as the comedy Crew's MATE (not its owner) — the owner email is already right at
+    // this suite's magic-link rate-limit budget (5 requests/15min, services/auth.ts's own
+    // requestMagicLink), and this test needs its own fresh login on top of every other test in
+    // this file that already logs the owner back in.
+    const owner = await loginByEmail('rec-comedy-mate@plot-test.invalid');
+    const plansRes = await app.inject({ method: 'GET', url: `/crews/${comedyCrewId}/messages`, headers: { cookie: owner.cookie } });
+    const { messages } = plansRes.json() as { messages: { body: string }[] };
+    const announcement = messages.find((m) => m.body.includes(' — /plans/'))!;
+    const slug = announcement.body.match(/\/plans\/([a-zA-Z0-9-]+)$/)![1];
+
+    const planRes = await app.inject({ method: 'GET', url: `/plans/public/${slug}` });
+    const planBody = planRes.json() as { recommendation: { id: string; confidence: string } | null; reasonOptions?: { code: string; label: string }[] };
+    expect(planBody.recommendation).not.toBeNull();
+    expect(['HIGH', 'MEDIUM', 'EXPLORATORY']).toContain(planBody.recommendation!.confidence);
+    expect(planBody.reasonOptions).toBeDefined();
+    expect(planBody.reasonOptions!.length).toBeGreaterThan(0);
+
+    const optionsRes = await app.inject({
+      method: 'GET',
+      url: `/crews/${comedyCrewId}/recommendations/${planBody.recommendation!.id}/reason-options`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(optionsRes.statusCode).toBe(200);
+    const { options } = optionsRes.json() as { options: { code: string; label: string }[] };
+    expect(options).toEqual(planBody.reasonOptions);
+
+    const respondRes = await app.inject({
+      method: 'POST',
+      url: `/crews/${comedyCrewId}/recommendations/${planBody.recommendation!.id}/respond`,
+      headers: { cookie: owner.cookie },
+      payload: { action: 'not_for_us', reasonCode: 'done_enough_lately' },
+    });
+    expect(respondRes.statusCode).toBe(200);
+    const { ack } = respondRes.json() as { ack: string };
+    expect(ack.toLowerCase()).toContain('mix it up');
+  });
+
   test('a member from a different Crew cannot respond to this Crew\'s recommendation (IDOR check)', async () => {
     const comedyOwner = await loginByEmail('rec-comedy-owner@plot-test.invalid');
     const sportOwner = await loginByEmail('rec-sport-owner@plot-test.invalid');

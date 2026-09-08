@@ -17,6 +17,7 @@ import {
 } from '../services/plan';
 import { track } from '../services/analytics';
 import { hasLiveTicketedProvider } from '../providers/registry';
+import { reasonOptionsFor } from '../services/recommendationLearning';
 import { prisma } from '../lib/prisma';
 
 export async function planRoutes(app: FastifyInstance): Promise<void> {
@@ -96,9 +97,16 @@ export async function planRoutes(app: FastifyInstance): Promise<void> {
     // docs/DECISIONS.md#crew-auto-recommendations.
     const recommendation = await prisma.crewRecommendation.findUnique({
       where: { planId: plan.id },
-      select: { id: true, reasonText: true, status: true },
+      select: { id: true, reasonText: true, status: true, confidence: true },
     });
-    return reply.send({ plan, pulse, recommendation });
+    // The real, contextual "not for us" reason options for this exact recommendation (see
+    // recommendationLearning.ts#reasonOptionsFor) — embedded here rather than a second round trip,
+    // since the Plan Card is the only place a member ever taps "Not for us" from.
+    const reasonOptions =
+      recommendation && plan.experience
+        ? reasonOptionsFor({ category: plan.experience.category, priceMinMinor: plan.experience.priceMinMinor })
+        : undefined;
+    return reply.send({ plan, pulse, recommendation, reasonOptions });
   });
 
   // Public — vote without an account (email-only). See services/plan.ts#submitVote.

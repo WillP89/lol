@@ -12,6 +12,8 @@ import { experienceInterestTags, experienceMatchesFreeText, categoryToTasteKey, 
 import { assertCrewPreferencesSet } from './crewPreferencesGate';
 import { interestLabel, TASTE_INTEREST_INDEX, UNAMBIGUOUS_CATEGORIES, TERRITORIES_REQUIRING_EXPLICIT_RELATION, RELATED_INTERESTS } from '@plot/shared';
 import { isPlanWorthyForCrew, isTicketedEvent } from './opportunityIntent';
+import { computeCrewLearningBias } from './recommendationLearning';
+import { deriveConfidence, type RecommendationConfidenceLevel } from './recommendationConfidence';
 import type { Experience, TasteProfile, Plan, Venue } from '@prisma/client';
 
 export interface MatchReason {
@@ -45,6 +47,11 @@ export interface MatchOption {
   // (GET /admin/crews/:id/explain-recommendation) and the client can show a real "X miles away",
   // never a fabricated one — product spec's own "HOW FAR?" requirement.
   distanceMiles: number | null;
+  // Real, evidence-derived confidence (services/recommendationConfidence.ts) — computed for
+  // every scored option, not just ones the automatic engine ends up sending, so the manual
+  // "Find us something" flow's own cards can show the same honest framing. Never a raw score or
+  // percentage — see that file's own header.
+  confidence: RecommendationConfidenceLevel;
 }
 
 /**
@@ -127,7 +134,7 @@ export async function scoreExperiencesForCrew(
   crewId: string,
   opts: { radiusMetersOverride?: number | null } = {},
 ): Promise<MatchOption[]> {
-  const [members, dna, recommendationSettings, pastResponses, crewLocation] = await Promise.all([
+  const [members, dna, recommendationSettings, learningBias, crewLocation] = await Promise.all([
     prisma.crewMember.findMany({
       where: { crewId, status: 'ACTIVE' },
       include: { user: { include: { tasteProfile: true, profile: true } } },
@@ -141,16 +148,15 @@ export async function scoreExperiencesForCrew(
     // settings UI) simply has no preference — this reads, never creates, so a brand-new Crew's
     // first score isn't blocked on a settings write.
     prisma.crewRecommendationSettings.findUnique({ where: { crewId }, select: { categoryPreferences: true, interestPreferences: true, travelRadiusMeters: true } }),
-    // THE LEARNING LOOP (brief §"PASS teaches Plot nothing" — this is the fix). Every past
-    // response this Crew has given a CrewRecommendation, joined to what that Experience actually
-    // was — turned into a per-category/per-interest bias applied to THIS scoring pass only (never
-    // written back into an individual member's own TasteProfile, since a Crew's collective "not
-    // for us" isn't necessarily true of any one person in it). See `buildLearningBias` below for
-    // which response kinds count as taste signal vs. purely situational.
-    prisma.crewRecommendation.findMany({
-      where: { crewId, status: { not: 'SENT' } },
-      select: { status: true, experience: { select: { category: true, subcategories: true, name: true, description: true } } },
-    }),
+    // THE LEARNING LOOP (brief §"PASS teaches Plot nothing" — this is the fix), and its own
+    // pilot-readiness rebuild (docs/DECISIONS.md#crew-recommendation-learning-engine): every real
+    // signal this Crew has ever given Plot — per-member recommendation responses, real IN/MAYBE/
+    // OUT votes, real Locked plans — weighted by how many DISTINCT people actually said it (never
+    // one person's tap reading as the whole Crew's verdict) and decayed over time (preferences
+    // change; nothing here is a permanent ban). See services/recommendationLearning.ts's own
+    // header for the full model — this used to be a bare `buildLearningBias` reading only
+    // CrewRecommendation.status, with neither of those two properties.
+    computeCrewLearningBias(crewId),
     // The Crew's own explicit location (Crew.latitude/.longitude — see that field's own schema
     // comment) — read here alongside everything else this function already fetches once, rather
     // than requiring a second round trip.
@@ -158,7 +164,6 @@ export async function scoreExperiencesForCrew(
   ]);
   const crewCategoryPreferences = new Set(recommendationSettings?.categoryPreferences ?? []);
   const crewInterestPreferences = new Set(recommendationSettings?.interestPreferences ?? []);
-  const learningBias = buildLearningBias(pastResponses);
 
   const userIds = members.map((m) => m.userId);
   const tasteProfiles = members
@@ -613,14 +618,16 @@ export async function scoreExperiencesForCrew(
       reasons.push({ code: 'ticketed_event', label: 'Real tickets available' });
     }
 
+    const matchScore = Math.max(0, Math.min(100, Math.round(score)));
     scored.push({
       experience,
-      matchScore: Math.max(0, Math.min(100, Math.round(score))),
+      matchScore,
       reasons,
       availableMemberCount: availableCount,
       totalMemberCount: userIds.length,
       withinRadius,
       distanceMiles,
+      confidence: deriveConfidence({ matchScore, reasons, experience }).level,
     });
   }
 
@@ -770,49 +777,11 @@ export async function suggestToCrewChat(crewId: string, requestedByUserId: strin
   return plans;
 }
 
-interface LearningBias {
-  category: Map<string, number>;
-  interest: Map<string, number>;
-}
-
-/** THE LEARNING LOOP — turns this Crew's actual past responses to recommendations into a bias
- *  applied to future scoring for that same Crew. Deliberately distinguishes two different kinds
- *  of PASS (brief §"be careful — one PASS should not permanently blacklist an entire category"):
- *
- *   - NOT_FOR_US / WRONG_VIBE are genuine taste signal ("not our thing") — negative bias.
- *   - TOO_FAR / TOO_EXPENSIVE are situational (wrong date/price/distance, not wrong taste) —
- *     contribute NOTHING here; match.ts's own distance/budget scoring already handles those
- *     dimensions directly, so double-counting them as a taste penalty would be exactly the "one
- *     PASS blacklists a category" failure mode the brief warns against.
- *   - MORE_LIKE_THIS is the positive counterpart, reinforcing a category/interest that landed well.
- *
- *  Each occurrence nudges by a small, capped amount (never unbounded) — a Crew that's said
- *  NOT_FOR_US to comedy three times ends up meaningfully cooler on comedy, not permanently
- *  zeroed out, and one MORE_LIKE_THIS can still counteract it. Scoped to THIS Crew's own
- *  scoring pass only, never written back into an individual member's TasteProfile — a Crew's
- *  collective "not for us" isn't necessarily true of any one person in it. */
-function buildLearningBias(
-  pastResponses: { status: string; experience: { category: string; subcategories: unknown; name: string; description: string } | null }[],
-): LearningBias {
-  const category = new Map<string, number>();
-  const interest = new Map<string, number>();
-  for (const r of pastResponses) {
-    if (!r.experience) continue;
-    let delta = 0;
-    if (r.status === 'NOT_FOR_US' || r.status === 'WRONG_VIBE') delta = -0.35;
-    else if (r.status === 'MORE_LIKE_THIS') delta = 0.35;
-    if (delta === 0) continue;
-    category.set(r.experience.category, clamp(-1, 1, (category.get(r.experience.category) ?? 0) + delta));
-    for (const tag of experienceInterestTags(r.experience)) {
-      interest.set(tag, clamp(-1, 1, (interest.get(tag) ?? 0) + delta));
-    }
-  }
-  return { category, interest };
-}
-
-function clamp(min: number, max: number, v: number): number {
-  return Math.max(min, Math.min(max, v));
-}
+// THE LEARNING LOOP itself moved to services/recommendationLearning.ts#computeCrewLearningBias
+// — a real, weighted, decayed, positive-AND-negative model (docs/DECISIONS.md#crew-
+// recommendation-learning-engine), replacing this file's old `buildLearningBias` (which only
+// ever read one un-attributed status field per recommendation, with no notion of individual vs
+// Crew signal or decay). See that file's own header for the full model.
 
 function medianOf(values: number[]): number {
   if (values.length === 0) return 0;

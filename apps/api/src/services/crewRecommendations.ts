@@ -8,8 +8,16 @@ import { sendSystemMessage } from './chat';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { interestLabel } from '@plot/shared';
 import { derivePlanWorthiness, deriveBookingType, deriveSourceKind, isTicketedEvent } from './opportunityIntent';
+import { MIN_RECOMMENDATION_SCORE, EXPLORATION_MIN_SCORE, deriveConfidence, confidenceLeadIn } from './recommendationConfidence';
+import { RecommendationResponseError, type RecommendationResponseAction } from './recommendationLearning';
 import { Prisma } from '@prisma/client';
-import type { CrewRecommendation, CrewRecommendationStatus } from '@prisma/client';
+import type { CrewRecommendation } from '@prisma/client';
+
+// Re-exported for callers that still import these from this file (routes/crews.ts) — the real
+// definitions moved to services/recommendationLearning.ts alongside the learning model they
+// feed, so the response-recording logic and the bias it produces can't drift apart across two
+// files. See that file's own header.
+export { RecommendationResponseError as RecommendationError, type RecommendationResponseAction };
 
 /**
  * Real gap this closes: every rejection path in `generateRecommendationForCrew` just returned
@@ -23,6 +31,8 @@ type RecommendationOutcome =
   | 'disabled'
   | 'preferences_not_set'
   | 'location_not_set'
+  | 'crew_inactive'
+  | 'too_soon'
   | 'weekly_cap_reached'
   | 'too_few_members'
   | 'no_eligible_candidate'
@@ -43,10 +53,40 @@ function logRecommendationOutcome(crewId: string, outcome: RecommendationOutcome
  * Match. See docs/DECISIONS.md#crew-auto-recommendations for the full design rationale.
  */
 
-// A confidence floor, not a quota — most weeks most Crews will see nothing, because most weeks
-// nothing clears this bar. Never "keep lowering the bar until something ships" logic.
-const MIN_RECOMMENDATION_SCORE = 55;
+// MIN_RECOMMENDATION_SCORE/EXPLORATION_MIN_SCORE moved to services/recommendationConfidence.ts —
+// the confidence floor and the eligibility floor are the same number by definition, now defined
+// once. Still a confidence floor, not a quota: most weeks most Crews will see nothing, because
+// most weeks nothing clears this bar. Never "keep lowering the bar until something ships" logic.
 const LOOKBACK_DAYS_FOR_WEEKLY_CAP = 7;
+// Real pilot-readiness cadence requirement: "space recommendations across the week... do not
+// dump three into chat together." A floor between any two automatic sends for the SAME Crew,
+// regardless of the weekly cap — spreads "up to 3/week" across early/mid/late week rather than
+// letting three consecutive 6-hourly sweep passes (RECOMMENDATION_SWEEP_DUE_INTERVAL_MS) fire
+// one right after another the moment a Crew clears its confidence bar three times in a row.
+const MIN_HOURS_BETWEEN_RECOMMENDATIONS = 36;
+// "Do not blindly send three recommendations every week to abandoned Crews" — real signals of a
+// Crew still being a going concern: recent chat, a recent response to a past recommendation, or
+// recent Plan activity. A brand-new Crew gets an onboarding grace period (this same window)
+// regardless of activity, since it hasn't had time to generate any yet. Chosen to comfortably
+// span a realistic "we're mid-planning, just went quiet for a bit" gap without becoming
+// effectively unconditional — a real, documented judgement call, not derived from data this
+// pilot doesn't have yet (see docs/DECISIONS.md#crew-recommendation-learning-engine).
+const ACTIVE_CREW_WINDOW_DAYS = 21;
+// Diversity/fatigue (product spec Part 3): the last N sends' categories get a tapering score
+// penalty against a repeat of the SAME category, so a strong exceptional match still wins (never
+// randomised — Part 3's own explicit "relevance + variety, not randomness"), but a near-tie
+// between "more of the same" and "something different" resolves toward variety. Applied only to
+// the automatic engine's own candidate pool (this file), never to match.ts's shared scorer — a
+// member manually asking "Find us something" wants the single best match, not a diversity-
+// optimised one.
+const CATEGORY_FATIGUE_WINDOW = 3;
+const CATEGORY_FATIGUE_PENALTY = [12, 7, 3]; // most-recent-category penalty first, tapering
+// Controlled exploration (product spec Part 7: "MOST high-confidence... SOME exploratory...
+// VERY LITTLE true wildcard" — "very little", not zero, and never at the cost of a real match).
+// Only reachable when NOTHING clears the normal confidence bar at all (never displaces a real
+// HIGH/MEDIUM pick — see `selectExploratoryCandidate`'s own comment), and rate-limited to at most
+// one per Crew per week so "exploratory" stays genuinely occasional, not a second normal tier.
+const MAX_EXPLORATORY_SENDS_PER_WEEK = 1;
 
 // The real delivery cadence — shared by server.ts's own poll and the admin sweep endpoint's
 // default (non-`force`) path, so there is exactly one place this number lives, not two that can
@@ -245,6 +285,82 @@ function explanationFor(option: MatchOption, opts: { isTicketedFallback?: boolea
   return opts.isTicketedFallback ? `${TICKETED_FALLBACK_PREFACE} — ${lowerFirst(explanation)}` : explanation;
 }
 
+interface CrewActivitySignals {
+  isActive: boolean;
+  reason: 'onboarding_grace_period' | 'recent_message' | 'recent_response' | 'recent_plan_activity' | 'inactive';
+  lastRecommendationAt: Date | null;
+}
+
+/** "Do not blindly send three recommendations every week to abandoned Crews" — a real, documented
+ *  definition of an active Crew (see ACTIVE_CREW_WINDOW_DAYS's own comment for the window and
+ *  reasoning): recent chat, a recent response to a past recommendation, recent Plan activity, or
+ *  still within a brand-new Crew's own onboarding grace period. Any ONE of these is enough — this
+ *  is "still a going concern", not "highly engaged". Also returns `lastRecommendationAt` (used
+ *  for the cadence-spacing check right after this function's own caller) since both checks need
+ *  the same real activity window and there's no reason to query it twice. */
+async function getCrewActivitySignals(crewId: string): Promise<CrewActivitySignals> {
+  const since = new Date(Date.now() - ACTIVE_CREW_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const [crew, recentMessage, recentResponse, recentPlanActivity, lastRecommendation] = await Promise.all([
+    prisma.crew.findUnique({ where: { id: crewId }, select: { createdAt: true } }),
+    prisma.crewMessage.findFirst({ where: { crewId, createdAt: { gte: since } }, select: { id: true } }),
+    prisma.recommendationResponse.findFirst({ where: { crewRecommendation: { crewId }, createdAt: { gte: since } }, select: { id: true } }),
+    prisma.plan.findFirst({ where: { crewId, updatedAt: { gte: since } }, select: { id: true } }),
+    prisma.crewRecommendation.findFirst({ where: { crewId }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+  ]);
+  const lastRecommendationAt = lastRecommendation?.createdAt ?? null;
+  if (crew && crew.createdAt >= since) return { isActive: true, reason: 'onboarding_grace_period', lastRecommendationAt };
+  if (recentMessage) return { isActive: true, reason: 'recent_message', lastRecommendationAt };
+  if (recentResponse) return { isActive: true, reason: 'recent_response', lastRecommendationAt };
+  if (recentPlanActivity) return { isActive: true, reason: 'recent_plan_activity', lastRecommendationAt };
+  return { isActive: false, reason: 'inactive', lastRecommendationAt };
+}
+
+/** Diversity/fatigue (see CATEGORY_FATIGUE_WINDOW/PENALTY's own comment) — a real, bounded,
+ *  score-space penalty for repeating one of the last few sent categories, never a hard exclusion
+ *  and never randomised. Returns a NEW array (never mutates `pool`) with adjusted `matchScore`s,
+ *  re-sorted — callers that need score-ordering (pickBest, the debugger's own top-10) both
+ *  already re-sort their own input, so this doesn't need to guarantee order beyond "adjusted". */
+async function applyCategoryFatigue(crewId: string, pool: MatchOption[]): Promise<MatchOption[]> {
+  if (pool.length === 0) return pool;
+  const recent = await prisma.crewRecommendation.findMany({
+    where: { crewId },
+    orderBy: { createdAt: 'desc' },
+    take: CATEGORY_FATIGUE_WINDOW,
+    select: { experience: { select: { category: true } } },
+  });
+  const recentCategories = recent.map((r) => r.experience.category);
+  if (recentCategories.length === 0) return pool;
+  return pool.map((o) => {
+    const idx = recentCategories.indexOf(o.experience.category);
+    if (idx === -1) return o;
+    const penalty = CATEGORY_FATIGUE_PENALTY[idx] ?? 0;
+    if (penalty === 0) return o;
+    return { ...o, matchScore: Math.max(0, o.matchScore - penalty) };
+  });
+}
+
+/** Controlled exploration — see MAX_EXPLORATORY_SENDS_PER_WEEK's own comment for the "very
+ *  little, never at the cost of a real match" framing. Only ever called when `eligible` (the
+ *  normal HIGH/MEDIUM pool) is EMPTY — this can never displace a real match, only fill a genuine
+ *  gap that would otherwise be silence. A candidate qualifies only with real, checkable evidence
+ *  it's worth the risk: ticketed (a real ticket, not a permanent place listing — see
+ *  opportunityIntent.ts), positively within radius (never a distance-stretched "worth the trip"
+ *  candidate), and scoring in the real exploratory band (EXPLORATION_MIN_SCORE..
+ *  MIN_RECOMMENDATION_SCORE — still has at least one real taste signal, from `withTaste`'s own
+ *  filter, just not enough of one to clear the normal bar). Rate-limited by counting this Crew's
+ *  own EXPLORATORY-confidence sends in the last 7 days. */
+async function selectExploratoryCandidate(crewId: string, withTaste: MatchOption[]): Promise<MatchOption | null> {
+  const candidates = withTaste.filter(
+    (o) => o.matchScore >= EXPLORATION_MIN_SCORE && o.matchScore < MIN_RECOMMENDATION_SCORE && o.withinRadius === true && isTicketedEvent(o.experience),
+  );
+  if (candidates.length === 0) return null;
+  const recentExploratoryCount = await prisma.crewRecommendation.count({
+    where: { crewId, confidence: 'EXPLORATORY', createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
+  });
+  if (recentExploratoryCount >= MAX_EXPLORATORY_SENDS_PER_WEEK) return null;
+  return [...candidates].sort((a, b) => b.matchScore - a.matchScore)[0];
+}
+
 async function resolveCrewCityForSweep(crewId: string): Promise<string> {
   const crew = await prisma.crew.findUnique({
     where: { id: crewId },
@@ -274,6 +390,12 @@ export interface CrewEligibilityResult {
   // "there's not much in your area right now" preface only appears when this is true, never
   // fabricated, never omitted when it should show. See this file's own `pickBest` comment.
   usedTicketedFallback?: boolean;
+  // True only for a genuine controlled-exploration send (see selectExploratoryCandidate's own
+  // comment) — tells generateRecommendationForCrew to label this EXPLORATORY rather than let
+  // deriveConfidence infer a level from score alone (an exploratory pick's score is, by
+  // definition, below the normal MEDIUM floor — inferring from score would just read as LOW,
+  // not the deliberate, evidence-backed exploration this actually is).
+  forceExploratoryConfidence?: boolean;
 }
 
 /** THE TIERING RULE this whole rebuild exists to enforce: "I need ticketed only events... don't
@@ -339,6 +461,22 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     return { outcome: 'location_not_set', details: { memberLocations: locationSummary, crewHasExplicitLocation } };
   }
 
+  // "Do not blindly send three recommendations every week to abandoned Crews" — see
+  // ACTIVE_CREW_WINDOW_DAYS's own comment for the exact signals and the grace-period reasoning.
+  const activity = await getCrewActivitySignals(crewId);
+  if (!activity.isActive) {
+    return { outcome: 'crew_inactive', details: { ...activity } };
+  }
+  // Real cadence spacing — see MIN_HOURS_BETWEEN_RECOMMENDATIONS's own comment. Naturally a
+  // no-op for a Crew's true first recommendation (nothing to space against yet), so this never
+  // blocks `guaranteeFirst`'s own "never come up empty on day one" guarantee.
+  if (activity.lastRecommendationAt) {
+    const hoursSinceLast = (Date.now() - activity.lastRecommendationAt.getTime()) / (1000 * 60 * 60);
+    if (hoursSinceLast < MIN_HOURS_BETWEEN_RECOMMENDATIONS) {
+      return { outcome: 'too_soon', details: { lastRecommendationAt: activity.lastRecommendationAt, hoursSinceLast: Math.round(hoursSinceLast * 10) / 10, minHoursBetween: MIN_HOURS_BETWEEN_RECOMMENDATIONS } };
+    }
+  }
+
   const since = new Date(Date.now() - LOOKBACK_DAYS_FOR_WEEKLY_CAP * 24 * 60 * 60 * 1000);
   const [recentCount, memberCount] = await Promise.all([
     prisma.crewRecommendation.count({ where: { crewId, createdAt: { gte: since } } }),
@@ -355,7 +493,13 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   const city = await resolveCrewCityForSweep(crewId);
   await ensureInventory(city);
 
-  const scored = await scoreExperiencesForCrew(crewId, { radiusMetersOverride: settings.travelRadiusMeters });
+  const scoredBeforeFatigue = await scoreExperiencesForCrew(crewId, { radiusMetersOverride: settings.travelRadiusMeters });
+  // Diversity/fatigue penalty (see CATEGORY_FATIGUE_WINDOW/PENALTY's own comment) — applied here,
+  // to the automatic engine's own pool specifically, never inside match.ts's shared scorer (a
+  // member manually asking "Find us something" wants the single best match, not a diversity-
+  // optimised one). Re-sorted so every downstream consumer (debugger, tiering) sees the
+  // fatigue-adjusted order, not the pre-penalty one.
+  const scored = (await applyCategoryFatigue(crewId, scoredBeforeFatigue)).sort((a, b) => b.matchScore - a.matchScore);
 
   // Never repeat: anything ever recommended to this Crew before (any status — a dismissal is
   // still a "don't show again", not a "try harder next time"), and anything a member has
@@ -482,6 +626,13 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   }
 
   if (eligible.length === 0) {
+    // Controlled exploration (see selectExploratoryCandidate's own comment) — tried only once
+    // the normal HIGH/MEDIUM pool has genuinely come up empty, so this can never displace a real
+    // match, only fill a gap that would otherwise be silence.
+    const exploratory = await selectExploratoryCandidate(crewId, withTaste);
+    if (exploratory) {
+      return { outcome: 'eligible', details: { ...details, exploratory: true }, best: exploratory, usedTicketedFallback: false, forceExploratoryConfidence: true };
+    }
     // Which filter actually killed it — "no strong match" covers a lot of genuinely different
     // situations, and during pilot "the whole pipeline is broken" vs "this Crew's taste is just
     // narrow this week" need to be tellable apart from the logs alone.
@@ -503,7 +654,37 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
  * (routes/crews.ts) — never the periodic sweep, which stays deliberately conservative. See
  * evaluateCrewEligibility's own comment on what it relaxes and what it never does.
  */
-export async function generateRecommendationForCrew(crewId: string, opts: { guaranteeFirst?: boolean } = {}): Promise<CrewRecommendation | null> {
+// Per-crew in-process serialization — real concurrency bug found operating this: two independent
+// call sites can both fire `generateRecommendationForCrew(crewId, { guaranteeFirst: true })` for
+// the SAME brand-new Crew within milliseconds of each other (updateSettings's own first-
+// preferences-set trigger and routes/crews.ts's 1->2-member join trigger — see each one's own
+// comment on why both exist). Both used to run fully concurrently: each independently read
+// `excluded`/`alreadySpoken` before either had written anything, so both could pass every check
+// and both proceed — one delivering a real recommendation, the other (finding nothing "yet"
+// excluded from ITS OWN read) sending the honest "we don't have anything yet" fallback message
+// milliseconds apart, so a Crew could see BOTH in the same breath. Made measurably easier to hit
+// by this phase's own added checks (getCrewActivitySignals, cadence spacing) — more awaited work
+// between "read" and "write" widens the exact window this race lives in. Fixed by chaining every
+// call for the same crewId onto the previous one's completion — the standard, cheap fix for this
+// shape of bug in a single-process deployment (see runSweepIfDue's own comment on this app's real
+// deployment target); a call that arrives while another is still running now genuinely waits for
+// it, so the second evaluation always sees the first one's effects, never a stale, pre-write view.
+const inFlightGenerations = new Map<string, Promise<CrewRecommendation | null>>();
+
+export function generateRecommendationForCrew(crewId: string, opts: { guaranteeFirst?: boolean } = {}): Promise<CrewRecommendation | null> {
+  const prior = inFlightGenerations.get(crewId) ?? Promise.resolve(null);
+  const chained = prior.catch(() => null).then(() => generateRecommendationForCrewNow(crewId, opts));
+  inFlightGenerations.set(crewId, chained);
+  // A no-op `.catch` off the SAME promise the caller gets back — cleanup must observe a rejection
+  // too (or this dangling branch becomes an unhandled rejection), but must never swallow it for
+  // the caller, who still awaits/catches `chained` itself, unaffected by this branch.
+  chained.catch(() => {}).finally(() => {
+    if (inFlightGenerations.get(crewId) === chained) inFlightGenerations.delete(crewId);
+  });
+  return chained;
+}
+
+async function generateRecommendationForCrewNow(crewId: string, opts: { guaranteeFirst?: boolean } = {}): Promise<CrewRecommendation | null> {
   const evaluation = await evaluateCrewEligibility(crewId, opts);
   if (evaluation.outcome !== 'eligible' || !evaluation.best) {
     logRecommendationOutcome(crewId, evaluation.outcome as RecommendationOutcome, evaluation.details);
@@ -571,10 +752,17 @@ export async function generateRecommendationForCrew(crewId: string, opts: { guar
     await enrichMissingImageForExperience({ id: best.experience.id, name: best.experience.name, category: best.experience.category });
   }
 
+  // Real, evidence-derived confidence (services/recommendationConfidence.ts) — decides the
+  // message's own lead-in copy AND is stored on the row for pilot analytics/the card's own
+  // display. Ticketed-fallback takes priority over confidence framing when both could apply (a
+  // more specific honesty signal — "we tried to find a ticket" — than a generic confidence
+  // level); an exploratory send is always labelled EXPLORATORY explicitly (see
+  // CrewEligibilityResult.forceExploratoryConfidence's own comment), never inferred from score.
+  const confidence = deriveConfidence(best, { forceExploratory: evaluation.forceExploratoryConfidence }).level;
+  const leadIn = evaluation.usedTicketedFallback ? TICKETED_FALLBACK_PREFACE : confidenceLeadIn(confidence);
+
   const systemUserId = await getPlotSystemUserId();
-  const { plan, messageId } = await createRecommendationPlanForCrew(crewId, best.experience.id, systemUserId, {
-    preface: evaluation.usedTicketedFallback ? TICKETED_FALLBACK_PREFACE : undefined,
-  });
+  const { plan, messageId } = await createRecommendationPlanForCrew(crewId, best.experience.id, systemUserId, { preface: leadIn });
 
   const recommendation = await prisma.crewRecommendation.create({
     data: {
@@ -583,20 +771,24 @@ export async function generateRecommendationForCrew(crewId: string, opts: { guar
       score: best.matchScore,
       reasonText: explanationFor(best, { isTicketedFallback: evaluation.usedTicketedFallback }),
       status: 'SENT',
+      confidence,
       planId: plan.id,
     },
   });
 
+  const ticketed = isTicketedEvent(best.experience);
   await track(
     'CrewRecommendationDelivered',
-    { crewId, experienceId: best.experience.id, score: best.matchScore },
+    { crewId, experienceId: best.experience.id, score: best.matchScore, confidence, category: best.experience.category, ticketed, usedTicketedFallback: Boolean(evaluation.usedTicketedFallback) },
     { crewId, planId: plan.id },
   );
   logRecommendationOutcome(crewId, 'delivered', {
     experienceId: best.experience.id,
     score: best.matchScore,
     planId: plan.id,
-    isTicketedEvent: isTicketedEvent(best.experience),
+    confidence,
+    category: best.experience.category,
+    isTicketedEvent: ticketed,
     usedTicketedFallback: Boolean(evaluation.usedTicketedFallback),
   });
   void messageId; // kept on the created CrewMessage itself; not stored redundantly here
@@ -627,50 +819,11 @@ export async function explainCrewRecommendation(crewId: string) {
   };
 }
 
-export type RecommendationResponseAction = 'more_like_this' | 'not_for_us' | 'too_far' | 'too_expensive' | 'wrong_vibe';
-
-const RESPONSE_STATUS: Record<RecommendationResponseAction, CrewRecommendationStatus> = {
-  more_like_this: 'MORE_LIKE_THIS',
-  not_for_us: 'NOT_FOR_US',
-  too_far: 'TOO_FAR',
-  too_expensive: 'TOO_EXPENSIVE',
-  wrong_vibe: 'WRONG_VIBE',
-};
-
-export class RecommendationError extends Error {
-  constructor(message: string, public code: 'not_found' | 'invalid_action') {
-    super(message);
-  }
-}
-
-/** Lightweight per-recommendation feedback — "More like this" / "Not for us" / "Too far" /
- * "Too expensive" / "Wrong vibe". Every action marks the recommendation responded-to (so it's
- * never re-surfaced as "new"); the experience itself is already permanently excluded from
- * future scoring for this Crew regardless of which button was tapped — see
- * `generateRecommendationForCrew`'s `excluded` set above. */
-export async function respondToRecommendation(
-  crewId: string,
-  recommendationId: string,
-  userId: string,
-  action: RecommendationResponseAction,
-): Promise<CrewRecommendation> {
-  const status = RESPONSE_STATUS[action];
-  if (!status) throw new RecommendationError('Not a recognised response.', 'invalid_action');
-
-  const existing = await prisma.crewRecommendation.findUnique({ where: { id: recommendationId } });
-  if (!existing || existing.crewId !== crewId) {
-    throw new RecommendationError('Recommendation not found for this Crew.', 'not_found');
-  }
-
-  const updated = await prisma.crewRecommendation.update({
-    where: { id: recommendationId },
-    data: { status, respondedAt: new Date() },
-  });
-
-  await track('CrewRecommendationResponded', { crewId, recommendationId, action, userId }, { crewId, userId });
-
-  return updated;
-}
+// respondToRecommendation moved to services/recommendationLearning.ts#recordRecommendationResponse
+// — the response-recording write path now lives alongside the learning model it feeds (per-
+// member RecommendationResponse rows, real reason codes, the "Got it — ..." acknowledgment),
+// rather than a second file that would have to stay in sync with it. RecommendationError/
+// RecommendationResponseAction are re-exported above for existing importers.
 
 /**
  * The periodic delivery job (brief's "a scheduling/delivery mechanism... periodic job

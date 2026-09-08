@@ -10,8 +10,9 @@ import { prisma } from '../src/lib/prisma';
  * recommendation — proven two ways:
  *
  *  1. When a real ticketed candidate exists alongside a non-ticketed one (both otherwise
- *     eligible), the ticketed one wins, with the normal confident "Plot found something" framing
- *     — never the fallback caveat when a real ticket genuinely was available.
+ *     eligible), the ticketed one wins, with the normal confidence-derived framing (see
+ *     services/recommendationConfidence.ts#confidenceLeadIn) — never the ticketed-fallback caveat
+ *     when a real ticket genuinely was available.
  *  2. When NOTHING ticketed clears the Crew's own eligibility bar, Plot still sends its best
  *     available (non-ticketed) match — never silence — but honestly prefaces it: "There's not
  *     much in your area right now, so how about this" (product spec's own exact wording),
@@ -103,7 +104,8 @@ describe('a real ticketed event beats a non-ticketed one, always', () => {
     const messages = await prisma.crewMessage.findMany({ where: { crewId }, orderBy: { createdAt: 'asc' } });
     const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
-    expect(announcement!.body).toContain('Plot found something your Crew might like');
+    // Normal confidence framing, never the ticketed-fallback caveat — a real ticket was available.
+    expect(announcement!.body).not.toContain("There's not much in your area right now");
     expect(announcement!.body).toContain('Stone Live Music Night');
   });
 });
@@ -124,6 +126,5 @@ describe('no ticketed event available: Plot still sends its best match, honestly
     const announcement = messages.find((m) => m.body.includes(' — /plans/'));
     expect(announcement).toBeDefined();
     expect(announcement!.body).toMatch(/^There's not much in your area right now, so how about this: "Stone Food Festival"/);
-    expect(announcement!.body).not.toContain('Plot found something your Crew might like');
   });
 });
