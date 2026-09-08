@@ -1,15 +1,17 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, ExperienceCategory } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { config } from '../lib/config';
 import { syncAllProviders, backfillImageQuality, backfillMissingImages, backfillVenueCities } from '../services/inventorySync';
 import { providerRegistry } from '../providers/registry';
 import { buildCanonicalKey } from '../services/entityResolution';
-import { computeQualityScore } from '../services/qualityScoring';
+import { computeQualityScore, MIN_PUBLISHABLE_QUALITY_SCORE } from '../services/qualityScoring';
 import { UK_FALLBACK_CENTER, resolveCityCenter } from '../data/ukPlaces';
 import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, getOrCreateSettings, explainCrewRecommendation, PLOT_SYSTEM_EMAIL, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from '../services/crewRecommendations';
 import { CANDIDATE_WINDOW_DAYS } from '../services/match';
+import { haversineKm } from '../lib/geo';
+import { isPlanWorthyForCrew } from '../services/opportunityIntent';
 import { runMessageNotificationSweep, runMessageNotificationSweepIfDue, MESSAGE_NOTIFICATION_SWEEP_DUE_INTERVAL_MS } from '../services/messageNotifications';
 
 /**
@@ -149,6 +151,90 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       probeWindowDays: days,
       recommendationWindowDays: CANDIDATE_WINDOW_DAYS,
       providers: perProvider,
+    });
+  });
+
+  // Real gap this closes: `/inventory-probe` shows what a LIVE provider would return right now
+  // (bypassing the database entirely), and `/providers` shows aggregate DB counts per provider —
+  // neither answers the actual question "what does the automatic engine's own scorer see for
+  // THIS city right now, and why did each nearby candidate pass or fail". That gap is exactly
+  // what turned a live "0 scored / 0 in radius" incident into several rounds of guessing: sync
+  // completing cleanly proves listings exist somewhere, not that any of them are the RIGHT
+  // category, within date, above the quality floor, or "plan-worthy" — every one of which is a
+  // silent, separate way to end up with zero. This mirrors `scoreExperiencesForCrew`'s own gates
+  // (services/match.ts) exactly, read-only, without needing a live Crew id — the diagnostics
+  // page's per-Crew explain already covers "why didn't THIS Crew get sent something"; this
+  // covers "what does the database actually hold near this city, full stop".
+  app.get('/experiences-near', async (request, reply) => {
+    const Schema = z.object({
+      city: z.string().default(UK_FALLBACK_CENTER.name),
+      radiusKm: z.coerce.number().positive().max(500).default(50),
+      category: z.string().optional(), // e.g. SPORT, CLUBBING, LIVE_MUSIC — filters after distance, same order as the real scorer's own gates
+      limit: z.coerce.number().int().positive().max(200).default(40),
+    });
+    const parsed = Schema.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const { city, radiusKm, category, limit } = parsed.data;
+
+    const center = resolveCityCenter(city);
+    const windowStart = new Date();
+    const windowEnd = new Date();
+    windowEnd.setDate(windowEnd.getDate() + CANDIDATE_WINDOW_DAYS);
+    windowEnd.setHours(23, 59, 59, 999);
+
+    // Every row with a real venue location, category-filtered at the DB level (cheap, and the
+    // one gate genuinely safe to apply before distance) — everything else is annotated rather
+    // than pre-filtered, so a candidate excluded for, say, a low quality score is still SHOWN as
+    // excluded-and-why, not silently absent the same way "0 scored" alone was.
+    const rows = await prisma.experience.findMany({
+      where: {
+        venueId: { not: null }, // no coordinates, no distance to compute — Venue.latitude/longitude are non-nullable once a venue exists
+        ...(category ? { category: category as ExperienceCategory } : {}),
+      },
+      include: { venue: true },
+      take: 3000, // safety cap, same shape as match.ts's own proximity projection
+    });
+
+    const withDistance = rows
+      .filter((e) => e.venue !== null)
+      .map((e) => ({
+        experience: e,
+        distanceKm: haversineKm(center.lat, center.lng, e.venue!.latitude, e.venue!.longitude),
+      }))
+      .filter((r) => r.distanceKm <= radiusKm)
+      .sort((a, b) => a.distanceKm - b.distanceKm)
+      .slice(0, limit);
+
+    return reply.send({
+      city,
+      center,
+      radiusKm,
+      category: category ?? null,
+      recommendationWindowDays: CANDIDATE_WINDOW_DAYS,
+      minPublishableQualityScore: MIN_PUBLISHABLE_QUALITY_SCORE,
+      totalWithinRadius: withDistance.length,
+      experiences: withDistance.map(({ experience: e, distanceKm }) => ({
+        id: e.id,
+        name: e.name,
+        category: e.category,
+        subcategories: e.subcategories,
+        venueName: e.venue?.name ?? null,
+        venueCity: e.venue?.city ?? null,
+        distanceKm: Math.round(distanceKm * 10) / 10,
+        startsAt: e.startsAt,
+        bookingStatus: e.bookingStatus,
+        qualityScore: e.qualityScore,
+        hasImage: Boolean(e.imageUrl),
+        imageSource: e.imageSource,
+        // The exact same three gates scoreExperiencesForCrew applies as `hardConstraints`, plus
+        // the separate plan-worthiness gate applied after preference filtering — spelled out
+        // individually so "why isn't this reaching a Crew" never requires re-deriving the gate
+        // logic from a raw row by hand.
+        passesQualityGate: e.qualityScore >= MIN_PUBLISHABLE_QUALITY_SCORE,
+        passesDateWindow: e.startsAt >= windowStart && e.startsAt <= windowEnd,
+        passesBookingStatus: e.bookingStatus !== 'SOLD_OUT',
+        isPlanWorthy: isPlanWorthyForCrew(e),
+      })),
     });
   });
 
