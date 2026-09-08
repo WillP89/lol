@@ -79,6 +79,32 @@ interface LookupCrew {
   rightNow: ExplainResult;
 }
 
+interface NearbyExperience {
+  id: string;
+  name: string;
+  category: string;
+  subcategories: string[];
+  venueName: string | null;
+  venueCity: string | null;
+  distanceKm: number;
+  startsAt: string;
+  bookingStatus: string;
+  qualityScore: number;
+  hasImage: boolean;
+  passesQualityGate: boolean;
+  passesDateWindow: boolean;
+  passesBookingStatus: boolean;
+  isPlanWorthy: boolean;
+}
+
+interface NearbyResult {
+  city: string;
+  radiusKm: number;
+  totalWithinRadius: number;
+  minPublishableQualityScore: number;
+  experiences: NearbyExperience[];
+}
+
 interface RecentDelivery {
   crewId: string;
   crewName: string;
@@ -229,6 +255,8 @@ function ExplainPanel({
   const [forceMsg, setForceMsg] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [nearby, setNearby] = useState<NearbyResult | 'loading' | null>(null);
+  const [nearbyError, setNearbyError] = useState<string | null>(null);
   const info = OUTCOME_INFO[explain.outcome] ?? { label: explain.outcome, tone: 'quiet' as Tone, blurb: '' };
   const colors = toneColor(info.tone);
   const candidates = explain.topCandidates ?? [];
@@ -272,6 +300,25 @@ function ExplainPanel({
       setSyncMsg(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       setSyncing(false);
+    }
+  }
+
+  // Real gap this closes: `totalScored`/`afterRadius`/`afterTasteSignal` above prove something
+  // is empty, but not WHICH gate emptied it — a sync completing cleanly ("fetched 40, upserted
+  // 40") only proves listings exist somewhere, not that any of them are the right category,
+  // within date, above the quality floor, or "plan-worthy" (see routes/admin.ts's own
+  // `/experiences-near` comment). This is the direct, in-app way to see that without pasting raw
+  // JSON back and forth — the exact same annotated gates the real scorer applies, read-only.
+  async function checkNearby() {
+    if (!cityToSync) return;
+    setNearby('loading');
+    setNearbyError(null);
+    try {
+      const result = await adminFetch<NearbyResult>(`/admin/experiences-near?city=${encodeURIComponent(cityToSync)}&radiusKm=50&limit=40`, adminKey);
+      setNearby(result);
+    } catch (err) {
+      setNearby(null);
+      setNearbyError(err instanceof Error ? err.message : 'Something went wrong.');
     }
   }
 
@@ -383,9 +430,61 @@ function ExplainPanel({
             {syncing ? `Syncing ${cityToSync}…` : `Sync ${cityToSync} inventory now`}
           </button>
         )}
+        {cityToSync && (
+          <button type="button" onClick={checkNearby} disabled={nearby === 'loading'} className="v2-btn v2-btn-ghost" style={{ padding: '8px 14px', fontSize: 12.5, marginTop: 10 }}>
+            {nearby === 'loading' ? 'Checking database…' : "What's actually in the database near here?"}
+          </button>
+        )}
         {forceMsg && <span className="v2-dim" style={{ fontSize: 12, marginTop: 10 }}>{forceMsg}</span>}
         {syncMsg && <span className="v2-dim" style={{ fontSize: 12, marginTop: 10 }}>{syncMsg}</span>}
+        {nearbyError && <span style={{ color: 'var(--v2-error)', fontSize: 12, marginTop: 10 }}>{nearbyError}</span>}
       </div>
+
+      {nearby && nearby !== 'loading' && (
+        <div style={{ marginTop: -4 }}>
+          <p className="v2-dim" style={{ fontSize: 12, margin: '0 0 8px' }}>
+            <b style={{ color: 'var(--v2-ink)' }}>{nearby.totalWithinRadius}</b> real row{nearby.totalWithinRadius === 1 ? '' : 's'} within {nearby.radiusKm}km of {nearby.city} — quality floor is {nearby.minPublishableQualityScore}.
+            {nearby.totalWithinRadius === 0 && ' Nothing has been synced this close yet — try Sync above, then check again.'}
+          </p>
+          {nearby.totalWithinRadius > 0 && (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: 'var(--v2-ink-muted)' }}>
+                    <th style={{ padding: '4px 8px 4px 0', fontWeight: 600 }}>Name</th>
+                    <th style={{ padding: '4px 8px', fontWeight: 600 }}>Category</th>
+                    <th style={{ padding: '4px 8px', fontWeight: 600 }}>Distance</th>
+                    <th style={{ padding: '4px 0', fontWeight: 600 }}>Why it would/wouldn&rsquo;t reach a Crew</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {nearby.experiences.map((e) => {
+                    const fails: string[] = [];
+                    if (!e.passesQualityGate) fails.push(`quality score ${e.qualityScore} < ${nearby.minPublishableQualityScore}`);
+                    if (!e.passesDateWindow) fails.push('outside the recommendation date window');
+                    if (!e.passesBookingStatus) fails.push('sold out');
+                    if (!e.isPlanWorthy) fails.push('not specific enough to be plan-worthy');
+                    return (
+                      <tr key={e.id} style={{ borderTop: '1px solid var(--v2-line)' }}>
+                        <td style={{ padding: '7px 8px 7px 0', maxWidth: 200 }}>{e.name}</td>
+                        <td style={{ padding: '7px 8px', color: 'var(--v2-ink-muted)' }}>{titleCaseCategory(e.category)}</td>
+                        <td style={{ padding: '7px 8px', color: 'var(--v2-ink-muted)' }}>{e.distanceKm.toFixed(1)}km</td>
+                        <td style={{ padding: '7px 0' }}>
+                          {fails.length === 0 ? (
+                            <span style={{ color: '#0f7a44', fontWeight: 700 }}>Clears every gate</span>
+                          ) : (
+                            <span style={{ color: 'var(--v2-ink-dim)' }}>{fails.join(', ')}</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
