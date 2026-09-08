@@ -326,7 +326,12 @@ function ExplainPanel({
                       <td style={{ padding: '7px 8px', fontVariantNumeric: 'tabular-nums' }}>{c.matchScore}</td>
                       <td style={{ padding: '7px 0' }}>
                         {c.eligible ? (
-                          <span style={{ color: '#0f7a44', fontWeight: 700 }}>Eligible</span>
+                          <span>
+                            <span style={{ color: '#0f7a44', fontWeight: 700 }}>Eligible</span>
+                            {c.reasons.length > 0 && (
+                              <span style={{ color: 'var(--v2-ink-muted)' }}> — {c.reasons.map((r) => r.label).join(', ')}</span>
+                            )}
+                          </span>
                         ) : (
                           <span style={{ color: 'var(--v2-ink-dim)' }}>
                             {c.rejectionReasons.map((r) => REJECTION_LABEL[r] ?? r).join(', ')}
