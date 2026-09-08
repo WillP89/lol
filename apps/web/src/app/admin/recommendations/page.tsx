@@ -227,9 +227,12 @@ function ExplainPanel({
   const [expanded, setExpanded] = useState(false);
   const [forcing, setForcing] = useState(false);
   const [forceMsg, setForceMsg] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const info = OUTCOME_INFO[explain.outcome] ?? { label: explain.outcome, tone: 'quiet' as Tone, blurb: '' };
   const colors = toneColor(info.tone);
   const candidates = explain.topCandidates ?? [];
+  const cityToSync = explain.city ?? defaultCity ?? explain.defaultCity ?? null;
 
   async function forceCheck() {
     setForcing(true);
@@ -245,6 +248,30 @@ function ExplainPanel({
       setForceMsg(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       setForcing(false);
+    }
+  }
+
+  // A real, distinct action from "force a check" — that only re-runs eligibility against
+  // whatever's already in the database. This actually re-fetches from every live provider and
+  // writes fresh rows, for the exact case a real production incident surfaced: a city that DOES
+  // have existing content doesn't block on a background resync (see inventorySync.ts#
+  // ensureInventoryProduction's own "stale-while-revalidate" comment) — so a Crew can see zero
+  // scored candidates against genuinely stale/mismatched existing rows while real, current
+  // inventory sits one real sync away. Exposed here rather than only via curl/`/admin/sync`
+  // because "why is there nothing for my city" needs a one-click real fix, not just a diagnosis.
+  async function syncInventory() {
+    if (!cityToSync) return;
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      await adminFetch<{ results: unknown }>('/admin/sync', adminKey, { method: 'POST', body: JSON.stringify({ city: cityToSync }) });
+      const fresh = await adminFetch<ExplainResult>(`/admin/crews/${crewId}/explain-recommendation`, adminKey);
+      onRefresh(fresh);
+      setSyncMsg(`Synced ${cityToSync} — re-checked above.`);
+    } catch (err) {
+      setSyncMsg(err instanceof Error ? err.message : 'Something went wrong.');
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -347,11 +374,17 @@ function ExplainPanel({
         </div>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 4, borderTop: '1px solid var(--v2-line)', marginTop: 2 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 4, borderTop: '1px solid var(--v2-line)', marginTop: 2, flexWrap: 'wrap' }}>
         <button type="button" onClick={forceCheck} disabled={forcing} className="v2-btn v2-btn-ghost" style={{ padding: '8px 14px', fontSize: 12.5, marginTop: 10 }}>
           {forcing ? 'Checking…' : 'Force a check now'}
         </button>
+        {cityToSync && (
+          <button type="button" onClick={syncInventory} disabled={syncing} className="v2-btn v2-btn-ghost" style={{ padding: '8px 14px', fontSize: 12.5, marginTop: 10 }}>
+            {syncing ? `Syncing ${cityToSync}…` : `Sync ${cityToSync} inventory now`}
+          </button>
+        )}
         {forceMsg && <span className="v2-dim" style={{ fontSize: 12, marginTop: 10 }}>{forceMsg}</span>}
+        {syncMsg && <span className="v2-dim" style={{ fontSize: 12, marginTop: 10 }}>{syncMsg}</span>}
       </div>
     </div>
   );
