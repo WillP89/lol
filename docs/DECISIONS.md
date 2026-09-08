@@ -2651,3 +2651,51 @@ actually consumes, which is what makes it a genuine regression test again, not a
 one). Full suite: 444/444 passing (twice, back to back, to confirm the concurrency fix holds under
 load). Typecheck clean (api + web). Lint clean (only the one pre-existing, unrelated
 `personalHome.ts` `prefer-const` warning, untouched by this pass).
+
+## #recommendation-diagnostics-ui
+
+**Live product-owner feedback, mid pilot-readiness testing pass**: the pilot readiness checklist
+(a separate testing artifact) leaned on `GET /admin/crews/:id/explain-recommendation` — the
+"why hasn't this Crew got anything" diagnostic — as a copy-paste `curl` command. Direct
+follow-up: "I don't understand this, can you give it to me in layman's terms." Two real gaps,
+fixed together:
+
+1. **The route didn't actually exist.** Four separate comments (`services/match.ts`,
+   `services/crewRecommendations.ts`, `services/opportunityIntent.ts`, and this file's own
+   `#crew-recommendation-architecture` section) all described
+   `GET /admin/crews/:id/explain-recommendation` as a real, callable route — it was never
+   registered. `explainCrewRecommendation` only ever ran embedded inside `/admin/users/lookup`,
+   one Crew at a time, keyed by a member's email, not a Crew id. Added the missing route
+   (`routes/admin.ts`), now also returning `crewName`/`defaultCity` so a caller who only has a
+   Crew id gets something readable back, not just an id echoed to itself.
+2. **The tooling assumed a terminal.** Every `/admin/*` route already accepts its shared secret
+   as a `?key=` query param specifically so it can be pasted into a browser address bar (see
+   `#admin-auth`) — genuinely no terminal required for the GET routes. But nobody had ever built
+   the browser-native version: a real page, not a URL to construct by hand.
+
+**`apps/web/src/app/admin/recommendations/page.tsx`** (new) — a small, self-contained internal
+tool, deliberately outside the pilot user's own navigation (no `TabBarV2`, not linked from
+anywhere a real user would see):
+
+- **The key is entered once**, in a normal password-type field, saved to `localStorage` on that
+  device — the same shared-secret model every other `/admin/*` route already uses (see
+  `#admin-auth`'s own note that this is a deliberate pilot-stage stopgap, not real per-operator
+  auth — this page doesn't change that, it just gives it a face non-engineers can use).
+- **Look up by a member's email** (`/admin/users/lookup`) or **by a Crew id pasted from its URL**
+  (the new single-Crew route) — either way, the same outcome is translated from an internal
+  string (`no_eligible_candidate`, `too_soon`, `crew_inactive`, …) into one honest, specific
+  sentence, plus the real numbers behind it (candidates scored, how many passed each gate, best
+  score seen vs. the threshold) and an expandable table of every candidate actually considered,
+  with its own real rejection reason in plain English.
+- **"Force a check now"** calls the existing `/admin/recommendations/sweep` endpoint scoped to
+  one Crew, then re-reads the explain result — still runs the exact same real eligibility gates
+  (a Crew that isn't genuinely due still gets nothing); this only skips the wait for the next
+  scheduled sweep, it never bypasses a real rule.
+- **Recently delivered, across every Crew** — a plain table view of `/admin/recommendations/recent`.
+
+Regression coverage: `test/adminExplainRecommendation.test.ts` (4 tests — key required, key
+accepted as a query param, unknown Crew id is a clean 404 not a raw 500, and the route reads the
+exact same live outcome the automatic engine itself would act on, sending nothing itself). Full
+suite: 448/448 passing. Typecheck clean (api + web). Web production build succeeds
+(`/admin/recommendations` compiles as a static page). Lint clean (same one pre-existing,
+unrelated warning as above).

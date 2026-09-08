@@ -421,6 +421,24 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
+   * The single-Crew diagnostic — real gap this closes: every doc comment and code comment
+   * pointing at "GET /admin/crews/:id/explain-recommendation" (services/match.ts,
+   * services/crewRecommendations.ts, services/opportunityIntent.ts, docs/DECISIONS.md) described
+   * a route that was never actually registered — `explainCrewRecommendation` only ever ran
+   * embedded inside `/users/lookup` below, one Crew at a time, keyed by a member's email. Useful
+   * when you already have a Crew open (its id is right there in the URL) and don't want to look
+   * up a member's email first. Paste this URL (with ?key=) into a browser — read-only, sends
+   * nothing, same eligibility check `generateRecommendationForCrew` would run right now.
+   */
+  app.get('/crews/:id/explain-recommendation', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const crew = await prisma.crew.findUnique({ where: { id }, select: { id: true, name: true, defaultCity: true } });
+    if (!crew) return reply.code(404).send({ error: 'not_found', message: 'No Crew with that id.' });
+    const explain = await explainCrewRecommendation(id);
+    return reply.send({ crewName: crew.name, defaultCity: crew.defaultCity, ...explain });
+  });
+
+  /**
    * Real gap found verifying this in production for the first time: `lastResult.delivered` on
    * `/health/scheduler` proves a sweep delivered *something*, but not WHICH Crew — so "it says
    * delivered:1 but I can't find a message from Plot anywhere" was previously undebuggable
