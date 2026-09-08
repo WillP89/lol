@@ -147,12 +147,28 @@ export interface AnalyticsEventPayloads {
   SuggestionsSentToChat: { crewId: string; count: number };
   ItemViewed: { experienceId: string; source: 'explore' | 'home' | 'chat' };
   ItemSharedToCrew: { crewId: string; experienceId: string };
-  CrewRecommendationDelivered: { crewId: string; experienceId: string; score: number };
+  CrewRecommendationDelivered: {
+    crewId: string;
+    experienceId: string;
+    score: number;
+    // Pilot analytics (docs/DECISIONS.md#crew-recommendation-learning-engine): the real,
+    // evidence-derived confidence level and category/ticketed status this delivery actually had
+    // — lets the pilot dashboard answer "which categories perform best" and "what's our ticketed
+    // recommendation rate" without joining back through Experience for every event.
+    confidence: 'HIGH' | 'MEDIUM' | 'EXPLORATORY';
+    category: string;
+    ticketed: boolean;
+    usedTicketedFallback: boolean;
+  };
   CrewRecommendationResponded: {
     crewId: string;
     recommendationId: string;
     action: 'more_like_this' | 'not_for_us' | 'too_far' | 'too_expensive' | 'wrong_vibe';
     userId: string;
+    // Only set for 'not_for_us' — the structured "what wasn't right" reason (see
+    // services/recommendationLearning.ts#reasonOptionsFor), real product signal for "why are
+    // recommendations being rejected", not just that they were.
+    reasonCode?: string;
   };
 
   SentToCrew: { crewId: string; planId: string; source: 'find_us_something' | 'individual_send' | 'recommendation' };

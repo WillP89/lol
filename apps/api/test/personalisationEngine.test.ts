@@ -207,11 +207,21 @@ describe('the learning loop: PASS reasons that are genuine taste signal cool fut
 
     // Genuine "not our thing" responses against separately-named past SPORT/championship
     // recommendations for THIS Crew — distinct names so entity-resolution's own near-duplicate
-    // suppression never collapses them with the target experience above.
+    // suppression never collapses them with the target experience above. The real signal
+    // computeCrewLearningBias reads is RecommendationResponse (per-member), not the raw
+    // CrewRecommendation.status field alone (see recommendationLearning.ts's own header on why
+    // that split exists) — both Crew members respond, so this is genuine CREW-level signal, not
+    // one loud individual's.
     for (let i = 0; i < 3; i += 1) {
       const pastExpId = await seedExperience(`Archived Match Response Fixture ${i}`, 'SPORT', ['championship'], 'Old Ground');
-      await prisma.crewRecommendation.create({
+      const pastRec = await prisma.crewRecommendation.create({
         data: { crewId, experienceId: pastExpId, score: 60, reasonText: 'test fixture', status: 'NOT_FOR_US' },
+      });
+      await prisma.recommendationResponse.createMany({
+        data: [
+          { crewRecommendationId: pastRec.id, userId: a.userId, action: 'NOT_FOR_US' },
+          { crewRecommendationId: pastRec.id, userId: b.userId, action: 'NOT_FOR_US' },
+        ],
       });
     }
 
@@ -232,8 +242,14 @@ describe('the learning loop: PASS reasons that are genuine taste signal cool fut
 
     for (let i = 0; i < 3; i += 1) {
       const pastExpId = await seedExperience(`Situational Archived Fixture ${i}`, 'SPORT', ['championship'], 'Distant Ground');
-      await prisma.crewRecommendation.create({
+      const pastRec = await prisma.crewRecommendation.create({
         data: { crewId, experienceId: pastExpId, score: 60, reasonText: 'test fixture', status: 'TOO_FAR' },
+      });
+      await prisma.recommendationResponse.createMany({
+        data: [
+          { crewRecommendationId: pastRec.id, userId: a.userId, action: 'TOO_FAR' },
+          { crewRecommendationId: pastRec.id, userId: b.userId, action: 'TOO_FAR' },
+        ],
       });
     }
 

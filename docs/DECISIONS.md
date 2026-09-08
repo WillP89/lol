@@ -2418,3 +2418,236 @@ close; and the honest fallback preface, verified on both the chat message and th
 (`' — /plans/'`, present in both lead-ins) instead of one specific phrase — not a description of
 new behaviour those tests didn't already assert, just no longer coupled to which of the two
 honest framings actually applies. Full suite: 413/413 passing. Typecheck clean (api + web).
+
+## #crew-recommendation-learning-engine
+
+**Live brief, pilot-readiness framing**: move the automatic Crew recommendation engine from "one
+good first send" (the two rebuilds above) to something that keeps genuinely earning trust across
+a real pilot — it must LEARN from what a Crew actually does with what it's sent, keep sending at
+a real cadence without becoming noise, stay varied, communicate its own confidence honestly, and
+never trade quality for hitting a quota. Closing line of the brief, kept as the actual design
+constraint throughout: "do not send three bad recommendations just because the database says
+three are due... three genuinely useful ideas per week is the target."
+
+This is one coherent pipeline, not a stack of patches — every mechanism below sits inside the
+same two files (`services/recommendationLearning.ts` for the learning model,
+`services/crewRecommendations.ts` for delivery/eligibility) that the two rebuilds above already
+established, extended rather than layered over.
+
+### The pipeline, in order (`evaluateCrewEligibility`)
+
+1. `enabled` → 2. `preferencesSetAt` set → 3. real location anchor exists → 4. **Crew is
+   active** (new) → 5. **cadence spacing since the last send** (new) → 6. weekly cap
+   (`maxPerWeek`, now defaults to 3 — see below) → 7. `memberCount >= 2` → 8. score against
+   real inventory, applying **category-fatigue** (new) → 9. filter to a real taste signal,
+   in-radius, above the confidence floor → 10. **tier ticketed-first** (existing, Phase 3) → 11.
+   if nothing clears the normal bar, try **controlled exploration** (new) → 12. derive
+   **confidence** (new) → 13. send, storing confidence + the real per-member response model.
+   Every step short-circuits to a specific, logged outcome (`crew_inactive`, `too_soon`,
+   `weekly_cap_reached`, `no_eligible_candidate`, …) — `GET /admin/crews/:id/explain-recommendation`
+   answers "why hasn't this Crew heard anything" with the real reason, not a guess.
+
+### 1. Learning: negative AND positive, individual vs Crew, with decay
+
+`services/recommendationLearning.ts#computeCrewLearningBias` replaces `match.ts`'s old
+`buildLearningBias`, which had two real gaps: it only ever read `CrewRecommendation.status` (one
+field per recommendation, overwritten by whoever tapped last — a Crew of 6 with one person
+tapping "Not for us" once looked identical to all 6 independently rejecting it), and it never
+read real IN/MAYBE/OUT votes or Locked plans at all.
+
+- **`RecommendationResponse`** (new model) — one row per member per recommendation
+  (`@@unique([crewRecommendationId, userId])`), so individual attribution is real, not inferred.
+- **Per-user capping BEFORE cross-user summation** (`PER_USER_CATEGORY_CAP = 0.5`,
+  `CREW_BIAS_CAP = 1`) — the actual mechanism behind "one person's dislike must never read as the
+  whole Crew's verdict" (the brief's own Crew D: "football should not become permanently banned").
+  Proven in `test/recommendationLearningEngine.test.ts`: five rejections from ONE member cap out
+  at exactly the per-user bound; a genuinely SECOND member's rejection then moves the bias further
+  negative, and the Crew-level bound still holds.
+- **Exponential decay** (`DECAY_HALF_LIFE_DAYS = 45`) — a rejection from 45 days ago counts at
+  half its original weight, 90 days ago a quarter, asymptotically toward (never snapping to) zero.
+  "Allow recovery" is this, not a separate un-ban mechanism — a repeated rejection just contributes
+  its own fresh full-weight event, naturally keeping a real dislike alive without extra code.
+- **Real signal sources, not just the explicit buttons** (brief Part 8's own audit-and-fix ask):
+  `RecommendationResponse` actions, real `PlanVote` (IN +0.15/MAYBE +0.05/OUT −0.1) on Plans with
+  a real Experience, and a Plan actually reaching LOCKED/BOOKED/COMPLETED (+0.5, credited to
+  every member of that Plan, not just whoever tapped Lock — locking is a Crew-level consensus
+  event). `test/recommendationLearningEngine.test.ts` proves a Lock outweighs a bare IN vote.
+- **Situational vs taste, split at the reason code, not the action** (`deltaFor`) — `TOO_FAR`/
+  `TOO_EXPENSIVE` contribute zero taste bias (match.ts's own distance/budget scoring already
+  covers those dimensions); `NOT_FOR_US` with a situational `reasonCode` (`too_far`,
+  `too_expensive`, `wrong_day_time`, `done_enough_lately`) likewise contributes zero; a genuine
+  taste reason (`not_into_this_type`, `not_this_venue`, `not_this_artist`, no reason given at
+  all) is the one path that actually cools future category/interest scoring.
+
+### 2. Contextual "what wasn't right" reasons, real acknowledgment copy
+
+`reasonOptionsFor(experience)` builds the follow-up options from the ACTUAL recommendation's own
+category and price — never a fixed, sometimes-irrelevant list (brief's own example: "for a
+restaurant don't ask about an artist; for football don't ask about music genre"). A price option
+only appears when a real price exists; a performer-style option (`Not this artist` / `Not this
+team`) only for categories that have one; a venue option only for categories with real venue
+identity (RESTAURANT/BAR/CLUBBING/CINEMA/THEATRE/ART_CULTURE). Exposed via
+`GET /crews/:id/recommendations/:recId/reason-options` and embedded directly on
+`GET /plans/public/:slug` (`reasonOptions`) so the web client never needs a second round trip the
+moment someone taps "Not for us".
+
+`recordRecommendationResponse` (`services/recommendationLearning.ts`) is now THE single write
+path for a member's response — it replaces the old `crewRecommendations.ts#respondToRecommendation`
+(re-exported from there for existing importers), writes both the real per-member
+`RecommendationResponse` row and the aggregate `CrewRecommendation.status` field the existing
+exclusion logic already relies on, and returns a real, natural acknowledgment string
+(`learningAckFor`) tied to exactly what changed — "Got it — we'll show this Crew less of this",
+"we'll keep things a bit closer", "we'll look for cheaper options", "we'll mix it up" for a
+diversity/fatigue signal — never a generic "Thanks, noted" regardless of what was actually tapped.
+`POST /crews/:id/recommendations/:recId/respond` now accepts an optional `reasonCode`/`reasonText`
+alongside `action` and returns `{ recommendation, ack }`.
+
+### 3. Confidence: three honest tiers, never a number
+
+`services/recommendationConfidence.ts` is the one place that decides HIGH/MEDIUM/EXPLORATORY —
+`crewRecommendations.ts` turns the level into natural Plot-voiced copy, never raw numbers, never
+"confidence: HIGH", never a percentage, never "AI thinks".
+
+- **MEDIUM** (`MIN_RECOMMENDATION_SCORE = 55`) — the same floor that already gated automatic
+  sends before this file existed, now named for what it represents. Lead-in: *"This might be one
+  for the Crew."*
+- **HIGH** (`HIGH_CONFIDENCE_SCORE = 72`) — requires the high score AND a real, specific
+  taste-signal reason code (`free_text_match`, `interest_match`, `crew_interest_preference`,
+  `crew_preference`, `category_affinity`, `crew_dna_match`), not just budget+distance+
+  availability, which a real regression found could clear 72+ with zero actual taste evidence.
+  Lead-in: *"We think this is a great fit for your Crew."*
+- **EXPLORATORY** — never inferred from score; only ever set explicitly by
+  `crewRecommendations.ts`'s own exploration decision (below), which has the weekly-cap/recency
+  context this file doesn't. Lead-in: *"A little outside your usual picks — but this looked worth
+  a shout."*
+- The ticketed-fallback preface (Phase 3, `TICKETED_FALLBACK_PREFACE`) takes priority over
+  confidence copy when both could apply — a more specific honesty signal ("we tried to find a
+  ticket") than a generic confidence framing.
+
+`test/unit/recommendationConfidence.test.ts` proves the HIGH-requires-real-signal distinction
+directly (budget+distance+availability alone, even above 72, is MEDIUM).
+
+### 4. Cadence: "up to 3/week", never a quota
+
+`CrewRecommendationSettings.maxPerWeek` default raised from 2 to 3 (existing Crews keep whatever
+they already had — a schema default only ever applies at row creation, never retroactively
+bumped). It is a CAP the confidence bar still governs, not a target the pipeline tries to fill —
+most weeks most Crews will still see fewer than 3, because most weeks fewer than 3 genuinely clear
+the bar.
+
+- **Active-Crew gate** (`getCrewActivitySignals`, `ACTIVE_CREW_WINDOW_DAYS = 21`) — "do not
+  blindly send three recommendations a week to an abandoned Crew." A Crew is active if it's still
+  within its own onboarding grace period (new Crews get the benefit of the doubt — they haven't
+  had time to generate activity yet), OR has a recent message, a recent recommendation response,
+  or recent Plan activity. Any ONE is enough; this is "still a going concern", not "highly
+  engaged". A documented judgement call (21 days), not derived from real pilot data this product
+  doesn't have yet.
+- **Cadence spacing** (`MIN_HOURS_BETWEEN_RECOMMENDATIONS = 36`) — a floor between any two
+  automatic sends for the SAME Crew, independent of the weekly cap, so "up to 3/week" actually
+  spreads across the week instead of three 6-hourly sweep passes clustering together the moment a
+  Crew clears the bar three times in a row. A no-op for a Crew's genuine first-ever
+  recommendation (nothing to space against yet), so it never blocks the `guaranteeFirst`
+  first-moment guarantee.
+
+### 5. Diversity: a real score penalty, never randomisation
+
+`applyCategoryFatigue` — the last `CATEGORY_FATIGUE_WINDOW = 3` sent categories get a tapering
+score penalty (`[12, 7, 3]`, most-recent-category first) against a repeat of the SAME category.
+A strong exceptional match still wins outright (the brief's own "relevance + variety, not
+randomness"); a near-tie between "more of the same" and "something different" resolves toward
+variety. Applied ONLY inside the automatic engine's own candidate pool
+(`crewRecommendations.ts`), never inside `match.ts`'s shared scorer — a member manually asking
+"Find us something" wants the single best match, not a diversity-optimised one.
+`test/recommendationLearningEngine.test.ts` proves the exact subtraction (a candidate's score
+drops by precisely 12 once one prior same-category send exists) and that an unrelated category is
+never touched.
+
+### 6. Controlled exploration: "very little", never at the cost of a real match
+
+`selectExploratoryCandidate` — the brief's own "MOSTLY high-confidence, SOME exploratory, VERY
+LITTLE true wildcard". Only ever reached when the normal HIGH/MEDIUM pool (`eligible`) is
+genuinely empty — it can never displace a real match, only fill a gap that would otherwise be
+silence. A candidate qualifies only with real, checkable evidence: ticketed (a real ticket, not a
+permanent place listing), positively confirmed within radius, and scoring in a real band
+(`EXPLORATION_MIN_SCORE = 40` .. `MIN_RECOMMENDATION_SCORE`) — still has at least one genuine
+taste signal, just not enough to clear the normal bar. Rate-limited to
+`MAX_EXPLORATORY_SENDS_PER_WEEK = 1` per Crew, counted over a real rolling 7 days independent of
+the 36-hour cadence floor (so a Crew that legitimately waited out the cadence window still can't
+get a second exploratory send inside the same week) — proven directly in
+`test/recommendationLearningEngine.test.ts`. Never reachable through the separate, more permissive
+`guaranteeFirst` relaxation (that path already has its own first-moment rules — see the
+crew-recommendation-architecture section above).
+
+### Analytics + privacy
+
+`CrewRecommendationDelivered` gained `confidence`/`category`/`ticketed`/`usedTicketedFallback` —
+answers "which categories perform best" and "what's our ticketed-recommendation rate" without
+joining back through Experience for every event. `CrewRecommendationResponded` gained an optional
+`reasonCode` — real signal for WHY recommendations are rejected, not just that they were. No new
+PII is captured anywhere in this pass — reason codes are a closed, predefined enum-like set of
+strings, never free-text stored against a person's identity in analytics (a member's own
+`reasonText` free-text note, when given, is stored only on the `RecommendationResponse` row
+itself, readable by the Crew, never sent to the analytics pipeline).
+
+### What was deliberately NOT built
+
+- **A dedicated notification-fatigue signal separate from cadence spacing.** The 36-hour floor and
+  the active-Crew gate are the real mechanisms actually shipped; a genuine "this Crew reads
+  everything Plot sends within a minute" vs "this Crew hasn't opened a Plot message in two weeks"
+  distinction would need real read-receipt/engagement data this pilot doesn't have yet.
+- **A dedicated multi-member-taste-conflict resolution UI.** The per-user capping in the learning
+  model (this section, §1) IS the real mechanism for "one person's taste doesn't override the
+  Crew's" — proven directly in tests — but there's no separate UI surface showing "these two
+  members disagree about X"; the existing averaged-affinity scoring in `match.ts` already blends
+  divergent member taste the same way it always has.
+- **A cold-start rule distinct from the existing `guaranteeFirst` relaxation.** A brand-new
+  Crew's genuine first send already has its own, separately-tested path (the
+  crew-recommendation-architecture section above); this pass reuses that unchanged rather than
+  building a second cold-start mechanism.
+- **A full pilot-analytics dashboard.** The events exist and are queryable; a dedicated
+  aggregation surface (weekly delivered/responded/confidence-mix charts) is a real, valuable next
+  step but genuinely out of scope for this pass — see `docs/PILOT.md` for the existing metrics
+  approach these new events slot into.
+- **A larger, scripted pilot-simulation harness** beyond the direct before/after test assertions
+  in `test/recommendationLearningEngine.test.ts` and `test/personalisationEngine.test.ts` (which
+  do prove real ranking movement with real numbers — see the FINAL REPORT for the actual figures).
+
+### A real concurrency fix found while building this
+
+Two independent triggers can both call `generateRecommendationForCrew(crewId, { guaranteeFirst:
+true })` for the exact same brand-new Crew within milliseconds — `updateSettings`'s own
+first-preferences-set trigger, and `routes/crews.ts`'s 1→2-member join trigger (both pre-existing,
+each with its own reason to exist independently — see their own comments). Before this pass, both
+could run fully concurrently: each read `excluded`/`alreadySpoken` before either had written
+anything, so both could pass every check, and a Crew could see BOTH a real delivered
+recommendation AND the honest "we don't have anything yet" fallback message, seconds apart. This
+phase's own added checks (`getCrewActivitySignals`, cadence spacing) made the race measurably
+easier to hit — more awaited work between read and write widens the exact window the bug lives
+in — which is how it surfaced: reliably reproducible under the full test suite's own load, though
+not in any single isolated test file. Fixed by chaining every `generateRecommendationForCrew`
+call for the same `crewId` onto the previous one's completion (`inFlightGenerations`, an
+in-process `Map<string, Promise<...>>`) — the standard, cheap fix for this shape of bug in this
+app's real single-process deployment target (see `runSweepIfDue`'s own comment on why that's the
+deployment this codebase is actually built for).
+
+### Testing + validation
+
+New: `test/unit/recommendationConfidence.test.ts` (7), `test/unit/recommendationLearning.test.ts`
+(7, `reasonOptionsFor`), `test/recommendationLearningEngine.test.ts` (11 — individual-vs-Crew
+capping, decay, real positive signal from votes/Locks, category fatigue with exact score-delta
+proof, active/inactive gating, cadence spacing, exploratory selection + its own weekly rate
+limit), `test/recommendationResponseAck.test.ts` (5 — the response write path, ack copy,
+situational-vs-taste bias, upsert-not-duplicate, cross-Crew IDOR rejection). Extended
+`test/crewRecommendations.test.ts` with a route-level reason-options + ack test. Three pre-existing
+tests updated for genuinely changed behaviour, not loosened to pass: the settings-race test's
+`maxPerWeek` expectation (2 → 3, the new default), the ticketed-first test's "normal confident
+framing" assertion (the old fixed "Plot found something" phrase no longer applies uniformly now
+that confidence-derived lead-ins exist — reworded to assert the ticketed-fallback caveat is
+genuinely absent, which is what the test was actually proving), and `personalisationEngine.test.ts`'s
+learning-loop test (it asserted on stale `CrewRecommendation.status` writes with no per-member
+`RecommendationResponse` rows at all — the real signal `computeCrewLearningBias` now reads — so it
+was silently asserting nothing had changed; fixed to seed the real per-member rows the new model
+actually consumes, which is what makes it a genuine regression test again, not a vacuously-passing
+one). Full suite: 444/444 passing (twice, back to back, to confirm the concurrency fix holds under
+load). Typecheck clean (api + web). Lint clean (only the one pre-existing, unrelated
+`personalHome.ts` `prefer-const` warning, untouched by this pass).

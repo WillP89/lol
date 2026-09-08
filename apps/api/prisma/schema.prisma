@@ -59,6 +59,7 @@ model User {
   availabilityWindows   AvailabilityWindow[]
   planMemberships       PlanMember[]
   planVotes             PlanVote[]
+  recommendationResponses RecommendationResponse[]
   bookingParticipations BookingParticipant[]
   notifications         Notification[]
   intentSignals         IntentSignal[]
@@ -776,10 +777,14 @@ model CrewRecommendationSettings {
   crewId             String   @unique
   crew               Crew     @relation(fields: [crewId], references: [id], onDelete: Cascade)
   enabled            Boolean  @default(true)
-  // A conservative cap, not a target — the scoring engine only delivers when it clears the
-  // confidence threshold, so most crews will see fewer than this most weeks. Never a "keep
-  // trying until something lands" quota.
-  maxPerWeek         Int      @default(2)
+  // Real pilot-readiness target (docs/DECISIONS.md#crew-recommendation-learning-engine): "at
+  // least 3 high-quality recommendations per week under normal inventory conditions" — still a
+  // CAP the scoring engine's own confidence bar decides whether to actually fill, never a quota
+  // "keep trying until 3 landed" would violate; most weeks most Crews will still see fewer.
+  // Existing Crews created before this default changed keep whatever value they already have (a
+  // schema default only ever applies at row creation) — never silently bumped for a Crew that
+  // set 2 deliberately.
+  maxPerWeek         Int      @default(3)
   // Null = derive from the average of members' own TasteProfile.travelRadiusMeters, rather
   // than forcing every Crew to configure a number before recommendations work at all.
   travelRadiusMeters Int?
@@ -829,10 +834,19 @@ model CrewRecommendation {
   // raw score internals. See services/crewRecommendations.ts#explanationFor.
   reasonText   String
   status       CrewRecommendationStatus @default(SENT)
+  // How sure Plot actually was when this was sent — real, evidence-derived (services/
+  // recommendationConfidence.ts), never a raw score threshold with no explanation. Stored (not
+  // recomputed on read) so the card's own copy and the pilot analytics both reflect what was
+  // TRUE at send time, not a re-scored guess later. Defaults to MEDIUM for rows written before
+  // this column existed — the honest "we don't actually know, don't overclaim" backfill value,
+  // never HIGH.
+  confidence   RecommendationConfidence @default(MEDIUM)
   planId       String?                  @unique
   plan         Plan?                    @relation(fields: [planId], references: [id], onDelete: Cascade)
   createdAt    DateTime                 @default(now())
   respondedAt  DateTime?
+
+  responses RecommendationResponse[]
 
   @@index([crewId, createdAt])
   @@index([crewId, experienceId])
@@ -845,6 +859,40 @@ enum CrewRecommendationStatus {
   TOO_FAR
   TOO_EXPENSIVE
   WRONG_VIBE
+}
+
+enum RecommendationConfidence {
+  HIGH
+  MEDIUM
+  EXPLORATORY
+}
+
+/// Per-member response to a CrewRecommendation — the real "individual vs Crew" signal the
+/// learning model needs (docs/DECISIONS.md#crew-recommendation-learning-engine). Distinct from
+/// CrewRecommendation.status above (kept as the single current/aggregate state the existing
+/// exclusion logic already relies on — never resurface something ANYONE already responded to):
+/// this table is the full per-person history, so "1 person said not into jazz" can be weighted
+/// as one real signal, not read as the whole Crew's verdict. One row per member per
+/// recommendation — a second tap updates it, never duplicates.
+model RecommendationResponse {
+  id                   String             @id @default(uuid())
+  crewRecommendationId String
+  crewRecommendation   CrewRecommendation @relation(fields: [crewRecommendationId], references: [id], onDelete: Cascade)
+  userId               String
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Reuses CrewRecommendationStatus's own response values (SENT excluded — that's the
+  // pre-response default, never a real answer) rather than a second, parallel enum.
+  action               CrewRecommendationStatus
+  // Structured "what wasn't right" — meaningful for NOT_FOR_US specifically, generated from the
+  // recommendation's own real attributes (see routes/crews.ts's own reason-option logic) —
+  // never a fixed list irrelevant to what was actually sent. Free text via 'something_else'.
+  reasonCode           String?
+  reasonText           String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@unique([crewRecommendationId, userId])
+  @@index([userId])
 }
 
 // ---------------------------------------------------------------------------
