@@ -165,6 +165,109 @@ export async function scoreExperiencesForCrew(
   const crewCategoryPreferences = new Set(recommendationSettings?.categoryPreferences ?? []);
   const crewInterestPreferences = new Set(recommendationSettings?.interestPreferences ?? []);
 
+  // Layer 1b: the Crew's OWN explicit category/interest picks, when set, are a HARD FILTER on
+  // the candidate pool — never just a scoring bonus blended in with individual member taste.
+  // Computed here, BEFORE the proximity query below runs, rather than after it (where this used
+  // to live) — see this whole block's history of real bugs, and `passesPreferenceGate`'s own
+  // final comment on why moving it up here is itself the fix for the newest one.
+  // REAL, LIVE-REPORTED BUG this fixes: a brand-new Crew's preferences were set to food ONLY,
+  // and the very first thing Plot ever sent that Crew was a comedy event. Root cause — below,
+  // `crewCategoryPreferences.has(experience.category)` only ever ADDED score+a reason on top of
+  // whatever a candidate already had; it never excluded anything. A member's own personal
+  // TasteProfile (comedy affinity from THEIR OWN onboarding swipes, nothing to do with what
+  // THIS Crew explicitly said it's about) was on its own enough to clear the confidence bar via
+  // category_affinity/interest_match alone, for a category the Crew never asked for. Once a
+  // Crew has explicitly said "we are specifically this", that IS the Crew's answer — a member's
+  // own unrelated personal taste can still rank AMONG matching options (the scoring below is
+  // unchanged for those), it can never again override the restriction itself. Empty preferences
+  // (a Crew that hasn't said anything explicit) keeps the original, fully member-derived
+  // behaviour — nothing to restrict to yet.
+  // REAL, LIVE-REPORTED BUG this same filter went on to cause: a Crew picked a specific INTEREST
+  // (not a whole category) — "we don't have any [interest] events near London that we can
+  // honestly recommend yet" for a city with genuinely deep real inventory. Root cause:
+  // `experienceInterestTags` only ever matches an interest by literally finding one of its
+  // synonyms in an Experience's own subcategories/name/description text — real provider data
+  // (Ticketmaster, Skiddle, PredictHQ) essentially never carries Plot's own taxonomy's specific
+  // wording, so an interest-only preference could legitimately match zero real experiences even
+  // in a city with hundreds of genuinely relevant ones. A Crew choosing a specific interest is
+  // still choosing that interest's own parent categories (`TASTE_INTEREST_INDEX`'s own
+  // `territory.categories` — e.g. picking a food interest under the "Food & Drink" territory is
+  // still, at minimum, choosing RESTAURANT) — so those categories pass this hard gate too,
+  // exactly as if the Crew had ticked the category box directly. This never widens what an
+  // interest-only Crew can be sent beyond categories THEY THEMSELVES implied by their own pick —
+  // still never comedy for a food-only Crew — it only stops a real category match from being
+  // thrown out purely because live inventory doesn't happen to use Plot's own interest wording.
+  // A literal interest-tag match still scores and reads as more specific below (`interest_match`/
+  // `crew_interest_preference`) — this only affects which candidates reach scoring at all.
+  // THIRD real, live-reported bug this same filter went on to cause: a Crew set its preferences
+  // to street food / food festivals / wine bars — the very first thing Plot sent it was a grime
+  // artist's tour date, categorized COMMUNITY. Root cause: COMMUNITY sits in the food territory's
+  // own `categories` list, but every live provider adapter also uses COMMUNITY as its universal
+  // fallback for anything it can't confidently classify at all (see @plot/shared's
+  // CATCH_ALL_CATEGORIES for the full rationale and provider-by-provider evidence).
+  // FOURTH real, live-reported bug (the SAME Crew, the SAME artist, reported again — the fix
+  // above wasn't the whole story): this time the event was categorized CLUBBING. Root cause:
+  // `wine_bars` lives under the `drinks_nightlife` territory, whose `categories` is
+  // `['BAR', 'CLUBBING']` — a wine bar and a full nightclub night are genuinely different
+  // things, and picking "wine bars" never said anything about wanting clubbing. CLUBBING is
+  // claimed by TWO territories (`music` and `drinks_nightlife`), the exact ambiguity
+  // @plot/shared's `UNAMBIGUOUS_CATEGORIES` exists to exclude — this file used to only exclude
+  // `CATCH_ALL_CATEGORIES`, never the broader ambiguous-territory case, even though
+  // services/tasteSignals.ts (Home/Explore's own equivalent widening) already had to learn this
+  // exact lesson for DAY_ACTIVITY (Food + Outdoors). Now both files share the one definition —
+  // see `UNAMBIGUOUS_CATEGORIES`'s own doc comment for why this can't be allowed to drift apart
+  // between the two call sites again. A literal interest-tag match still lets ANY category
+  // through on its own real merit (the `experienceInterestTags` check below applies regardless of
+  // whether a category is ambiguous) — only the "same territory, no other evidence" shortcut is
+  // restricted to categories no OTHER territory or provider-fallback pattern could also produce.
+  // FOURTH real, live-reported bug: "I love drill" -> Sam Smith, captioned "because you're into
+  // drill". `music` bundles ~30 genuinely distinct, often mutually-exclusive genres under
+  // LIVE_MUSIC/FESTIVAL — bare category membership is never enough evidence on its own for a
+  // territory this broad, so a Crew whose interest picks fall under `music`
+  // (`TERRITORIES_REQUIRING_EXPLICIT_RELATION`) get NO blanket category grant here at all — only
+  // an explicit, curated close relation (`RELATED_INTERESTS`), checked below against what the
+  // candidate's own text actually, literally supports.
+  const categoriesImpliedByInterests = new Set<string>();
+  for (const interestId of crewInterestPreferences) {
+    const territory = TASTE_INTEREST_INDEX.get(interestId)?.territory;
+    if (!territory || TERRITORIES_REQUIRING_EXPLICIT_RELATION.has(territory.id)) continue;
+    for (const category of territory.categories) {
+      if (!UNAMBIGUOUS_CATEGORIES.has(category)) continue;
+      categoriesImpliedByInterests.add(category);
+    }
+  }
+  const crewHasExplicitPreference = crewCategoryPreferences.size > 0 || crewInterestPreferences.size > 0;
+
+  // REAL, LIVE-REPORTED BUG this closes ("0 scored / 0 in radius" for a Crew whose own explicit
+  // interests — e.g. House/Techno/Disco, or Football/Boxing/MMA — had real, current matching
+  // inventory genuinely within its own travel radius the whole time): the proximity query below
+  // used to select the 50 NEAREST rows across EVERY category first, and only filtered down to
+  // the Crew's own category/interest preference AFTER that cut. A city with a dense, hyper-local
+  // cluster in one category (Stafford's ~130 FHRS restaurant/bar rows, every one within ~0-2km
+  // of the town centre — the FHRS feed is a food-hygiene register, not an events source, so this
+  // is entirely ordinary) completely fills that top-50 slice before a genuinely relevant but
+  // farther-out SPORT/LIVE_MUSIC/CLUBBING row (a stadium or arena 20-40km out, still well inside
+  // a 25-mile Crew radius) ever gets the chance to be one of the 50 candidates considered — the
+  // category filter then had nothing of the right category left to keep, however deep the real
+  // inventory actually was. Applying the SAME preference gate the post-hydration filter already
+  // used (`preferenceFilteredCandidates` below) here too, before the nearest-50 cut, means a
+  // Crew with an explicit preference only ever competes for its 50 slots against candidates that
+  // could actually be sent to it — never crowded out by an unrelated category's own local
+  // density. A Crew with NO explicit preference is completely unaffected (this gate is `true` for
+  // everything when `crewHasExplicitPreference` is false, identical to today's behaviour).
+  function passesPreferenceGate(experience: { category: string; subcategories: unknown; name: string; description: string }): boolean {
+    if (!crewHasExplicitPreference) return true;
+    if (crewCategoryPreferences.has(experience.category)) return true;
+    if (categoriesImpliedByInterests.has(experience.category)) return true;
+    const tags = experienceInterestTags(experience);
+    if (tags.some((tag) => crewInterestPreferences.has(tag))) return true;
+    for (const interestId of crewInterestPreferences) {
+      const relatives = RELATED_INTERESTS[interestId] ?? [];
+      if (relatives.some((rel) => tags.includes(rel))) return true;
+    }
+    return false;
+  }
+
   const userIds = members.map((m) => m.userId);
   const tasteProfiles = members
     .map((m) => m.user.tasteProfile)
@@ -239,14 +342,18 @@ export async function scoreExperiencesForCrew(
     // into an unbounded table scan as inventory keeps growing.
     const proximityRows = await prisma.experience.findMany({
       where: hardConstraints,
-      select: { id: true, venue: { select: { latitude: true, longitude: true } } },
+      // category/subcategories/name/description added alongside the original id+coordinates
+      // projection specifically so `passesPreferenceGate` can run at THIS stage, before the
+      // nearest-50 cut below — see that function's own comment for the real bug this closes.
+      select: { id: true, category: true, subcategories: true, name: true, description: true, venue: { select: { latitude: true, longitude: true } } },
       take: 5000,
     });
+    const preferenceGatedRows = proximityRows.filter((row) => passesPreferenceGate(row));
     const nearestDistanceMiles = (row: (typeof proximityRows)[number]): number =>
       row.venue
         ? Math.min(...memberCoords.map((c) => haversineMiles(c.homeLat, c.homeLng, row.venue!.latitude, row.venue!.longitude)))
         : Number.POSITIVE_INFINITY; // no venue = distance genuinely unknown, sorts last, never excluded
-    const nearestIds = proximityRows
+    const nearestIds = preferenceGatedRows
       .map((row) => ({ id: row.id, distance: nearestDistanceMiles(row) }))
       .sort((a, b) => a.distance - b.distance)
       .slice(0, 50)
@@ -283,92 +390,15 @@ export async function scoreExperiencesForCrew(
   const radiusMiles = radiusMeters / 1609.34;
 
   // Layer 1b: the Crew's OWN explicit category/interest picks, when set, are a HARD FILTER on
-  // the candidate pool — never just a scoring bonus blended in with individual member taste.
-  // REAL, LIVE-REPORTED BUG this fixes: a brand-new Crew's preferences were set to food ONLY,
-  // and the very first thing Plot ever sent that Crew was a comedy event. Root cause — below,
-  // `crewCategoryPreferences.has(experience.category)` only ever ADDED score+a reason on top of
-  // whatever a candidate already had; it never excluded anything. A member's own personal
-  // TasteProfile (comedy affinity from THEIR OWN onboarding swipes, nothing to do with what
-  // THIS Crew explicitly said it's about) was on its own enough to clear the confidence bar via
-  // category_affinity/interest_match alone, for a category the Crew never asked for. Once a
-  // Crew has explicitly said "we are specifically this", that IS the Crew's answer — a member's
-  // own unrelated personal taste can still rank AMONG matching options (the scoring below is
-  // unchanged for those), it can never again override the restriction itself. Empty preferences
-  // (a Crew that hasn't said anything explicit) keeps the original, fully member-derived
-  // behaviour — nothing to restrict to yet.
-  // REAL, LIVE-REPORTED BUG this same filter went on to cause: a Crew picked a specific INTEREST
-  // (not a whole category) — "we don't have any [interest] events near London that we can
-  // honestly recommend yet" for a city with genuinely deep real inventory. Root cause:
-  // `experienceInterestTags` only ever matches an interest by literally finding one of its
-  // synonyms in an Experience's own subcategories/name/description text — real provider data
-  // (Ticketmaster, Skiddle, PredictHQ) essentially never carries Plot's own taxonomy's specific
-  // wording, so an interest-only preference could legitimately match zero real experiences even
-  // in a city with hundreds of genuinely relevant ones. A Crew choosing a specific interest is
-  // still choosing that interest's own parent categories (`TASTE_INTEREST_INDEX`'s own
-  // `territory.categories` — e.g. picking a food interest under the "Food & Drink" territory is
-  // still, at minimum, choosing RESTAURANT) — so those categories pass this hard gate too,
-  // exactly as if the Crew had ticked the category box directly. This never widens what an
-  // interest-only Crew can be sent beyond categories THEY THEMSELVES implied by their own pick —
-  // still never comedy for a food-only Crew — it only stops a real category match from being
-  // thrown out purely because live inventory doesn't happen to use Plot's own interest wording.
-  // A literal interest-tag match still scores and reads as more specific below (`interest_match`/
-  // `crew_interest_preference`) — this only affects which candidates reach scoring at all.
-  // THIRD real, live-reported bug this same filter went on to cause: a Crew set its preferences
-  // to street food / food festivals / wine bars — the very first thing Plot sent it was a grime
-  // artist's tour date, categorized COMMUNITY. Root cause: COMMUNITY sits in the food territory's
-  // own `categories` list, but every live provider adapter also uses COMMUNITY as its universal
-  // fallback for anything it can't confidently classify at all (see @plot/shared's
-  // CATCH_ALL_CATEGORIES for the full rationale and provider-by-provider evidence).
-  // FOURTH real, live-reported bug (the SAME Crew, the SAME artist, reported again — the fix
-  // above wasn't the whole story): this time the event was categorized CLUBBING. Root cause:
-  // `wine_bars` lives under the `drinks_nightlife` territory, whose `categories` is
-  // `['BAR', 'CLUBBING']` — a wine bar and a full nightclub night are genuinely different
-  // things, and picking "wine bars" never said anything about wanting clubbing. CLUBBING is
-  // claimed by TWO territories (`music` and `drinks_nightlife`), the exact ambiguity
-  // @plot/shared's `UNAMBIGUOUS_CATEGORIES` exists to exclude — this file used to only exclude
-  // `CATCH_ALL_CATEGORIES`, never the broader ambiguous-territory case, even though
-  // services/tasteSignals.ts (Home/Explore's own equivalent widening) already had to learn this
-  // exact lesson for DAY_ACTIVITY (Food + Outdoors). Now both files share the one definition —
-  // see `UNAMBIGUOUS_CATEGORIES`'s own doc comment for why this can't be allowed to drift apart
-  // between the two call sites again. A literal interest-tag match still lets ANY category
-  // through on its own real merit (the `experienceInterestTags` check below applies regardless of
-  // whether a category is ambiguous) — only the "same territory, no other evidence" shortcut is
-  // restricted to categories no OTHER territory or provider-fallback pattern could also produce.
-  // FOURTH real, live-reported bug: "I love drill" -> Sam Smith, captioned "because you're into
-  // drill". `music` bundles ~30 genuinely distinct, often mutually-exclusive genres under
-  // LIVE_MUSIC/FESTIVAL — bare category membership is never enough evidence on its own for a
-  // territory this broad, so a Crew whose interest picks fall under `music`
-  // (`TERRITORIES_REQUIRING_EXPLICIT_RELATION`) get NO blanket category grant here at all — only
-  // an explicit, curated close relation (`RELATED_INTERESTS`), checked below against what the
-  // candidate's own text actually, literally supports.
-  const categoriesImpliedByInterests = new Set<string>();
-  for (const interestId of crewInterestPreferences) {
-    const territory = TASTE_INTEREST_INDEX.get(interestId)?.territory;
-    if (!territory || TERRITORIES_REQUIRING_EXPLICIT_RELATION.has(territory.id)) continue;
-    for (const category of territory.categories) {
-      if (!UNAMBIGUOUS_CATEGORIES.has(category)) continue;
-      categoriesImpliedByInterests.add(category);
-    }
-  }
-
-  const crewHasExplicitPreference = crewCategoryPreferences.size > 0 || crewInterestPreferences.size > 0;
-  const preferenceFilteredCandidates = !crewHasExplicitPreference
-    ? candidates
-    : candidates.filter((experience) => {
-        if (crewCategoryPreferences.has(experience.category)) return true;
-        if (categoriesImpliedByInterests.has(experience.category)) return true;
-        const tags = experienceInterestTags(experience);
-        if (tags.some((tag) => crewInterestPreferences.has(tag))) return true;
-        // The explicit-relation fallback for territories requiring one (see this block's own
-        // comment above) — a real, specific, curated sibling relationship (e.g. drill/grime),
-        // never a fabricated match: still requires the candidate's own text to literally support
-        // the related interest.
-        for (const interestId of crewInterestPreferences) {
-          const relatives = RELATED_INTERESTS[interestId] ?? [];
-          if (relatives.some((rel) => tags.includes(rel))) return true;
-        }
-        return false;
-      });
+  // the candidate pool — never just a scoring bonus blended in with individual member taste. The
+  // actual gate (`passesPreferenceGate`, with its own full history of the real bugs that shaped
+  // it — a food-only Crew sent comedy, a specific-interest Crew starved by real inventory not
+  // using Plot's own wording, COMMUNITY/CLUBBING's provider-fallback ambiguity, "I love drill"
+  // -> Sam Smith) now lives above, computed BEFORE the proximity query runs, so it can gate the
+  // nearest-N cut itself too — see that function's own comment for why. Re-applied here as a
+  // pure no-op safety net for the `else` branch above (no member/Crew location at all — the
+  // proximity query never runs, so this is the first and only time the gate applies).
+  const preferenceFilteredCandidates = candidates.filter((experience) => passesPreferenceGate(experience));
 
   // PART TWO of the "Caffè Nero in London" fix — the location gate above stops the WRONG PLACE;
   // this stops the RIGHT PLACE, WRONG REASON case: a genuinely in-radius, category-matching
