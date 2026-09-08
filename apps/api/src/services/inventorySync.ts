@@ -27,6 +27,30 @@ const IMAGE_QUALITY_EXEMPT_SOURCES = new Set(['THESPORTSDB', 'MANUAL']);
 // NOT used to select which providers actually run — providerRegistry alone decides that.
 const MOCK_PROVIDER_IDS = ['mock_ticketing', 'mock_restaurants', 'mock_activities'];
 
+// Real production bug this closes, same class as Skiddle's own OVERALL_BUDGET_MS (see that
+// file's comment) but one level up: every adapter's fetchListings() is individually
+// time-bounded, but the per-LISTING work AFTER fetch — Wikipedia/TheSportsDB enrichment, then
+// Commons/Pexels stock-photo fallback, then a byte-probe quality check — is three-to-four more
+// sequential live network calls per listing, completely unbounded by listing count. A provider
+// with no pre-existing DB rows (a genuinely fresh sync — exactly what a brand-new city, or the
+// new admin "Sync now" button, both trigger) means EVERY listing needs full enrichment: FHRS
+// alone routinely returns 100+ listings for a UK town, none of which carry a photo (it's a food
+// hygiene feed, not an imagery source). At even a couple of seconds per listing that's minutes,
+// not seconds — and `syncAllProviders` runs providers concurrently but `ensureInventoryProduction`
+// still AWAITS the whole thing for a genuinely empty city, and the new POST /admin/sync route
+// awaits it unconditionally always. Real, live-reproduced symptom: the "Sync now" diagnostics
+// button 502ing outright — not a slow response, no response at all, because Render's own proxy
+// gave up on the request long before this loop finished. Bounding it here, the same "stop and
+// return what's done so far" shape Skiddle already uses for its own per-category loop, means one
+// sync can never again stall the request that triggered it — a listing this pass didn't reach
+// simply gets its enrichment attempt on the NEXT sync (periodic due-resync, or another click),
+// exactly like a Skiddle category that ran out of budget already does today. Matches Skiddle's
+// own OVERALL_BUDGET_MS exactly — same reasoning: providers run concurrently in syncAllProviders,
+// so total request latency is the MAX across providers of (its own fetch budget + this upsert
+// budget), and this keeps that combined worst case for any one provider in the same ballpark as
+// every other adapter's own bounded fetch, comfortably clear of a proxy's own request timeout.
+const UPSERT_LOOP_BUDGET_MS = 15_000;
+
 /**
  * Runs one provider end-to-end: fetch -> map -> dedup -> quality-score -> upsert. Every
  * listing is handled independently (brief §42/#44) — one malformed record from a provider
@@ -57,8 +81,16 @@ export async function syncProvider(
 
   let upserted = 0;
   let failed = 0;
+  const loopStartedAt = Date.now();
 
   for (const listing of listings) {
+    if (Date.now() - loopStartedAt > UPSERT_LOOP_BUDGET_MS) {
+      logger.warn(
+        { provider: adapter.id, city: params.city, upserted, remaining: listings.length - upserted - failed },
+        'Provider upsert loop hit its overall time budget — returning what was processed rather than risk stalling the request that triggered this sync',
+      );
+      break;
+    }
     try {
       const canonicalInput = adapter.mapToCanonical(listing);
       // Real-image enrichment (PLOT-CONTENT directive §7 "if a provider gives weak/no imagery,
