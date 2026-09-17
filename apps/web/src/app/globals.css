@@ -931,6 +931,15 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
 
 .v2-explore-split { display: block; }
 .v2-explore-map-pane { display: none; }
+/* Real, reproduced-with-evidence bug this closes (Playwright, real device viewport, the app's
+   own real internal scroll container — not a fullPage-screenshot artifact): `.v2-explore-col`
+   was only ever given padding inside the `min-width: 1000px` desktop rule below — on mobile
+   (this page's own `.v2-explore-split { display: block }` layout, no dedicated column at all)
+   the discovery grid's own outermost element had NO bottom padding whatsoever, so its last
+   row's content rendered straight into, and partly behind, the floating `.v2-nav-bottom` pill
+   with nothing reserved to clear it. Same bottom-clearance amount `.v2-page` already uses
+   everywhere else in the app (96px + safe-area) — this page just never had its own copy of it. */
+.v2-explore-col { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
 @media (min-width: 1000px) {
   .v2-explore-split {
     display: flex;

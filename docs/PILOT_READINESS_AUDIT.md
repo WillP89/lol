@@ -498,3 +498,37 @@ Shipped: typecheck + lint clean (this repo's web app has no automated test suite
 is the full CI gate, matching every prior round's own verification method for this exact class of
 bug, which has consistently relied on live/Playwright screenshot evidence over unit tests for
 viewport-dependent rendering).
+
+## Cycle 6 — broader golden-path visual pass, one real bug found and fixed (Explore, mobile)
+
+Direct follow-up to Cycle 5's composer fix: since re-verifying from scratch (not trusting a prior
+"completed" label) had just found a real bug, the same live methodology was extended across
+Home, Crews, Explore, Profile, and Plans at a real mobile viewport (390×844, real iOS Safari user
+agent) using the same 2-member Crew and real session.
+
+**A real methodology trap found and corrected along the way**: Playwright's `fullPage: true`
+screenshot mode is unreliable for this app's architecture, which deliberately scrolls an inner
+`.v2-shell-desktop` container (`overflow-y: auto`) rather than the document body, with the
+floating bottom nav pill `position: absolute` inside the same `100dvh` shell (see that CSS rule's
+own comment for the real address-bar-collapse bug this already fixed). `fullPage` screenshots
+appeared to show the nav pill overlapping card content on Home — investigated with a direct DOM
+measurement before touching any code, which proved it was a screenshot-compositing artifact
+(scrolling `window`, which never actually moves in this architecture, instead of the real
+internal scroll container): with the correct container scrolled to its real maximum, Home
+actually clears the nav with 15.8px to spare, exactly as intended. No code change made there —
+correctly holding off on a fix once the evidence pointed the other way, not just when it confirms
+a hypothesis. All further verification in this cycle used the real scroll container, never
+`fullPage`.
+
+**The real bug**: Explore's mobile layout (`.v2-explore-col`, wrapping the whole discovery grid)
+had a bottom-padding rule ONLY inside its `@media (min-width: 1000px)` desktop block — on mobile,
+where the same element is unconditionally rendered with zero dedicated CSS at all, the discovery
+grid's last row had no reserved clearance whatsoever, so real card content (a price, "Nia
+Archives... £57–£98") rendered straight behind the floating nav pill. Confirmed with a real,
+correctly-scrolled screenshot before and after. Fixed with one rule, matching the same
+bottom-clearance amount (`96px + safe-area`) `.v2-page` already uses everywhere else in the app —
+Explore's own content wrapper never had its own copy of it. Home, Crews, Profile, and Plans were
+all independently re-verified clean with the same corrected methodology; no other instance of
+this exact gap was found on those four.
+
+Shipped: typecheck clean (CSS-only change).
