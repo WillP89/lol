@@ -1303,3 +1303,83 @@ regression).
 **Not yet done**: P0-3 (mass-market chain exclusion policy) is the last remaining P0 foundation
 failure — next, followed by the P0 acceptance test (task #138) before resuming the paused pilot-
 scorecard/analytics/ops mission.
+
+## Cycle 19 — P0-3: mass-market chain exclusion — AUDIT CONFIRMED ALREADY BUILT, no code changed
+
+The mission asked for a maintainable, non-name-hardcoded policy that removes ubiquitous mass-market
+chains (Greggs, McDonald's, "and comparable businesses") from Crew recommendation eligibility before
+ranking, plus an audit of current place inventory for supermarkets/petrol stations/generic retail/
+services/low-information POIs. Read the code expecting to build this from scratch — it already
+exists, already covers both named examples by name, and is already live-tested end-to-end. Verified
+with fresh live test runs this cycle (not assumed from a prior session's own claim — see the
+mission's own "do not self-certify unsupported claims" standing rule) rather than shipped as a new
+feature; no source file changed this cycle.
+
+**The mechanism** (`services/opportunityIntent.ts`, built in earlier session work as "the Caffè Nero
+fix" — docs' own Part 27 acceptance test): `isGenericChainName` — a curated, documented, regex-based
+name list (`GENERIC_CHAIN_NAMES`), not a scattered `if (name === 'Greggs')` special case — already
+contains Greggs, McDonald's, KFC, Subway, Burger King, Starbucks, Costa Coffee, Caffè Nero, Pret,
+Wetherspoon, Domino's, Pizza Hut, Dunkin, Tim Hortons, matched case-insensitively with word
+boundaries. `derivePlanWorthiness` force-floors any match to `VERY_LOW` regardless of category or
+source, with an honest, specific audit-trail reason (`generic_chain_name`) — surfaced directly in the
+recommendation debugger (`GET /admin/crews/:id/explain-recommendation`), never silently dropped.
+`isPlanWorthyForCrew` (bar: `MEDIUM`) then hard-excludes anything `VERY_LOW` from the Crew
+recommendation candidate pool — applied via `match.ts#passesEarlyPlanWorthinessGate`, BEFORE the
+nearest-50 proximity cut (a real, previously-fixed bug: a chain-saturated town centre used to be able
+to fill all 50 candidate slots before a genuine independent venue farther out ever got the chance to
+be considered — see `test/planWorthinessBeforeProximityCut.test.ts`'s own "55 nearer chain venues
+never crowd out a genuine independent restaurant" case). Deliberately narrow and specific — never a
+broad word like "coffee" or "pub" that would catch independents, and explicitly does NOT list
+`Wagamama`/`Nando's`-style chains that are genuine real UK group-dinner destinations — matching the
+mission's own explicit warning against over-filtering legitimate independents.
+
+**The place-inventory audit** the mission asked for (supermarkets/petrol stations/generic retail/
+services/low-information POIs): read all four live place-provider adapters' own category-mapping
+logic directly, not inferred.
+- `providers/live/openStreetMap.ts#buildQuery`: Overpass query hard-scoped to
+  `amenity~"restaurant|cafe|bar|pub|fast_food|nightclub|biergarten|food_court|ice_cream"` plus
+  `marketplace`/`cinema`/`theatre` — no supermarket, fuel, or generic-retail tag ever requested.
+- `providers/live/fhrs.ts#mapCategory`: only `Restaurant/Cafe/Canteen`, `Takeaway/sandwich shop`,
+  `Mobile caterer`, `Other catering premises` -> RESTAURANT and `Pub/bar/nightclub` -> BAR are
+  mapped — every other real FHRS business type (including `Retailers - supermarkets/hypermarkets`,
+  a real category in FHRS's own register) returns `null` and is dropped before it ever becomes a
+  listing.
+- `providers/live/googlePlaces.ts`: `INCLUDED_TYPES` is hard-scoped to
+  `['restaurant', 'cafe', 'bar', 'bakery', 'meal_takeaway', 'night_club']` — no
+  `supermarket`/`gas_station`/`shopping_mall`/service-business types in the request at all.
+- `providers/live/foursquare.ts#mapCategory`: text-matches only
+  restaurant/café/coffee/bakery/food truck/food court/diner/bistro/night club/bar/pub/
+  brewery/speakeasy — anything else (a real Foursquare category name that doesn't match) returns
+  `null` and is dropped.
+
+Conclusion: supermarkets, petrol stations, generic retail stores, and services genuinely CANNOT enter
+Plot's Experience table via any of the four live place-provider adapters — excluded architecturally
+at the category-mapping level, not merely score-penalised after the fact. A McDonald's/Greggs/KFC-
+type venue CAN surface from any of the four (they're legitimately tagged `fast_food`/`restaurant`/
+`meal_takeaway` in each source's own taxonomy) — that's exactly the case `isGenericChainName` exists
+to catch downstream. "Low-information POIs" — a venue with no real description/price/tags/freshness —
+is covered by a separate, pre-existing, independently-audited hard constraint:
+`services/qualityScoring.ts#computeQualityScore` (`MIN_PUBLISHABLE_QUALITY_SCORE = 40`, structurally
+requiring real completeness signals — description length, image, price, tag richness — to clear),
+enforced as a database-level hard constraint in `match.ts`'s own `hardConstraints` before any
+candidate is even fetched.
+
+**Fresh live verification this cycle** (not re-trusting a prior session's own claim):
+`test/unit/opportunityIntent.test.ts` (23 tests — classification logic, including the exact
+`isGenericChainName('Greggs')`/`isGenericChainName("McDonald's")` assertions),
+`test/crewRecommendationHardGates.test.ts` (7 tests — the real, live, end-to-end "Caffè Nero in
+London" acceptance test through the actual Crew recommendation engine, both the manual "Find us
+something" flow and the fully automatic `generateRecommendationForCrew` path), and
+`test/planWorthinessBeforeProximityCut.test.ts` (1 test — the chain-density crowding fix). All 31
+pass, confirmed unaffected by this session's own P0-1/P0-2 changes to `match.ts`/`crewRecommendations
+.ts`/`inventorySync.ts`.
+
+**No code changed this cycle** — deliberately. Re-implementing an already-working, already-tested
+mechanism would be the "manufacture features simply to appear productive" the mission explicitly
+warns against; the honest finding here is that this P0 foundation risk was already closed by earlier
+session work, and this cycle's real contribution is the fresh, evidence-based confirmation (live test
+run + full 4-adapter inventory audit) that it still holds today, not a re-build.
+
+**Next**: task #138, the P0 acceptance test — a fresh manual-quality run through the real product
+across the mission's own named test crews (Rock, Japanese Food, Electronic/UK Garage, Broad), then
+the final P0 sign-off before resuming the paused pilot-scorecard/analytics/ops mission.
