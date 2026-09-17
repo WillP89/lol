@@ -1486,3 +1486,44 @@ P0 work closes a real trust/quality risk, it does not manufacture live supply th
 **Resuming the paused mission next**: task #132 (pilot scorecard, picked up exactly where paused),
 then task #133 (security/production hygiene), then task #134 (performance/reliability + final
 multi-archetype simulation + the FULL pilot-readiness verdict).
+
+## Cycle 21: Task #132 resumed and shipped — pilot scorecard endpoint
+
+Picked back up exactly where Cycle 16 paused it (commit `dd0fea1`, "WIP: pilot-scorecard endpoint
+(paused, untested)"). The `GET /admin/pilot-scorecard` implementation itself was already complete
+and had typechecked/linted clean before the P0 pivot — nothing in it needed to change. What was
+missing was live verification and a regression test, per this session's own standing rule that
+nothing ships without both.
+
+**Live verification**: started the API dev server against the real dev database (which still held
+the just-completed P0 acceptance test's real crews/events) and hit the endpoint directly. Got a
+fully coherent response across every section — users/crews totals, firstValue rate + median time +
+EXPLICIT/DERIVED split, the recommendation funnel's full outcome breakdown, IN/MAYBE/PASS response
+rates, top pass reasons, rec-to-plan rate, lock rate, category/provider performance, and a real
+`deadCrews` list of 6 genuinely stuck Crews with their most common blocking outcome. One value
+worth checking rather than assuming — `providerPerformance` showing `"manual_curation"` instead of
+the code's own fallback label `"manual_or_unknown"` — was traced via grep to `/admin/experiences/
+manual`, which genuinely creates a real `ProviderListing` row with that providerId. Not a bug.
+
+**Regression tests** (`apps/api/test/pilotScorecard.test.ts`, 7 tests, real Postgres rows seeded
+directly via prisma — same pattern as `recommendationResponseAck.test.ts`): the admin-key gate; an
+out-of-range `?days=` rejected rather than silently clamped; one full coherent scenario asserting
+every section of the response against known seeded rows (two active users plus one deliberately
+excluded deactivated one, EXPLICIT first-value timing, a two-outcome funnel, IN/MAYBE votes, a
+structured pass reason, a locked vs. unlocked Plan for `recToPlanRate`/`lockRate`, category and
+provider performance rows including the honest `manual_or_unknown` fallback for an Experience with
+no ProviderListing at all); the `deadCrews` classifier's inclusion rule (enabled + taste set +
+evaluated + never delivered) and its two exclusion rules (disabled Crew, no taste set yet); `?days=`
+genuinely bounding the window (an old Crew and an old event both correctly excluded at the default
+30-day window, both correctly included once the window is widened to 90); and an empty window
+reporting honest `null`s everywhere a zero-denominator rate would otherwise be, never `NaN` or a
+fabricated zero.
+
+Shipped through this session's established pipeline: commit → push to the feature branch → cherry-
+pick both the original endpoint commit and this test commit onto `main` → typecheck/lint clean on
+`main` → full suite run on `main` (515/515 passing; one `tasteSpecificityHierarchy.test.ts` failure
+on the first run was the same previously-documented transient `resetDatabase()` TRUNCATE deadlock
+under parallel load, confirmed transient by an immediate clean re-run of that file alone, 5/5) →
+push `main` → merge `main` back into the feature branch → push. Task #132 complete.
+
+**Next**: task #133 (security/production hygiene review).
