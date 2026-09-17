@@ -1527,3 +1527,89 @@ under parallel load, confirmed transient by an immediate clean re-run of that fi
 push `main` → merge `main` back into the feature branch → push. Task #132 complete.
 
 **Next**: task #133 (security/production hygiene review).
+
+## Cycle 22: Task #133 — security / production hygiene review
+
+A systematic pass over the real attack surface: auth, admin gating, secrets, uploads, logging,
+dependencies. Findings below are organized by outcome — fixed, confirmed-already-sound (no change
+needed), and flagged-not-fixed (real, but out of this pass's scope).
+
+**FIXED — ADMIN_API_KEY's own default is a public, literal secret.** `lib/config.ts`'s schema
+defaulted `ADMIN_API_KEY` to `'dev_admin_key_change_me'` with nothing stopping a production deploy
+from booting with that default still in place — and every `/admin/*` route (user hard-delete,
+provider management, and now the pilot scorecard's own real user/Crew analytics) is gated on
+nothing but this one key. Fixed with the exact same fail-loud-at-boot pattern this file already
+uses for `resolvePublicApiUrl()`'s own production misconfiguration case: `NODE_ENV === 'production'`
+with the key still at its default now throws at startup instead of silently serving every admin
+route wide open. Proven with a 3-case regression test (`test/configAdminKeyGuard.test.ts`) run in a
+fresh child process per case — importing `config.ts` has a real module-level side effect that can't
+be exercised inside the shared vitest process without corrupting every other test's already-loaded
+config singleton.
+
+**FIXED — the admin-key comparison itself used plain `!==`.** A `!==` string comparison returns as
+soon as the first differing byte is found — a real, well-documented timing side channel for
+guessing a secret character-by-character. `lib/crypto.ts` already built `constantTimeEqual`
+specifically for session-token comparison (and already uses it there — verified, not just defined
+and forgotten); wired the same primitive into the admin preHandler. Covered by every one of this
+suite's existing admin-gated tests (the key never changed, only how it's compared), plus the whole
+suite re-run clean after the change (86 files, 518 tests).
+
+**FIXED — one safe dependency patch.** `npm audit` found 3 vulnerabilities fixable without a
+breaking change (nodemailer, patch-level) — applied via `npm audit fix`; the lockfile diff confirms
+only nodemailer moved (9.1.0 → 9.1.1), everything else was resolved-URL churn at identical semver.
+
+**CONFIRMED ALREADY SOUND — no change needed:**
+- Session and magic-link cookies: `httpOnly`, `secure` in production, `sameSite: 'lax'` — correct
+  on every `setCookie` call site.
+- Tokens are never stored raw: a random token is generated, handed to the client, and only its
+  HMAC digest (keyed by `SESSION_SECRET`/`TOKEN_HASH_SECRET`, both required with no default) is
+  persisted — a DB read alone can't hand out usable credentials.
+- `requestMagicLink`/`loginOrRequestLink` are IP-rate-limited (`lib/rateLimit.ts`); the
+  auto-instant-login-off-email-alone path is deliberately gated on `providerReadiness` (a real
+  email provider actually configured), never on `NODE_ENV`, so it can't silently activate itself
+  in a production deploy that forgot to set one.
+- No raw/unsafe SQL anywhere in `src/` — every query goes through Prisma's parameterized client;
+  the one `$queryRaw` (app.ts's own health check) is a literal `SELECT 1`, no interpolation.
+- No secrets committed to the repo — `.env`/`.env.*` are gitignored, `.env.example` holds only
+  placeholders, verified via `git ls-files`.
+- File uploads: MIME allowlist (JPEG/PNG/WebP only — no SVG, no HTML), 6MB cap, and a
+  server-generated random-UUID filename with an extension derived from the validated MIME type
+  (never from client-supplied user input) — rules out path traversal and arbitrary-extension
+  writes.
+- No CORS surface to misconfigure: the web app proxies `/api/*` to the backend via a Next.js
+  rewrite, so the browser only ever talks to one origin — a deliberate, documented design choice
+  (`apps/web/src/lib/api.ts`'s own comment), not an oversight.
+- Fastify's own default request-log serializer (verified by reading
+  `node_modules/fastify/lib/logger.js` directly) logs only `method`/`url`/`hostname`/
+  `remoteAddress`/`remotePort` — never `headers`, so session cookies and the admin key are not
+  written to production logs by Fastify's own default request logging. Nothing in this app's own
+  route code logs `request.headers` either (grepped).
+- The one bulk-delete admin route (`/admin/reset-to-real-accounts`) already has a real safeguard
+  independent of the admin-key gate: it's a dry-run by default and requires an exact
+  `&confirm=DELETE_ALL_TEST_DATA` phrase to actually execute.
+- Stripe/payments: every function in `providers/payments/stripe.ts` throws a clear "not configured"
+  error rather than silently no-op-ing — genuinely not live yet, so there's no webhook-signature
+  gap to worry about at this stage (nothing to forge a webhook against).
+
+**FLAGGED, NOT FIXED — real but out of this pass's safe scope:**
+- `npm audit` also found a critical-severity Next.js CVE set (14.2.35 in use; fix requires 14→16)
+  and a high-severity Fastify `find-my-way` DoS (4.29.1 in use; fix requires 4→5) — both need a
+  major version bump with a large blast radius (86 backend test files, the entire frontend route
+  tree) that isn't safe to attempt inside a hygiene pass without a dedicated regression cycle.
+  Pre-launch item, not a nice-to-have — tracked here rather than silently deferred.
+- File uploads trust the client-declared multipart `Content-Type` rather than sniffing the actual
+  file bytes' magic numbers. Lower severity given the MIME allowlist already excludes SVG/HTML (the
+  classes of file that actually enable stored-content attacks via a spoofed image type) and images
+  are served with an explicit, allowlisted Content-Type rather than a sniffed one — but a real,
+  cheap hardening opportunity for later, not addressed here.
+- Admin auth remains a single shared secret, not real per-operator role-based auth — this is a
+  pre-existing, already-documented limitation (`docs/DECISIONS.md#admin-auth`), explicitly called
+  out there as a pre-launch requirement once there's more than one operator. Unchanged by this pass
+  on purpose: that's an architecture decision, not a hygiene fix.
+
+Shipped both fixes through the established pipeline (commit → push → cherry-pick to `main` →
+typecheck/lint/full-suite clean on `main` → push `main` → merge back to the feature branch → push).
+Task #133 complete.
+
+**Next**: task #134 (performance/reliability check + final multi-archetype simulation + the FULL
+pilot-readiness verdict).
