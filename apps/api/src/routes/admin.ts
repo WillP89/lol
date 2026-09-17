@@ -120,10 +120,19 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
           const filtered = needle
             ? mapped.filter((m) => m.name.toLowerCase().includes(needle) || m.subcategories.some((s) => s.toLowerCase().includes(needle)) || m.description.toLowerCase().includes(needle))
             : mapped;
+          // fetchListings() deliberately swallows its own network/API failures and returns []
+          // (see e.g. openStreetMap.ts's fetchListings) so one down provider can never crash a
+          // real inventory sync sweep — but that same swallowing made this probe indistinguishable
+          // from "genuinely zero real inventory here": a raw fetch that failed outright and a city
+          // that truly has nothing both showed fetchedTotal: 0, error: null. Real gap this closes:
+          // when the raw fetch came back empty, ask the adapter's own healthCheck() whether that's
+          // because it's actually unreachable right now, and surface that reason instead of a
+          // silent zero — the one piece of evidence this endpoint exists to give.
+          const unexplainedEmpty = mapped.length === 0 ? await adapter.healthCheck().catch(() => null) : null;
           return {
             id: adapter.id,
             isLive: true,
-            error: null,
+            error: unexplainedEmpty && unexplainedEmpty.status === 'DOWN' ? unexplainedEmpty.error ?? 'Provider health check reports DOWN' : null,
             fetchedTotal: mapped.length,
             matched: filtered.length,
             events: filtered
