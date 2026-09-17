@@ -1018,3 +1018,50 @@ revisit only if real usage shows operator attention alone isn't catching provide
 
 Shipped: typecheck + lint clean, full backend suite green (82 files / 487 tests, the 4 new ones
 included).
+
+## Cycle 15 — golden path failure-state verification (no bugs found)
+
+Direct check of the mission's own degraded/failure-state list against the real code, on top of the
+golden path itself already proven live earlier this session (Cycles 7–11: signup → onboarding →
+taste → location → Crew → invite/join → chat → derived/explicit taste → recommendation → response
+→ replacement → lock → Plan → Home → subsequent recommendation). Each item below verified by
+reading the actual handling code, not assumed correct because it sounded plausible:
+
+- **Provider unavailable / no strong candidate**: already live-proven (Cycles 8/9) — the honest
+  "we're still looking" chat message, never a fabricated pick.
+- **Location denied**: `explore/page.tsx#useMyLocation` distinguishes `PERMISSION_DENIED`
+  specifically ("Location access was declined — allow it in your browser settings, or search a
+  town/postcode instead") from a generic geolocation failure, with a manual search fallback always
+  available either way.
+- **Location missing entirely**: `crewRecommendations.ts`'s own `location_not_set` eligibility gate
+  (read in an earlier cycle) refuses to score against an unknown location rather than guessing —
+  confirmed still in place.
+- **Crew preferences conflicted**: live-proven via `crewFirstValueDerivation.test.ts`'s own
+  conflicted-trio scenario — correctly derives nothing rather than fabricating consensus.
+- **No image**: the category-editorial-fallback-art pipeline (built in earlier session work —
+  `imageEnrichment.ts`/`categoryStockImages.ts`/inventorySync.ts's own multi-tier chain) leaves
+  `imageUrl: null` only when every real tier is exhausted, at which point the web app's own
+  generated fallback art renders — never a broken `<img>`.
+- **Unknown price**: `lib/formatPrice.ts#formatPriceFrom` returns `null` for `priceMinMinor: null`,
+  and every call site (`crews/[id]/page.tsx`) short-circuits on that `null` via `&&` — the price
+  clause simply doesn't render, never a literal "£null" or "from £NaN". A previously-fixed real bug
+  is documented right in that file: a genuinely free event (`priceMinMinor: 0`) rendering as the
+  confusing "from £0" instead of "free".
+- **Unknown booking availability**: `bookingStatus` (including `UNKNOWN`) is never rendered as raw
+  enum text anywhere in the web app (confirmed by grep — zero matches in the Crew/Explore pages) —
+  it only ever influences scoring/exclusion server-side, so there is no code path where an
+  unhandled enum value could leak into the UI as broken text.
+- **Network/API error**: every one of the 7 live provider adapters was independently confirmed
+  failure-isolated in Cycle 12's own full audit — one adapter/category/page failing never blocks
+  the others, and the automatic engine falls back to the honest "still looking" message.
+- **Duplicate provider listings**: `entityResolution.ts#dedupeNearDuplicates`, extended with
+  location-awareness in Cycle 4, live-tested and unit-tested (`test/unit/entityResolution.test.ts`).
+- **Stale / past / cancelled event**: `match.ts`'s own hard-constraint WHERE clause
+  (`startsAt: { gte: windowStart, lte: windowEnd }`, `bookingStatus: { not: 'SOLD_OUT' }`) excludes
+  both at the database level, with a previously-fixed, documented real bug right there in the same
+  code (an end-of-day rounding issue that silently shrank the window depending on what time of day
+  a request happened to fire).
+
+**No new bugs found this cycle** — every failure state the mission listed is already correctly,
+honestly handled, most with their own previously-documented real-bug-fix history rather than being
+untested guesses. No code changed; no shipping step needed.
