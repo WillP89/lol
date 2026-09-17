@@ -169,6 +169,14 @@ export const fhrsProvider: ProviderAdapter = {
         establishments.push(...pageResults);
         const totalPages = data.meta?.totalPages ?? 1;
         if (page >= totalPages || pageResults.length === 0) break;
+        // Real operator-visibility gap flagged (not fixed) in Cycle 4's own gate audit — unlike
+        // OpenStreetMap's own equivalent cap, FHRS's own `meta.totalPages` makes this PRECISELY
+        // knowable, not just inferred from hitting a round number: if the loop is about to exit
+        // for reaching MAX_PAGES while the API itself says more real pages exist, that is a
+        // genuine, exact truncation, not a guess — worth a real log line, not a silent stop.
+        if (page === MAX_PAGES && totalPages > MAX_PAGES) {
+          logger.warn({ city: params.city, maxPages: MAX_PAGES, totalPages }, 'FHRS query hit MAX_PAGES with more real pages still available — inventory truncated for this city');
+        }
       }
     } catch (err) {
       logger.warn({ err, city: params.city }, 'FHRS Open Data API query failed — no FHRS inventory this sync');

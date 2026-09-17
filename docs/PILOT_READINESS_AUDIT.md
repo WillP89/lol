@@ -960,3 +960,61 @@ convention) proves the request shape, all 8 intents run, the `city` override app
 
 Shipped: typecheck + lint clean, full backend suite green (81 files / 483 tests, the 3 new ones
 included).
+
+## Cycle 14 — the supply gate + provider resilience plan
+
+Direct response to the mission's "make provider resilience real, never fake" ask. Two small, real
+code fixes first, both closing the specific "not yet done" item Cycle 4's own audit already
+flagged: OpenStreetMap's `MAX_RESULTS` (120) and FHRS's `MAX_PAGES` (2) both silently truncate real
+inventory for a dense enough city with zero operator-visible signal that it happened — a real city
+thin on results and a real city that got cut off looked identical. Both now log a warning
+specifically when the cap is genuinely hit (OSM: result count reaches `MAX_RESULTS`; FHRS: the
+API's own `meta.totalPages` — a precise, not inferred, signal — says more real pages existed than
+`MAX_PAGES` reached), and stay silent for the ordinary case where a city's real result count never
+approaches the cap. `test/unit/providerTruncationLogging.test.ts` (4 tests, mocked fetch) proves
+both the fires-when-truncated and stays-silent-when-not cases for each adapter.
+
+**The resilience table itself**, one row per `ExperienceCategory` a live adapter can produce,
+answering the mission's own four questions (primary source / secondary source / what happens if
+primary fails / what happens if both fail) with what is ACTUALLY true in this codebase today, not
+aspirational:
+
+| Category | Primary (live) | Secondary (live) | If primary fails | If all fail |
+|---|---|---|---|---|
+| RESTAURANT, BAR | OpenStreetMap | FHRS (independent, real, government open data) | Genuine redundancy already exists — the other source still returns real results, deduped against each other by `entityResolution.ts` | Zero real inventory this sync; the honest "still looking" chat message (crewRecommendations.ts) fires, never a fabricated pick |
+| CLUBBING | OpenStreetMap (`amenity=nightclub`) | Skiddle (`CLUB` eventcode) *if key configured* | The other still contributes if configured; if Skiddle isn't keyed, single-source | Same as above |
+| THEATRE, CINEMA, ART_CULTURE, FITNESS, DAY_ACTIVITY, COMMUNITY | OpenStreetMap only | **None** | **Single point of failure** — zero real fallback of any kind, mock or live | Same as above — correctly falls back to the honest empty message, never mock data |
+| LIVE_MUSIC, COMEDY | Ticketmaster/Skiddle *if configured* | Each other, if both configured | Whichever configured source remains | With no key configured at all (this sandbox's own current state): zero real supply, full stop — `mock_ticketing` covers these two only as the dev/production ticketed-events *fallback*, not real inventory (see Cycle 8's own correction) |
+| SPORT, FESTIVAL | Skiddle/PredictHQ/Ticketmaster *if configured* | Each other, if more than one configured | Whichever configured source remains | **No fallback of any kind exists today, live or mock** — `mock_ticketing` doesn't cover either category (confirmed by reading `mock/ticketingProvider.ts`'s own categories, and matches Cycle 13's live `UNSUPPORTED` classification for Football/Food-festival exactly) |
+
+**The real architectural risk this table makes explicit, already flagged once in Cycle 8 and
+reaffirmed here rather than re-litigated**: six categories (THEATRE/CINEMA/ART_CULTURE/FITNESS/
+DAY_ACTIVITY/COMMUNITY) depend entirely on OpenStreetMap with no fallback of any kind — if OSM is
+ever down for an extended real-world period (not just this sandbox's own permanent egress block),
+those categories return truthfully empty rather than degraded-but-present. **Deliberately not
+"fixed" this cycle** by reintroducing `mockRestaurantProvider`/`mockActivityProvider` into the
+dev/production registry — the mission's own explicit instruction ("do not create fake resilience",
+"mocks must never silently masquerade as production supply") and Cycle 8's own reasoning both apply
+unchanged: whether this is a real, live risk depends entirely on whether the *actual* production
+deployment's network can reach OpenStreetMap, a fact this sandbox categorically cannot determine
+(it can only confirm this specific interactive session's own, much more restrictive proxy blocks
+it). The correct fix, if this ever becomes a confirmed live problem, is a genuinely different one
+from "restore the mocks": a health-check-gated fallback that only ever activates when OSM's own
+`healthCheck()` reports DOWN, clearly labelled as degraded coverage, not permanently co-mingled
+with real data — scoped out of this cycle as a real, identified, but not-yet-justified follow-up,
+not built speculatively against a risk that may not exist in the real deployment.
+
+**What Plot already does correctly, verified rather than assumed**: truthful "nothing strong
+enough right now" behaviour already exists and was live-proven in Cycle 8/9 (the Manchester Crew's
+honest "we're still looking" message, and the conflicted-Crew tests in
+`crewFirstValueDerivation.test.ts`) — never a fabricated pick standing in for missing supply, in
+any of the failure modes this table describes. Operational visibility already exists at a scope
+matched to this pilot's real scale: `/admin/providers` (aggregate DB counts + live health per
+provider), `/admin/inventory-probe` and `/admin/pilot-certification` (Cycles 12/13, live per-
+intent verification with a classified failure reason), and now these two truncation-warning log
+lines. A push-alerting/paging system was considered and deliberately not built — genuine
+over-engineering for a friends-and-family pilot an operator is actively watching, not a gap;
+revisit only if real usage shows operator attention alone isn't catching provider outages in time.
+
+Shipped: typecheck + lint clean, full backend suite green (82 files / 487 tests, the 4 new ones
+included).
