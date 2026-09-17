@@ -315,7 +315,7 @@ export async function buildPersonalHome(userId: string, opts: { debug?: boolean 
     .filter((e) => e.venue && haversineKm(homeCenter.lat, homeCenter.lng, e.venue.latitude, e.venue.longitude) <= LOCAL_AREA_RADIUS_KM)
     .slice(0, HOME_CANDIDATE_LIMIT);
 
-  const deduped = dedupeNearDuplicates(rows, (e) => ({ name: e.name, category: e.category, startsAt: e.startsAt }));
+  const deduped = dedupeNearDuplicates(rows, (e) => ({ name: e.name, category: e.category, startsAt: e.startsAt, latitude: e.venue?.latitude ?? null, longitude: e.venue?.longitude ?? null }));
   const scored = deduped.map((e) => scoreForIndividual(e, ctx, opts.debug === true));
 
   if (!hasSignal) {
@@ -385,7 +385,7 @@ export async function buildPersonalHome(userId: string, opts: { debug?: boolean 
     return relevance.impliedByInterestId !== null && underCoveredInterests[relevance.impliedByInterestId] !== undefined;
   });
   const widened = [...widenedByCategory, ...widenedByRelation];
-  let eligible = [...strictEligible, ...widened].sort((a, b) => b.score - a.score);
+  const eligible = [...strictEligible, ...widened].sort((a, b) => b.score - a.score);
 
   const forYou = eligible.slice(0, FOR_YOU_LIMIT);
 

@@ -1,4 +1,5 @@
 import type { CanonicalListingInput } from '../providers/types';
+import { haversineMiles } from '../lib/geo';
 
 /**
  * Deduplication (brief §44). The same gig can arrive from DICE, RA and the venue's own site;
@@ -60,6 +61,20 @@ export function shouldAutoMerge(a: string, b: string): boolean {
 // category" gets treated as one option rather than two.
 const NEAR_DUPLICATE_WINDOW_DAYS = 3;
 
+// Real gap this closes, found in a follow-up gate audit: name-similarity alone, with zero
+// location awareness, can silently collapse two genuinely DIFFERENT real venues that happen to
+// share a common UK name — "The Red Lion", "The Crown", "The Kings Arms" are among the most
+// common pub names in England, and two unrelated real pubs both named "The Crown" in the same
+// city, both mapped to BAR with the same nextSensibleTime() hour, would hit shouldAutoMerge's
+// 0.82 threshold on name alone and lose one of them permanently. 0.3 miles (~480m) is generous
+// enough to still catch the case this function exists for — the SAME real venue geocoded
+// slightly differently by two providers (a doorway vs. a building centroid, OSM vs. FHRS's own
+// address-derived coordinates) — while being well short of "two different venues across town".
+// Distance is only ever a REASON TO REJECT a would-be merge, never a reason to force one: two
+// items without known coordinates on both sides fall back to the pre-existing name-only
+// heuristic unchanged, so this can only make dedup MORE conservative, never less.
+const MAX_DEDUP_DISTANCE_MILES = 0.3;
+
 /**
  * Runtime near-duplicate suppression — the counterpart `similarityScore`/`shouldAutoMerge` were
  * missing. Before this, both functions existed only as ingestion-time heuristics that nothing
@@ -79,10 +94,17 @@ const NEAR_DUPLICATE_WINDOW_DAYS = 3;
  * lives here, at the point results are about to be shown, not just at ingestion: collapse
  * same-category, similar-name, near-in-time items down to the single best-ranked (i.e. first, in
  * whatever order the caller already sorted by) representative.
+ *
+ * `latitude`/`longitude` (MAX_DEDUP_DISTANCE_MILES's own comment) are the real fix for a distinct
+ * bug this same audit found: without them, two genuinely different real venues sharing a common
+ * UK name ("The Red Lion", "The Crown") could hit the name-similarity threshold and silently lose
+ * one. Optional and additive — an item with unknown coordinates on either side falls back to the
+ * pre-existing name-only behaviour exactly as before, so this can only make dedup MORE
+ * conservative (reject a would-be merge it can now prove is two different places), never less.
  */
 export function dedupeNearDuplicates<T>(
   items: T[],
-  getFields: (item: T) => { name: string; category: string; startsAt: Date },
+  getFields: (item: T) => { name: string; category: string; startsAt: Date; latitude?: number | null; longitude?: number | null },
 ): T[] {
   const kept: T[] = [];
   for (const item of items) {
@@ -92,7 +114,16 @@ export function dedupeNearDuplicates<T>(
       if (existingFields.category !== fields.category) return false;
       const daysApart = Math.abs(fields.startsAt.getTime() - existingFields.startsAt.getTime()) / 86_400_000;
       if (daysApart > NEAR_DUPLICATE_WINDOW_DAYS) return false;
-      return shouldAutoMerge(fields.name, existingFields.name);
+      if (!shouldAutoMerge(fields.name, existingFields.name)) return false;
+      // A real coordinate on BOTH sides that's too far apart proves these are two different
+      // venues, whatever their names look like — overrides the name-similarity verdict. Either
+      // side missing coordinates falls through to trusting the name-similarity check alone,
+      // unchanged from before this fix.
+      if (fields.latitude != null && fields.longitude != null && existingFields.latitude != null && existingFields.longitude != null) {
+        const distance = haversineMiles(fields.latitude, fields.longitude, existingFields.latitude, existingFields.longitude);
+        if (distance > MAX_DEDUP_DISTANCE_MILES) return false;
+      }
+      return true;
     });
     if (!isDuplicate) kept.push(item);
   }
