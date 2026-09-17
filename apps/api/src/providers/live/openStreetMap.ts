@@ -45,7 +45,21 @@ import { UK_FALLBACK_CENTER, resolveCityCenter, type UkPlace } from '../../data/
  */
 const FETCH_RETRY = { attempts: 2, timeoutMs: 8_000 };
 
-const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
+// Real production incident this closes: /admin/providers reported this adapter DOWN with
+// `TypeError: fetch failed` — no code-level bug found on inspection (the query, method, headers,
+// and error handling here are all correct), which points at the single public instance itself
+// (rate-limited, temporarily unreachable, or blocking Render's egress IP range specifically —
+// overpass-api.de is a shared community resource, not a dedicated/paid endpoint, exactly the
+// risk this file's own header comment already flagged). Real, known, actively-maintained public
+// Overpass mirrors exist for exactly this reason (the project's own wiki lists them) — trying
+// the next one on a failure is the honest fix for a single-shared-instance outage, not a code
+// bug to "fix" that doesn't exist. Ordered by real-world reliability reputation among Overpass
+// API consumers, primary first.
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.openstreetmap.ru/api/interpreter',
+] as const;
 const SEARCH_RADIUS_METERS = 6000; // dining/nightlife — a real "worth the trip" catchment, not a whole county
 const CULTURE_RADIUS_METERS = 9000; // museums/attractions/markets are sparser — search a bit wider
 // Real, live-reported gap this closes: "I only see comedy and live music" — Ticketmaster/Skiddle's
@@ -173,18 +187,35 @@ function buildQuery(center: UkPlace): string {
   out center tags ${MAX_RESULTS};`;
 }
 
-async function runQuery(center: UkPlace, signal: AbortSignal): Promise<OsmElement[]> {
-  const res = await fetch(OVERPASS_ENDPOINT, {
+async function runQueryAgainst(endpoint: string, center: UkPlace, signal: AbortSignal): Promise<OsmElement[]> {
+  const res = await fetch(endpoint, {
     method: 'POST',
     signal,
     headers: { 'Content-Type': 'text/plain', 'User-Agent': 'Plot/1.0 (https://plotmaker.co.uk; discovery)' },
     body: buildQuery(center),
   });
   if (!res.ok) {
-    throw new Error(`Overpass API returned ${res.status}: ${await res.text().catch(() => '')}`);
+    throw new Error(`Overpass API (${endpoint}) returned ${res.status}: ${await res.text().catch(() => '')}`);
   }
   const data = (await res.json()) as OverpassResponse;
   return data.elements ?? [];
+}
+
+/** Tries each mirror in `OVERPASS_ENDPOINTS` in order, moving to the next only once the current
+ *  one has exhausted its own retry budget — so a genuinely transient blip on the primary still
+ *  gets its fair retry before this falls back, but a real outage (or a block specific to this
+ *  app's egress IP) doesn't take the whole provider down when a working alternative exists. */
+async function runQueryWithFallback(center: UkPlace, retry: { attempts: number; timeoutMs: number }): Promise<OsmElement[]> {
+  let lastErr: unknown;
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      return await withRetry((signal) => runQueryAgainst(endpoint, center, signal), retry);
+    } catch (err) {
+      lastErr = err;
+      logger.warn({ err, endpoint }, 'Overpass mirror failed — trying the next one');
+    }
+  }
+  throw lastErr;
 }
 
 export const openStreetMapProvider: ProviderAdapter = {
@@ -195,7 +226,7 @@ export const openStreetMapProvider: ProviderAdapter = {
 
   async healthCheck(): Promise<ProviderHealth> {
     try {
-      await withRetry((signal) => runQuery(UK_FALLBACK_CENTER, signal), { attempts: 1, timeoutMs: 10_000 });
+      await runQueryWithFallback(UK_FALLBACK_CENTER, { attempts: 1, timeoutMs: 10_000 });
       return { status: 'ACTIVE', checkedAt: new Date() };
     } catch (err) {
       return { status: 'DOWN', error: String(err), checkedAt: new Date() };
@@ -206,9 +237,9 @@ export const openStreetMapProvider: ProviderAdapter = {
     const center = resolveCityCenter(params.city);
     let elements: OsmElement[];
     try {
-      elements = await withRetry((signal) => runQuery(center, signal), FETCH_RETRY);
+      elements = await runQueryWithFallback(center, FETCH_RETRY);
     } catch (err) {
-      logger.warn({ err, city: params.city }, 'Overpass query failed — no OpenStreetMap inventory this sync');
+      logger.warn({ err, city: params.city }, 'Every Overpass mirror failed — no OpenStreetMap inventory this sync');
       return [];
     }
 

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { openStreetMapProvider } from '../../src/providers/live/openStreetMap';
 import type { RawListing } from '../../src/providers/types';
 
@@ -103,5 +103,62 @@ describe('openStreetMapProvider.mapToCanonical', () => {
 describe('openStreetMapProvider registration', () => {
   test('is always live — no credential to be missing for a public API', () => {
     expect(openStreetMapProvider.isLive).toBe(true);
+  });
+});
+
+/**
+ * Real production incident this closes: /admin/providers reported this adapter DOWN with a bare
+ * `TypeError: fetch failed` — no bug in the query/parsing logic itself, which points at the
+ * single shared public Overpass instance (rate-limited, temporarily unreachable, or blocking
+ * this app's own egress IP specifically). `fetchListings`/`healthCheck` now try each of the
+ * known public mirrors in `OVERPASS_ENDPOINTS` in turn — these tests prove that fallback
+ * actually happens, using a real Overpass QL response shape, rather than trusting the code read.
+ */
+describe('openStreetMapProvider mirror fallback', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test('fetchListings still returns real results when the primary mirror is down but a later one works', async () => {
+    let callCount = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      callCount += 1;
+      if (url.includes('overpass-api.de')) {
+        throw new TypeError('fetch failed'); // the exact real production error
+      }
+      return {
+        ok: true,
+        json: async () => ({ elements: [{ type: 'node', id: 1, lat: 52.48, lon: -1.89, tags: { name: 'The Fallback Arms', amenity: 'pub' } }] }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const listings = await openStreetMapProvider.fetchListings({ city: 'Birmingham', fromDate: new Date(), toDate: new Date() });
+    expect(listings).toHaveLength(1);
+    expect(callCount).toBeGreaterThan(1); // proves it actually moved past the failing primary
+    expect(fetchMock.mock.calls[0][0]).toContain('overpass-api.de');
+    expect(fetchMock.mock.calls[fetchMock.mock.calls.length - 1][0]).not.toContain('overpass-api.de');
+  });
+
+  test('fetchListings resolves to an empty array (never throws) when every mirror fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
+    const listings = await openStreetMapProvider.fetchListings({ city: 'Birmingham', fromDate: new Date(), toDate: new Date() });
+    expect(listings).toEqual([]);
+  });
+
+  test('healthCheck reports ACTIVE once ANY mirror succeeds, not just the primary', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('overpass-api.de')) throw new TypeError('fetch failed');
+      return { ok: true, json: async () => ({ elements: [] }) } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const health = await openStreetMapProvider.healthCheck();
+    expect(health.status).toBe('ACTIVE');
+  });
+
+  test('healthCheck reports DOWN only when every mirror genuinely fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
+    const health = await openStreetMapProvider.healthCheck();
+    expect(health.status).toBe('DOWN');
   });
 });
