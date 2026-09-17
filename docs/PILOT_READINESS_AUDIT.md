@@ -1132,3 +1132,99 @@ Deliberately NOT done this cycle: `CrewAiTasteSetupApplied` (routes/crews.ts) al
 covers the AI free-text taste-setup flow specifically — left as-is, no overlap with the new
 `CrewPreferencesSet` event (which fires on the underlying `preferencesSetAt`-stamping moment
 regardless of which UI flow triggered it, a different and complementary signal, not a duplicate).
+
+## Cycle 17 — P0-1: taste specificity/hierarchy fix (Rock + Live gigs recommending K-pop)
+
+A real, live-reported P0 foundation failure that paused all other pilot-readiness work: a Stafford
+Crew set its own taste to `Live gigs` + `Rock` and Plot recommended "K Pop Demons". Traced through
+the full pipeline the mission asked for (user preferences -> Crew interestPreferences -> query
+generation -> candidate pool gate -> scoring -> eligibility -> delivery) rather than patched at the
+symptom.
+
+**Root cause**, confirmed by reading `services/match.ts#scoreExperiencesForCrew` end to end: every
+one of a Crew's own `interestPreferences` was treated as an independent, additive OR condition —
+`passesPreferenceGate` admits a candidate into the scored pool the moment ANY one pick matches, and
+the scoring loop only ever ADDS bonus for a literal match, never asks whether a candidate's own
+confirmed genre data CONTRADICTS a different, more specific pick the same Crew also made. The New
+Crew taste picker (`CrewTuneContent`, apps/web) writes both "Live gigs" and "Rock" into the same
+flat `interestPreferences` array with no distinction between them — "Live gigs" is a broad,
+context-setting pick (a K-pop show genuinely, honestly IS "a live gig" — Ticketmaster/Skiddle-style
+marketing copy for it plausibly contains the word "gig", which is exactly why the existing loose
+name/description keyword scan (`experienceInterestTags`) let it through the gate on that pick
+alone), while "Rock" is a specific genre pick — but nothing in the scoring architecture ever
+composed the two into "live ROCK gigs specifically". `Live gigs` + `Rock` was always scored as
+"live gigs OR rock", independently satisfiable by two completely unrelated pieces of evidence.
+
+**The fix** (`packages/shared/src/tasteTaxonomy.ts` + `apps/api/src/services/match.ts`):
+- A new `narrows?: boolean` field on `TasteInterest` marks a genuine REFINEMENT of its territory —
+  a music genre, a food cuisine, a sport discipline — as distinct from a broad/context/format pick.
+  Marked via a new `tn()` taxonomy helper (parallel to the existing `t()`) on: every music genre
+  (rock, indie, alternative, pop, hip_hop, grime, drill, rnb, house, techno, drum_and_bass,
+  uk_garage, disco, soul_funk, jazz, country, folk, metal, punk, classical, electronic, afrobeats,
+  reggae, latin); every food cuisine/dietary interest (italian, japanese, thai, indian, mexican,
+  korean, middle_eastern, steak, seafood, vegan); every sport discipline (football, rugby, cricket,
+  boxing, mma, tennis, darts, motorsport, basketball, ice_hockey, athletics, golf, cycling,
+  horse_racing). Deliberately left `narrows: false` (the default): format/context picks (live_gigs,
+  small_venues, festivals, club_nights, dj_sets, tribute_throwback, restaurants, street_food,
+  food_festivals, pop_ups, brunch, fine_dining, casual_dining, markets, watching_big_matches) and
+  every football-specific league (premier_league, championship_football, league_one_two,
+  non_league, womens_football, international_football, champions_league, local_football) — leagues
+  sit WITHIN football, not alongside it as a different discipline, so a confirmed Premier League
+  tag must never register as "contradicting" a Championship pick; that finer distinction is left to
+  the existing `crew_interest_preference` scoring bonus (a literal league match already outranks a
+  bare football one), never exclusion. comedy/culture/drinks_nightlife/outdoors_active territories
+  are left entirely `narrows: false` for now — same "grow it only with real, defensible cases"
+  discipline `TERRITORIES_REQUIRING_EXPLICIT_RELATION`/`RELATED_INTERESTS` already established, not
+  a blanket pass over the whole taxonomy.
+- A new curated `RELATED_INTERESTS` cluster (rock/indie/alternative/punk/metal, bidirectional) —
+  the P0 report's own explicit worked example of "sensible exploration" for a Rock Crew — so a
+  genuinely adjacent genre is never mistaken for a contradiction the way an unrelated one (K-pop)
+  correctly is.
+- `match.ts#contradictsCrewInterestPreference` (new): for one candidate, checks whether it carries
+  CONFIRMED evidence (subcategory-sourced — `experienceInterestTagsFromSubcategories`, never the
+  loose keyword scan) of a DIFFERENT `narrows: true` interest in the SAME taxonomy territory as one
+  the Crew explicitly picked, and neither matches it, is a curated `RELATED_INTERESTS` sibling, nor
+  is itself one of the Crew's OTHER own picks (a real second bug this last check fixes — see
+  below). A candidate with NO confirmed narrowing evidence at all (a genuinely untagged "Live Music
+  Night") is never a contradiction — Plot doesn't know enough to call it wrong, and per the
+  mission's own explicit instruction must still be able to explore broadly.
+- Wired into the scoring loop (not the hard candidate-pool gate — a binary exclusion would make a
+  contradicting candidate invisible to the recommendation debugger's own "what did Plot consider
+  and why did it lose" trail, which the mission explicitly wants visible): a confirmed contradiction
+  caps the candidate's TOTAL score at 20 (comfortably under `MIN_RECOMMENDATION_SCORE` = 55, applied
+  last so it can never be outrun by unrelated distance/availability/quality/ticketed score volume),
+  strips any reason code that would make it read as a genuine taste match, and replaces it with an
+  honest `genre_contradiction` reason (free-text matches are deliberately never stripped — a
+  literal, deliberate mention of an artist/event name is always real, first-person evidence a
+  taxonomy inference must never override). `crewRecommendations.ts`'s own recommendation-debugger
+  (`explain-recommendation`) now surfaces a new `GENRE_MISMATCH` rejection reason wherever this
+  fires, checked before the generic `NO_TASTE_SIGNAL`, so the debug trail names the SPECIFIC reason.
+
+**A real bug in the fix's own first draft**, caught by its own cross-domain test before shipping:
+a Crew that picked BOTH `electronic` and `uk_garage` (two genuinely different, both genuinely
+wanted, narrowing picks in the same `music` territory) had a confirmed UK-garage-tagged candidate
+flagged as "contradicting" the `electronic` pick — the contradiction check compared a candidate's
+tag against ONE picked interest's own relation set at a time, never checking whether the tag was
+itself one of the Crew's OTHER explicit picks. Fixed by adding `crewInterestPreferences.has(tag)`
+to the "never a contradiction" check — a Crew is always allowed to want more than one specific
+thing in the same territory.
+
+**Regression coverage** (`test/tasteSpecificityHierarchy.test.ts`, 5 tests, all live/DB-backed
+against the real `/admin/crews/:id/explain-recommendation` debugger, no mocking): (1) the exact
+reported failure — a Rock Crew's real candidate pool (K-pop/generic-untagged/rock/alt-rock) proves
+the correct ordering (rock ≈ alt-rock > generic > K-pop, K-pop capped under 21, flagged
+`GENRE_MISMATCH`) and that generic/adjacent candidates are never penalised; (2) the mission's own
+control case — a Crew with ONLY the broad "Live gigs" pick (no genre) is never penalised for the
+same K-pop candidate; (3) cross-domain Food (Japanese vs Thai); (4) cross-domain Sport (Football vs
+Cricket); (5) cross-domain Nightlife (UK Garage + Electronic vs Techno) — the last one is also the
+regression test for the multi-genre-pick bug above.
+
+Full pipeline validated: `packages/shared` rebuilt, `apps/api` typecheck + lint clean, `apps/web`
+typecheck clean (imports the same taxonomy types), full backend suite 84 files / 498 tests (the 5
+new ones included), zero regressions against the prior 83/493 baseline — critically, no existing
+personalisation/match test (rock/food/sport crews built in earlier session work) broke, meaning
+this is a precise, additive fix, not a blunt tightening that would have shown up as new failures
+there.
+
+**Not yet done**: P0-2 (image pipeline truthfulness) and P0-3 (mass-market chain exclusion) are the
+two remaining P0 foundation failures the mission named — next.
