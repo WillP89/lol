@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { Prisma } from '@prisma/client';
 import { categoryToTasteKey } from './tasteSignals';
+import { track } from './analytics';
 
 // TasteProfile.categoryAffinity is keyed by whatever a swipe's free-text `category` was —
 // see submitTasteSwipes's own comment. Onboarding's own chip set (apps/web/src/lib/interests.ts
@@ -151,6 +152,13 @@ export async function tryDeriveAndApplyCrewPreferences(crewId: string): Promise<
       ...(stampingFirstTime ? { preferencesSetAt: new Date() } : {}),
     },
   });
+  if (stampingFirstTime) {
+    void track(
+      'CrewPreferencesSet',
+      { crewId, source: 'DERIVED', categoryPreferences: derived.categoryPreferences, interestPreferences: derived.interestPreferences },
+      { crewId },
+    );
+  }
   return stampingFirstTime;
 }
 
