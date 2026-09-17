@@ -156,6 +156,11 @@ interface CrewDetail {
   // that route's own comment for why this rides along on the same GET rather than a second
   // round-trip.
   myEmailNotificationsEnabled: boolean;
+  // Real gap this exists to close: a Crew whose creation flow was abandoned before the
+  // mandatory taste step is a real, joinable Crew that will silently never send anything —
+  // `evaluateCrewEligibility` returns `preferences_not_set` forever with no proactive signal.
+  // See the persistent "Set up needed" banner this powers, below.
+  preferencesSet: boolean;
 }
 
 interface DayAvailability {
@@ -1701,6 +1706,35 @@ export default function CrewPage() {
               </>
             )}
           </Link>
+        )}
+
+        {/* Real gap this closes: a Crew whose creation flow got abandoned between the mandatory
+            taste step and "Invite" (closed the tab, backgrounded the app) is a real, joinable
+            Crew with no preference ever saved — `evaluateCrewEligibility` silently returns
+            `preferences_not_set` forever, and until now the only prompt for that lived inside the
+            "Find us something" sheet, never shown just from opening the Crew. A member could sit
+            in a Crew that will never proactively say anything, with no visible reason why.
+            Persistent (not dismissible — this isn't a one-time tip, it's an accurate description
+            of this Crew's current state) until someone actually sets it. */}
+        {!crew.preferencesSet && (
+          <button
+            onClick={() => setTuneCrewOpen(true)}
+            className="fade-up v2-tap-feedback"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 12, margin: '0 20px 10px', width: 'calc(100% - 40px)',
+              padding: '12px 16px', borderRadius: 18, textAlign: 'left', border: '1px solid rgba(185,131,42,0.25)',
+              background: 'linear-gradient(135deg, rgba(185,131,42,0.16), rgba(185,131,42,0.04))', cursor: 'pointer',
+            }}
+          >
+            <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: '50%', background: 'rgba(185,131,42,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a5f1f' }}>
+              <IconPoll size={14} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', color: '#8a5f1f', marginBottom: 2 }}>Set up needed</div>
+              <div style={{ fontSize: 13.5, fontWeight: 700 }}>Plot won&rsquo;t find or suggest anything until this Crew&rsquo;s taste is set</div>
+            </div>
+            <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 800, color: '#fff', background: '#b9832a', padding: '7px 14px', borderRadius: 100 }}>Set it →</span>
+          </button>
         )}
       </div>
 
