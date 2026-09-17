@@ -585,6 +585,223 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  /**
+   * The pilot scorecard — ONE operator report answering the specific questions the pilot brief
+   * asked for by name (users/active crews, first-value rate + time, generated-vs-delivered,
+   * insufficient-inventory rate, IN/MAYBE/PASS rates, top pass reasons, lock rate, rec-to-plan
+   * rate, category/provider performance, dead crews and why), computed from real
+   * IntentSignal/CrewRecommendation/PlanVote/RecommendationResponse rows — never a fabricated or
+   * assumed success number. "Useful > beautiful" per the brief: same JSON-over-HTTP, paste-a-URL-
+   * into-a-browser convention as `/dashboard` and `/pilot-certification`, not a dedicated web page
+   * — nothing here needs one yet. `?days=` bounds every rate to a real, recent window so an old
+   * cohort's numbers can't quietly drown out this week's; defaults to 30.
+   *
+   * Depends on the two events Cycle 16 added (`CrewRecommendationEvaluated`,
+   * `CrewPreferencesSet`) — a Crew whose only activity predates that ship has real gaps in its own
+   * history here (no evaluated-outcome trail, no first-value timestamp), same honest limitation
+   * any event-sourced report has for data from before the event existed. Never backfilled or
+   * guessed at.
+   */
+  app.get('/pilot-scorecard', async (request, reply) => {
+    const Schema = z.object({ days: z.coerce.number().int().positive().max(365).default(30) });
+    const parsed = Schema.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const { days } = parsed.data;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const [userCount, crews, settingsRows, evaluatedEvents, preferencesSetEvents, recsInWindow, votesInWindow, passResponses] = await Promise.all([
+      prisma.user.count({ where: { status: 'ACTIVE', email: { not: PLOT_SYSTEM_EMAIL } } }),
+      prisma.crew.findMany({ where: { archivedAt: null }, select: { id: true, name: true, createdAt: true } }),
+      prisma.crewRecommendationSettings.findMany({ select: { crewId: true, enabled: true, preferencesSetAt: true, preferencesSource: true } }),
+      prisma.intentSignal.findMany({
+        where: { name: 'CrewRecommendationEvaluated', occurredAt: { gte: since } },
+        select: { crewId: true, occurredAt: true, payload: true },
+        orderBy: { occurredAt: 'asc' },
+      }),
+      prisma.intentSignal.findMany({
+        where: { name: 'CrewPreferencesSet', occurredAt: { gte: since } },
+        select: { crewId: true, payload: true },
+      }),
+      prisma.crewRecommendation.findMany({
+        where: { createdAt: { gte: since } },
+        select: {
+          id: true,
+          crewId: true,
+          planId: true,
+          experience: { select: { category: true, listings: { select: { providerId: true } } } },
+          plan: { select: { status: true } },
+        },
+      }),
+      prisma.planVote.findMany({
+        where: { createdAt: { gte: since }, plan: { recommendation: { isNot: null } } },
+        select: { vote: true },
+      }),
+      prisma.recommendationResponse.findMany({
+        where: {
+          createdAt: { gte: since },
+          action: { in: ['NOT_FOR_US', 'TOO_FAR', 'TOO_EXPENSIVE', 'WRONG_VIBE'] },
+          reasonCode: { not: null },
+        },
+        select: { reasonCode: true },
+      }),
+    ]);
+
+    // --- Users / active crews ---
+    const crewIdToName = new Map(crews.map((c) => [c.id, c.name]));
+
+    // --- First value: how many Crews ever reached preferencesSetAt, by which path, and how long
+    // it took from Crew creation. Scoped to Crews CREATED within the window — a Crew created long
+    // ago that only just got around to setting taste this week would otherwise report a
+    // misleadingly huge "time to first value".
+    const crewsCreatedInWindow = crews.filter((c) => c.createdAt >= since);
+    const settingsByCrewId = new Map(settingsRows.map((s) => [s.crewId, s]));
+    const firstValueMinutes: number[] = [];
+    let firstValueExplicit = 0;
+    let firstValueDerived = 0;
+    for (const crew of crewsCreatedInWindow) {
+      const settings = settingsByCrewId.get(crew.id);
+      if (!settings?.preferencesSetAt) continue;
+      firstValueMinutes.push((settings.preferencesSetAt.getTime() - crew.createdAt.getTime()) / 60_000);
+      if (settings.preferencesSource === 'EXPLICIT') firstValueExplicit++;
+      else if (settings.preferencesSource === 'DERIVED') firstValueDerived++;
+    }
+    firstValueMinutes.sort((a, b) => a - b);
+    const medianMinutesToFirstValue = firstValueMinutes.length > 0 ? firstValueMinutes[Math.floor(firstValueMinutes.length / 2)] : null;
+    // Cross-checked against the CrewPreferencesSet events themselves (the source Cycle 16 added
+    // specifically so this number doesn't have to be reconstructed from settings-table state
+    // alone) — the two should roughly agree; reported separately rather than silently reconciled,
+    // since a real mismatch (e.g. a Crew whose settings row was hand-edited outside the normal
+    // flow) is itself worth an operator noticing.
+    const preferencesSetEventCount = preferencesSetEvents.length;
+
+    // --- Recommendation-sweep funnel: every real outcome, from the durable event trail ---
+    const outcomeCounts: Record<string, number> = {};
+    for (const ev of evaluatedEvents) {
+      const outcome = (ev.payload as { outcome?: string }).outcome ?? 'unknown';
+      outcomeCounts[outcome] = (outcomeCounts[outcome] ?? 0) + 1;
+    }
+    const totalEvaluated = evaluatedEvents.length;
+    const delivered = outcomeCounts.delivered ?? 0;
+    const noEligibleCandidate = outcomeCounts.no_eligible_candidate ?? 0;
+
+    // --- IN/MAYBE/PASS on recommendation-sourced Plans (PlanVote.vote: IN/MAYBE/OUT — "PASS" in
+    // the brief's own vocabulary is the product's "Not for me" / OUT) ---
+    const voteCounts = { IN: 0, MAYBE: 0, OUT: 0 };
+    for (const v of votesInWindow) voteCounts[v.vote]++;
+    const totalVotes = votesInWindow.length;
+
+    // --- Top pass reasons: the structured "what wasn't right" already captured on the message-
+    // level recommendation response (services/recommendationLearning.ts), not the separate Plan
+    // vote (which carries no reason field at all) ---
+    const passReasonCounts: Record<string, number> = {};
+    for (const r of passResponses) {
+      const code = r.reasonCode as string; // filtered to { not: null } above
+      passReasonCounts[code] = (passReasonCounts[code] ?? 0) + 1;
+    }
+    const topPassReasons = Object.entries(passReasonCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([reasonCode, count]) => ({ reasonCode, count }));
+
+    // --- Lock rate + rec-to-plan rate + category/provider performance, all from the same
+    // delivered-recommendation set so every rate in this section is computed over an identical
+    // denominator ---
+    const recsWithPlan = recsInWindow.filter((r) => r.planId !== null);
+    const recsLocked = recsWithPlan.filter((r) => r.plan && ['LOCKED', 'BOOKED', 'COMPLETED'].includes(r.plan.status));
+
+    const categoryStats = new Map<string, { delivered: number; locked: number }>();
+    const providerStats = new Map<string, { delivered: number; locked: number }>();
+    for (const rec of recsInWindow) {
+      const category = rec.experience.category;
+      const isLocked = rec.plan !== null && ['LOCKED', 'BOOKED', 'COMPLETED'].includes(rec.plan.status);
+      const cat = categoryStats.get(category) ?? { delivered: 0, locked: 0 };
+      cat.delivered++;
+      if (isLocked) cat.locked++;
+      categoryStats.set(category, cat);
+
+      // A recommended Experience can carry listings from more than one provider (real entity-
+      // resolution dedup — see entityResolution.ts) — counted once per provider that contributed
+      // to it, the same "which providers are actually earning their place" question the mission
+      // brief's provider-performance ask is really getting at, not a claim any one provider alone
+      // sourced it.
+      const providerIds = new Set(rec.experience.listings.map((l) => l.providerId));
+      if (providerIds.size === 0) providerIds.add('manual_or_unknown');
+      for (const providerId of providerIds) {
+        const prov = providerStats.get(providerId) ?? { delivered: 0, locked: 0 };
+        prov.delivered++;
+        if (isLocked) prov.locked++;
+        providerStats.set(providerId, prov);
+      }
+    }
+    const toPerformanceRows = (stats: Map<string, { delivered: number; locked: number }>) =>
+      [...stats.entries()]
+        .map(([key, s]) => ({ key, delivered: s.delivered, locked: s.locked, lockRate: s.delivered > 0 ? Math.round((s.locked / s.delivered) * 1000) / 1000 : null }))
+        .sort((a, b) => b.delivered - a.delivered);
+
+    // --- Dead crews: recommendations enabled, taste set, evaluated at least once in the window,
+    // but never once delivered in the window — a real "this Crew is stuck" signal, with its own
+    // most frequent blocking reason, not just a bare count ---
+    const evaluatedByCrewId = new Map<string, string[]>();
+    for (const ev of evaluatedEvents) {
+      if (!ev.crewId) continue;
+      const outcome = (ev.payload as { outcome?: string }).outcome ?? 'unknown';
+      const list = evaluatedByCrewId.get(ev.crewId) ?? [];
+      list.push(outcome);
+      evaluatedByCrewId.set(ev.crewId, list);
+    }
+    const deadCrews: { crewId: string; name: string; evaluations: number; mostCommonOutcome: string }[] = [];
+    for (const [crewId, outcomes] of evaluatedByCrewId) {
+      const settings = settingsByCrewId.get(crewId);
+      if (!settings?.enabled || !settings.preferencesSetAt) continue;
+      if (outcomes.includes('delivered')) continue;
+      const counts: Record<string, number> = {};
+      for (const o of outcomes) counts[o] = (counts[o] ?? 0) + 1;
+      const mostCommonOutcome = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+      deadCrews.push({ crewId, name: crewIdToName.get(crewId) ?? '(unknown)', evaluations: outcomes.length, mostCommonOutcome });
+    }
+    deadCrews.sort((a, b) => b.evaluations - a.evaluations);
+
+    return reply.send({
+      windowDays: days,
+      generatedAt: new Date().toISOString(),
+      users: { total: userCount },
+      crews: { total: crews.length },
+      firstValue: {
+        crewsCreatedInWindow: crewsCreatedInWindow.length,
+        crewsReachingFirstValue: firstValueMinutes.length,
+        rate: crewsCreatedInWindow.length > 0 ? Math.round((firstValueMinutes.length / crewsCreatedInWindow.length) * 1000) / 1000 : null,
+        medianMinutesToFirstValue,
+        bySource: { EXPLICIT: firstValueExplicit, DERIVED: firstValueDerived },
+        preferencesSetEventCount,
+      },
+      recommendationFunnel: {
+        totalEvaluated,
+        byOutcome: outcomeCounts,
+        deliveredRate: totalEvaluated > 0 ? Math.round((delivered / totalEvaluated) * 1000) / 1000 : null,
+        insufficientInventoryRate: totalEvaluated > 0 ? Math.round((noEligibleCandidate / totalEvaluated) * 1000) / 1000 : null,
+      },
+      responseRates: {
+        totalVotes,
+        in: voteCounts.IN,
+        maybe: voteCounts.MAYBE,
+        pass: voteCounts.OUT,
+        inRate: totalVotes > 0 ? Math.round((voteCounts.IN / totalVotes) * 1000) / 1000 : null,
+        maybeRate: totalVotes > 0 ? Math.round((voteCounts.MAYBE / totalVotes) * 1000) / 1000 : null,
+        passRate: totalVotes > 0 ? Math.round((voteCounts.OUT / totalVotes) * 1000) / 1000 : null,
+      },
+      topPassReasons,
+      recToPlanRate: recsInWindow.length > 0 ? Math.round((recsWithPlan.length / recsInWindow.length) * 1000) / 1000 : null,
+      lockRate: {
+        recommendationPlans: recsWithPlan.length,
+        locked: recsLocked.length,
+        rate: recsWithPlan.length > 0 ? Math.round((recsLocked.length / recsWithPlan.length) * 1000) / 1000 : null,
+      },
+      categoryPerformance: toPerformanceRows(categoryStats).map((r) => ({ category: r.key, delivered: r.delivered, locked: r.locked, lockRate: r.lockRate })),
+      providerPerformance: toPerformanceRows(providerStats).map((r) => ({ providerId: r.key, delivered: r.delivered, locked: r.locked, lockRate: r.lockRate })),
+      deadCrews,
+    });
+  });
+
   app.get('/feedback', async (_request, reply) => {
     const feedback = await prisma.feedbackSignal.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
     return reply.send({ feedback });
