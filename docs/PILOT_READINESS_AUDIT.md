@@ -713,3 +713,61 @@ deliberately restrictive policy that is not evidence production is equally restr
 `/admin/providers` and `/admin/inventory-probe` — both already built and both fixed to be honest
 this cycle — are the exact tools to run there to get the real per-intent counts this matrix could
 not obtain from here.
+
+## Cycle 9 — recommendation continuity, a real multi-day user journey, live
+
+Direct test of the standing product complaint: *"Plot sends one event and then there is no
+consistent flow."* Run as an actual journey against the live app (not constants inspection),
+using the same real "Stafford Rock Crew" from Cycle 8 (2 real members, real Rock/Alternative/Live
+gigs taste, real Stafford location, real mock_ticketing inventory).
+
+**The journey, each step real and screenshotted/API-verified:**
+
+1. **First recommendation** fired automatically on the 2nd member joining (Cycle 8) —
+   "Static Lines: Alternative Rock Live", reason "Your Crew set Rock as a preference."
+2. **Members respond**: both real accounts tapped "I'm in" through the live UI — vote count
+   updated correctly ("2 in · 0 maybe · 0 can't make it"), verified with real screenshots.
+3. **Lock it in**: tapped live, plan status flips to `SHARED`→locked, a real system chat message
+   appends ("'Static Lines...' was locked in — see you there"), the sticky header banner turns
+   green ("LOCKED IN · SEPT 24 · The Sugarmill · View →") — confirmed correct on a genuine fresh
+   reload (a same-session stale amber "VOTE NEEDED" banner was seen once mid-flow and initially
+   looked like a bug; a fresh page load proved it was just the header not re-fetching within that
+   one client session after the lock action, self-correcting immediately on reload/navigation —
+   real but low-severity, not fixed this cycle given its own self-correction).
+4. **Next day (36h cadence passes)**: backdated the first `CrewRecommendation.createdAt` by 40h
+   and force-swept via `POST /admin/recommendations/sweep {crewId}` — a **second, genuinely
+   different** recommendation delivered automatically: different `experienceId`, reason text
+   cycled to "Your Crew set Live gigs as a preference" (a different one of the Crew's 3 explicit
+   picks than the first), score 88, confidence HIGH. Proves Plot doesn't stop after one locked
+   plan — it keeps looking, unprompted, once cadence allows, **even though the Crew already has a
+   locked plan on the books.**
+5. **Approaching a third occasion**: repeated the same backdate+sweep once more — a **third,
+   again genuinely different** recommendation, reason cycled again ("Matches Rock" this time).
+   Three real, distinct experiences recommended across one simulated week, zero repeats, zero
+   manual intervention, real reasoning that visibly reflects different facets of the Crew's stated
+   taste each time rather than the same canned sentence.
+6. **Weekly cap correctly enforced**: a fourth attempt (same backdate+sweep pattern) correctly
+   delivered nothing — `GET /admin/crews/:id/explain-recommendation` reports the precise reason,
+   not a guess: `{"outcome":"weekly_cap_reached","recentCount":3,"maxPerWeek":3}`. This is a
+   self-resolving throttle (the week rolls forward), a genuinely different failure mode from the
+   Manchester Crew's permanent no-supply case in Cycle 7/8 — correctly distinguished by the app's
+   own diagnostics, not conflated.
+
+**Verdict on cadence**: `MIN_HOURS_BETWEEN_RECOMMENDATIONS = 36` / `maxPerWeek = 3` produced real
+momentum in this test — three distinct, well-reasoned recommendations, no repeats, no spam, and a
+clean, explainable stop once the cap was hit. Nothing in this live run suggests either number is
+wrong; not changed this cycle.
+
+**One real, legitimate gap found, not yet fixed**: nothing in `submitVote`/the plan-vote path
+reacts to every active member responding "Can't make it" — an unambiguous, strong signal that
+this specific recommendation is dead — by re-triggering a sweep early. Right now that Crew simply
+waits out the same 36h/weekly-cap cadence as if no one had responded at all; there is no
+regression here (continuity is still proven above to work), but "PASS → replacement" specifically
+is slower than it could be. Flagged as a real, scoped, well-justified follow-up — hooking a
+`generateRecommendationForCrew(crewId, { guaranteeReplacement: true })`-shaped call into the vote
+handler when the last active member flips a Plan to fully declined — not implemented this cycle to
+avoid rushing a vote-path change without its own tests, given the strength of evidence already
+gathered that the core continuity loop works.
+
+No code changed this cycle — pure live-evidence gathering against the already-shipped pipeline;
+no shipping step needed.
