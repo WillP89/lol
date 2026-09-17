@@ -171,7 +171,14 @@ export async function listCrewMessages(crewId: string, requestingUserId: string,
   const messages = await prisma.crewMessage.findMany({
     where: { crewId, ...(afterCreatedAt ? { createdAt: { gt: afterCreatedAt } } : {}) },
     orderBy: { createdAt: 'asc' },
-    take: afterCreatedAt ? undefined : -MESSAGE_LIST_LIMIT, // no afterId → last N messages, oldest first
+    // no afterId → last N messages, oldest first. WITH an afterId, this used to have no cap at
+    // all — real reliability gap: the client (apps/web's chat page) polls this on a ~3s interval
+    // using the previous response's own last message id, so a client that reconnects after a
+    // long gap (phone offline overnight, backgrounded for hours) could pull an unboundedly large
+    // single response for a genuinely busy Crew. Safe to cap the same way: the client already
+    // advances its own `after` cursor from whatever it gets back, so a capped response here just
+    // means catching up over a couple more poll ticks, never losing a message.
+    take: afterCreatedAt ? MESSAGE_LIST_LIMIT : -MESSAGE_LIST_LIMIT,
     select: messageAuthorSelect,
   });
 
