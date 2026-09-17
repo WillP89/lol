@@ -337,7 +337,11 @@ export async function getCrewDetail(crewId: string, requestingUserId: string) {
         // reactive, inside the "Find us something" sheet, never shown just from opening the
         // Crew). Exposed here so the Crew page itself can show a persistent, honest banner
         // instead of a Crew that silently never says anything and nobody knows why.
-        recommendationSettings: { select: { preferencesSetAt: true } },
+        // `preferencesSource` (services/crewTasteDerivation.ts) lets that banner tell the two
+        // real states apart: a Crew Plot has safely inferred a starting taste for on its own
+        // (DERIVED — a soft, positive nudge to refine, not an error) from one that still has
+        // nothing at all (an honest prompt to set it up).
+        recommendationSettings: { select: { preferencesSetAt: true, preferencesSource: true } },
       },
     }),
     // A 3-message preview so the Crew page can answer "what's the conversation about right
@@ -362,8 +366,12 @@ export async function getCrewDetail(crewId: string, requestingUserId: string) {
     myEmailNotificationsEnabled: membership.emailNotificationsEnabled,
     // A brand-new Crew that never got a settings row at all (never reached the mandatory taste
     // step) is exactly as "not set" as one that reached it and saved nothing — both mean
-    // `evaluateCrewEligibility` will return `preferences_not_set` forever until someone acts.
+    // `evaluateCrewEligibility` will return `preferences_not_set` forever until someone acts,
+    // UNLESS derivation has since safely filled it in (see preferencesSource below).
     preferencesSet: Boolean(recommendationSettings?.preferencesSetAt),
+    // 'EXPLICIT' | 'DERIVED' | null — see CrewRecommendationSettings.preferencesSource's own
+    // schema comment.
+    preferencesSource: recommendationSettings?.preferencesSource ?? null,
   };
 }
 
