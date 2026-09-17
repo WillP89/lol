@@ -268,6 +268,19 @@ export async function scoreExperiencesForCrew(
     return false;
   }
 
+  // SAME bug shape as passesPreferenceGate above, found in the follow-up gate audit that
+  // shipped alongside the "Caffè Nero in London" plan-worthiness fix: isPlanWorthyForCrew used
+  // to run only AFTER the nearest-50-by-distance cut below (see `filteredCandidates`, further
+  // down this function) — meaning a chain-saturated town centre (McDonald's/KFC/Subway/Greggs/
+  // Starbucks, all force-floored to VERY_LOW by isGenericChainName) could fill the nearest-50
+  // slice before a genuine, non-chain venue sitting at position 51+ by pure distance ever got
+  // the chance to be considered, even when it's well inside the Crew's own travel radius. Gating
+  // BEFORE the cut, identical in spirit to passesPreferenceGate's own fix, means a Crew's 50
+  // candidate slots are only ever spent on venues that could actually be recommended.
+  function passesEarlyPlanWorthinessGate(experience: { category: string; subcategories: unknown; name: string; description: string; tags: unknown }): boolean {
+    return isPlanWorthyForCrew(experience as Parameters<typeof isPlanWorthyForCrew>[0]);
+  }
+
   const userIds = members.map((m) => m.userId);
   const tasteProfiles = members
     .map((m) => m.user.tasteProfile)
@@ -342,13 +355,14 @@ export async function scoreExperiencesForCrew(
     // into an unbounded table scan as inventory keeps growing.
     const proximityRows = await prisma.experience.findMany({
       where: hardConstraints,
-      // category/subcategories/name/description added alongside the original id+coordinates
-      // projection specifically so `passesPreferenceGate` can run at THIS stage, before the
-      // nearest-50 cut below — see that function's own comment for the real bug this closes.
-      select: { id: true, category: true, subcategories: true, name: true, description: true, venue: { select: { latitude: true, longitude: true } } },
+      // category/subcategories/name/description/tags added alongside the original id+coordinates
+      // projection specifically so `passesPreferenceGate` AND `passesEarlyPlanWorthinessGate` can
+      // both run at THIS stage, before the nearest-50 cut below — see each function's own
+      // comment for the real bug this closes.
+      select: { id: true, category: true, subcategories: true, name: true, description: true, tags: true, venue: { select: { latitude: true, longitude: true } } },
       take: 5000,
     });
-    const preferenceGatedRows = proximityRows.filter((row) => passesPreferenceGate(row));
+    const preferenceGatedRows = proximityRows.filter((row) => passesPreferenceGate(row) && passesEarlyPlanWorthinessGate(row));
     const nearestDistanceMiles = (row: (typeof proximityRows)[number]): number =>
       row.venue
         ? Math.min(...memberCoords.map((c) => haversineMiles(c.homeLat, c.homeLng, row.venue!.latitude, row.venue!.longitude)))
@@ -411,7 +425,11 @@ export async function scoreExperiencesForCrew(
   // conversation, the same bar) — never Explore or Home, which stay deliberately broad (see
   // services/explore.ts / personalHome.ts, and opportunityIntent.ts's own header). See
   // docs/DECISIONS.md#crew-recommendation-architecture for the full reasoning and the exact
-  // regression test this closes.
+  // regression test this closes. Re-applied here as a pure no-op safety net for the `else`
+  // branch above (no member/Crew location at all) — everyone else already had this gate applied
+  // at the proximity-query stage via `passesEarlyPlanWorthinessGate`, before the nearest-50 cut
+  // itself, for the exact same "don't let the cut spend its 50 slots on things that would be
+  // filtered out anyway" reason `passesPreferenceGate` was moved earlier for.
   const filteredCandidates = preferenceFilteredCandidates.filter((experience) => isPlanWorthyForCrew(experience));
 
   const scored: MatchOption[] = [];

@@ -52,6 +52,20 @@ const EVENT_CODES = ['FEST', 'LIVE', 'CLUB', 'COMEDY', 'THEATRE', 'ARTS', 'SPORT
 // what's shown, from a real, already-fetched pool, not from an under-reached one.
 const RADIUS_MILES = 65; // ~104km — comfortably covers the 100km UI preset from one sync
 const PAGE_SIZE = 50;
+// Real gap this closes, found in a follow-up gate audit: this adapter used to make exactly ONE
+// request per event code, sorted `order=date` ascending, and never read the response's own
+// `totalcount` field — so a dense event code (LIVE/CLUB in a city with 65+ real gigs across the
+// sync window) silently and permanently lost everything past the earliest 50 by date, every
+// single sync, systematically biasing this adapter's inventory toward near-term dates. Every
+// OTHER paginated adapter in this codebase loops (Ticketmaster MAX_PAGES=3, FHRS MAX_PAGES=2,
+// PredictHQ MAX_PAGES=2) — this brings Skiddle in line. 3 pages x 50 = 150 events per category
+// ceiling, matched to Ticketmaster's own page count since Skiddle's per-sync request count is
+// already the highest of any adapter here (up to 7 categories) and OVERALL_BUDGET_MS below is
+// the real backstop against this making a sync too slow, not this constant. Per Skiddle's own
+// documented API contract (github.com/Skiddle/web-api) — not exercised against the live API
+// from this sandbox, same "written against the documented contract, verify once a real key
+// exists" discipline as the rest of this file.
+const MAX_PAGES_PER_CATEGORY = 3;
 // Observed real-world pacing from an actively-maintained open-source consumer of this exact
 // endpoint (no official rate limit is published — see docs/providers/ticketing.md) — a small,
 // polite delay between the several per-category requests one sync makes, not a hard requirement
@@ -150,7 +164,7 @@ function mapBookingStatus(cancelled: SkiddleEvent['cancelled']): CanonicalListin
   return isCancelled ? 'SOLD_OUT' : 'AVAILABLE'; // excluded from Match's pool either way, same effect as genuinely sold out
 }
 
-async function fetchOneCategory(eventcode: string, params: FetchListingsParams, signal: AbortSignal): Promise<SkiddleEvent[]> {
+async function fetchCategoryPage(eventcode: string, params: FetchListingsParams, offset: number, signal: AbortSignal): Promise<SkiddleSearchResponse> {
   const center = resolveCityCenter(params.city);
   const url = new URL(SKIDDLE_BASE);
   url.searchParams.set('api_key', config.SKIDDLE_API_KEY ?? '');
@@ -163,6 +177,7 @@ async function fetchOneCategory(eventcode: string, params: FetchListingsParams, 
   url.searchParams.set('maxDate', params.toDate.toISOString().slice(0, 10));
   url.searchParams.set('order', 'date');
   url.searchParams.set('limit', String(PAGE_SIZE));
+  url.searchParams.set('offset', String(offset));
   url.searchParams.set('description', '1');
 
   const res = await fetch(url.toString(), { signal });
@@ -173,7 +188,7 @@ async function fetchOneCategory(eventcode: string, params: FetchListingsParams, 
   if (body.error) {
     throw new Error(`Skiddle events API error: ${body.error}`);
   }
-  return body.results ?? [];
+  return body;
 }
 
 export const skiddleProvider: ProviderAdapter = {
@@ -187,7 +202,7 @@ export const skiddleProvider: ProviderAdapter = {
       return { status: 'DOWN', error: 'SKIDDLE_API_KEY not configured', checkedAt: new Date() };
     }
     try {
-      await withRetry((signal) => fetchOneCategory('LIVE', { city: 'Birmingham', fromDate: new Date(), toDate: new Date() }, signal), { attempts: 1 });
+      await withRetry((signal) => fetchCategoryPage('LIVE', { city: 'Birmingham', fromDate: new Date(), toDate: new Date() }, 0, signal), { attempts: 1 });
       return { status: 'ACTIVE', checkedAt: new Date() };
     } catch (err) {
       return { status: 'DOWN', error: String(err), checkedAt: new Date() };
@@ -208,8 +223,22 @@ export const skiddleProvider: ProviderAdapter = {
         break;
       }
       try {
-        const pageEvents = await withRetry((signal) => fetchOneCategory(eventcode, params, signal), PER_CATEGORY_RETRY);
-        events.push(...pageEvents);
+        for (let page = 0; page < MAX_PAGES_PER_CATEGORY; page++) {
+          if (Date.now() - startedAt > OVERALL_BUDGET_MS) {
+            logger.warn({ city: params.city, eventcode, page }, 'Skiddle fetch hit its overall time budget mid-category — returning what was gathered');
+            break;
+          }
+          const offset = page * PAGE_SIZE;
+          const body = await withRetry((signal) => fetchCategoryPage(eventcode, params, offset, signal), PER_CATEGORY_RETRY);
+          const pageEvents = body.results ?? [];
+          events.push(...pageEvents);
+          // Fewer than a full page, or we've genuinely reached Skiddle's own reported total —
+          // no more real pages exist for this category, so stop asking rather than burn a
+          // request that can only come back empty.
+          const totalSoFar = offset + pageEvents.length;
+          if (pageEvents.length < PAGE_SIZE || (body.totalcount !== undefined && totalSoFar >= body.totalcount)) break;
+          if (page + 1 < MAX_PAGES_PER_CATEGORY) await new Promise((resolve) => setTimeout(resolve, REQUEST_SPACING_MS));
+        }
       } catch (err) {
         // One category failing (a transient error, an eventcode Skiddle rejects) must not take
         // the other six down with it — same "one provider outage can't cascade" principle every
