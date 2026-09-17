@@ -14,6 +14,127 @@ import { haversineKm } from '../lib/geo';
 import { isPlanWorthyForCrew } from '../services/opportunityIntent';
 import { runMessageNotificationSweep, runMessageNotificationSweepIfDue, MESSAGE_NOTIFICATION_SWEEP_DUE_INTERVAL_MS } from '../services/messageNotifications';
 
+// Real gap this closes (the "activation harness" — see docs/PILOT_READINESS_AUDIT.md Cycle 12): a
+// bare `error` string and a raw count left the caller to work out for themselves whether "0
+// results" meant no credential, no network, a rejected auth header, the provider rate-limiting
+// us, a real provider outage, or a city that genuinely has nothing right now — exactly the
+// ambiguity someone activating a provider for the first time needs resolved without reading this
+// file's source. `classifyOutcome` turns the raw error text (every adapter's own fetch throws a
+// consistent `"<Provider> API returned <status>: <body>"` shape — see e.g.
+// ticketmaster.ts#fetchPage) into one of a small, fixed set of outcomes so the response can be
+// read as an answer, not a puzzle.
+type ProbeStatus = 'not_configured' | 'auth_failed' | 'rate_limited' | 'unreachable' | 'provider_error' | 'provider_empty' | 'no_matches_for_query' | 'success';
+function classifyProbeOutcome(opts: { isLive: boolean; fetchedTotal: number; matchedTotal: number; hadQuery: boolean; rawError: string | null }): ProbeStatus {
+  if (!opts.isLive) return 'not_configured';
+  if (opts.rawError) {
+    // Real bug this specific check fixes, caught by reading this endpoint's own live output
+    // rather than assuming the classifier was right: an outbound network policy (this sandbox's
+    // own egress proxy, or any other allowlist a real deployment might sit behind) returns a 403
+    // that LOOKS identical, at the raw-status level, to the provider itself rejecting a
+    // credential — but for a no-credential adapter (OpenStreetMap/FHRS) there is no credential to
+    // have failed, and even for a keyed one this 403 never reached the real provider at all.
+    // Labelling it `auth_failed` would send someone straight to the wrong place (double-checking
+    // an API key that was never the problem). Checked first, before the generic status-code
+    // mapping below.
+    if (/host not in allowlist/i.test(opts.rawError)) return 'unreachable';
+    const statusMatch = opts.rawError.match(/returned (\d{3})/);
+    const code = statusMatch ? Number(statusMatch[1]) : null;
+    if (code === 401 || code === 403) return 'auth_failed';
+    if (code === 429) return 'rate_limited';
+    if (code !== null) return 'provider_error';
+    return 'unreachable'; // network-level failure (DNS, timeout, connection refused/reset, egress block) — no HTTP status at all
+  }
+  if (opts.fetchedTotal === 0) return 'provider_empty';
+  if (opts.hadQuery && opts.matchedTotal === 0) return 'no_matches_for_query';
+  return 'success';
+}
+
+interface ProbedProviderResult {
+  id: string;
+  isLive: boolean;
+  status: ProbeStatus;
+  error: string | null;
+  fetchedTotal: number;
+  matched: number;
+  events: { name: string; category: string; subcategories: string[]; venueName: string; startsAt: Date; withinRecommendationWindow: boolean; externalUrl: string }[];
+}
+
+/**
+ * The shared core behind both `/inventory-probe` (one city/query at a time, full event detail)
+ * and `/pilot-certification` (the same probe run across a fixed spread of real Crew intents in
+ * one shot) — calls `fetchListings`+`mapToCanonical` on every matching registered adapter
+ * directly, bypassing the DB, quality scoring, and dedup entirely, so both endpoints share one
+ * real implementation of "what does a live provider actually have right now" rather than two that
+ * could quietly drift apart.
+ */
+async function probeProviders(opts: { city: string; days: number; q?: string; providerId?: string }): Promise<{ center: ReturnType<typeof resolveCityCenter>; providers: ProbedProviderResult[] }> {
+  const { city, days, q, providerId } = opts;
+  const center = resolveCityCenter(city);
+  const fromDate = new Date();
+  const toDate = new Date();
+  toDate.setDate(toDate.getDate() + days);
+  const recommendationWindowEnd = new Date();
+  recommendationWindowEnd.setDate(recommendationWindowEnd.getDate() + CANDIDATE_WINDOW_DAYS);
+
+  const adapters = providerRegistry.filter((a) => !providerId || a.id === providerId);
+  const providers = await Promise.all(
+    adapters.map(async (adapter): Promise<ProbedProviderResult> => {
+      if (!adapter.isLive) return { id: adapter.id, isLive: false, status: 'not_configured', error: null, fetchedTotal: 0, matched: 0, events: [] };
+      try {
+        const raw = await adapter.fetchListings({ city, fromDate, toDate });
+        const mapped = raw
+          .map((listing) => {
+            try {
+              return adapter.mapToCanonical(listing);
+            } catch (err) {
+              return { __error: err instanceof Error ? err.message : String(err) } as never;
+            }
+          })
+          .filter((m): m is ReturnType<typeof adapter.mapToCanonical> => !(m as { __error?: string }).__error);
+        const needle = q?.toLowerCase();
+        const filtered = needle
+          ? mapped.filter((m) => m.name.toLowerCase().includes(needle) || m.subcategories.some((s) => s.toLowerCase().includes(needle)) || m.description.toLowerCase().includes(needle))
+          : mapped;
+        // fetchListings() deliberately swallows its own network/API failures and returns [] (see
+        // e.g. openStreetMap.ts's fetchListings) so one down provider can never crash a real
+        // inventory sync sweep — but that same swallowing made this probe indistinguishable from
+        // "genuinely zero real inventory here": a raw fetch that failed outright and a city that
+        // truly has nothing both showed fetchedTotal: 0, error: null. Real gap this closes: when
+        // the raw fetch came back empty, ask the adapter's own healthCheck() whether that's
+        // because it's actually unreachable right now, and surface that reason instead of a
+        // silent zero — the one piece of evidence this whole probe exists to give.
+        const unexplainedEmpty = mapped.length === 0 ? await adapter.healthCheck().catch(() => null) : null;
+        const rawError = unexplainedEmpty && unexplainedEmpty.status === 'DOWN' ? unexplainedEmpty.error ?? 'Provider health check reports DOWN' : null;
+        return {
+          id: adapter.id,
+          isLive: true,
+          status: classifyProbeOutcome({ isLive: true, fetchedTotal: mapped.length, matchedTotal: filtered.length, hadQuery: Boolean(needle), rawError }),
+          error: rawError,
+          fetchedTotal: mapped.length,
+          matched: filtered.length,
+          events: filtered
+            .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
+            .slice(0, 100)
+            .map((m) => ({
+              name: m.name,
+              category: m.category,
+              subcategories: m.subcategories,
+              venueName: m.venueName,
+              startsAt: m.startsAt,
+              withinRecommendationWindow: m.startsAt <= recommendationWindowEnd,
+              externalUrl: m.externalUrl,
+            })),
+        };
+      } catch (err) {
+        const rawError = err instanceof Error ? err.message : String(err);
+        return { id: adapter.id, isLive: true, status: classifyProbeOutcome({ isLive: true, fetchedTotal: 0, matchedTotal: 0, hadQuery: Boolean(q), rawError }), error: rawError, fetchedTotal: 0, matched: 0, events: [] };
+      }
+    }),
+  );
+
+  return { center, providers };
+}
+
 /**
  * Internal operator tooling (brief §29 admin console, §64 operating dashboard). Gated by a
  * single shared secret (`x-admin-key` header, `ADMIN_API_KEY` env) — a deliberately minimal
@@ -94,111 +215,90 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const { city, days, q, provider } = parsed.data;
 
-    const center = resolveCityCenter(city);
-    const fromDate = new Date();
-    const toDate = new Date();
-    toDate.setDate(toDate.getDate() + days);
-    const recommendationWindowEnd = new Date();
-    recommendationWindowEnd.setDate(recommendationWindowEnd.getDate() + CANDIDATE_WINDOW_DAYS);
-
-    // Real gap this closes (the "activation harness" — see docs/PILOT_READINESS_AUDIT.md Cycle
-    // 12): a bare `error` string and a raw count left the caller to work out for themselves
-    // whether "0 results" meant no credential, no network, a rejected auth header, the provider
-    // rate-limiting us, a real provider outage, or a city that genuinely has nothing right now —
-    // exactly the ambiguity someone activating a provider for the first time needs resolved
-    // without reading this file's source. `classifyOutcome` turns the raw error text (every
-    // adapter's own fetch throws a consistent `"<Provider> API returned <status>: <body>"` shape
-    // — see e.g. ticketmaster.ts#fetchPage) into one of a small, fixed set of outcomes so the
-    // response can be read as an answer, not a puzzle.
-    type ProbeStatus = 'not_configured' | 'auth_failed' | 'rate_limited' | 'unreachable' | 'provider_error' | 'provider_empty' | 'no_matches_for_query' | 'success';
-    function classifyOutcome(opts: { isLive: boolean; fetchedTotal: number; matchedTotal: number; hadQuery: boolean; rawError: string | null }): ProbeStatus {
-      if (!opts.isLive) return 'not_configured';
-      if (opts.rawError) {
-        // Real bug this specific check fixes, caught by reading this endpoint's own live output
-        // rather than assuming the classifier was right: an outbound network policy (this
-        // sandbox's own egress proxy, or any other allowlist a real deployment might sit behind)
-        // returns a 403 that LOOKS identical, at the raw-status level, to the provider itself
-        // rejecting a credential — but for a no-credential adapter (OpenStreetMap/FHRS) there is
-        // no credential to have failed, and even for a keyed one this 403 never reached the real
-        // provider at all. Labelling it `auth_failed` would send someone straight to the wrong
-        // place (double-checking an API key that was never the problem). Checked first, before
-        // the generic status-code mapping below.
-        if (/host not in allowlist/i.test(opts.rawError)) return 'unreachable';
-        const statusMatch = opts.rawError.match(/returned (\d{3})/);
-        const code = statusMatch ? Number(statusMatch[1]) : null;
-        if (code === 401 || code === 403) return 'auth_failed';
-        if (code === 429) return 'rate_limited';
-        if (code !== null) return 'provider_error';
-        return 'unreachable'; // network-level failure (DNS, timeout, connection refused/reset, egress block) — no HTTP status at all
-      }
-      if (opts.fetchedTotal === 0) return 'provider_empty';
-      if (opts.hadQuery && opts.matchedTotal === 0) return 'no_matches_for_query';
-      return 'success';
-    }
-
-    const adapters = providerRegistry.filter((a) => !provider || a.id === provider);
-    const perProvider = await Promise.all(
-      adapters.map(async (adapter) => {
-        if (!adapter.isLive) return { id: adapter.id, isLive: false, status: 'not_configured' as ProbeStatus, error: null, fetchedTotal: 0, matched: 0, events: [] as unknown[] };
-        try {
-          const raw = await adapter.fetchListings({ city, fromDate, toDate });
-          const mapped = raw
-            .map((listing) => {
-              try {
-                return adapter.mapToCanonical(listing);
-              } catch (err) {
-                return { __error: err instanceof Error ? err.message : String(err) } as never;
-              }
-            })
-            .filter((m): m is ReturnType<typeof adapter.mapToCanonical> => !(m as { __error?: string }).__error);
-          const needle = q?.toLowerCase();
-          const filtered = needle
-            ? mapped.filter((m) => m.name.toLowerCase().includes(needle) || m.subcategories.some((s) => s.toLowerCase().includes(needle)) || m.description.toLowerCase().includes(needle))
-            : mapped;
-          // fetchListings() deliberately swallows its own network/API failures and returns []
-          // (see e.g. openStreetMap.ts's fetchListings) so one down provider can never crash a
-          // real inventory sync sweep — but that same swallowing made this probe indistinguishable
-          // from "genuinely zero real inventory here": a raw fetch that failed outright and a city
-          // that truly has nothing both showed fetchedTotal: 0, error: null. Real gap this closes:
-          // when the raw fetch came back empty, ask the adapter's own healthCheck() whether that's
-          // because it's actually unreachable right now, and surface that reason instead of a
-          // silent zero — the one piece of evidence this endpoint exists to give.
-          const unexplainedEmpty = mapped.length === 0 ? await adapter.healthCheck().catch(() => null) : null;
-          const rawError = unexplainedEmpty && unexplainedEmpty.status === 'DOWN' ? unexplainedEmpty.error ?? 'Provider health check reports DOWN' : null;
-          return {
-            id: adapter.id,
-            isLive: true,
-            status: classifyOutcome({ isLive: true, fetchedTotal: mapped.length, matchedTotal: filtered.length, hadQuery: Boolean(needle), rawError }),
-            error: rawError,
-            fetchedTotal: mapped.length,
-            matched: filtered.length,
-            events: filtered
-              .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
-              .slice(0, 100)
-              .map((m) => ({
-                name: m.name,
-                category: m.category,
-                subcategories: m.subcategories,
-                venueName: m.venueName,
-                startsAt: m.startsAt,
-                withinRecommendationWindow: m.startsAt <= recommendationWindowEnd,
-                externalUrl: m.externalUrl,
-              })),
-          };
-        } catch (err) {
-          const rawError = err instanceof Error ? err.message : String(err);
-          return { id: adapter.id, isLive: true, status: classifyOutcome({ isLive: true, fetchedTotal: 0, matchedTotal: 0, hadQuery: Boolean(q), rawError }), error: rawError, fetchedTotal: 0, matched: 0, events: [] as unknown[] };
-        }
-      }),
-    );
-
+    const { center, providers } = await probeProviders({ city, days, q, providerId: provider });
     return reply.send({
       city,
       center,
       probeWindowDays: days,
       recommendationWindowDays: CANDIDATE_WINDOW_DAYS,
-      providers: perProvider,
+      providers,
     });
+  });
+
+  /**
+   * The "run the whole certification pass" version of `/inventory-probe` above — the mission's
+   * own explicit ask: one command that answers "what does Plot itself find" for a representative
+   * spread of real Crew intents in one shot, instead of running `/inventory-probe?q=...` by hand
+   * eight times and assembling the table yourself. Diagnostic only, same as `/inventory-probe` —
+   * never writes to the database, never sends anything into a real Crew's chat. `INTENTS` below is
+   * the same 8-intent list docs/PILOT_READINESS_AUDIT.md's own Cycle 8 coverage matrix used, kept
+   * in sync deliberately: that matrix was built by hand from reading provider source and running
+   * this exact kind of probe manually; this endpoint is what makes re-running it, once real
+   * credentials/network exist, take one request instead of a repeat of that same manual work.
+   */
+  const INTENTS: { label: string; city: string; q: string; expectedCategory: string }[] = [
+    { label: 'Alternative rock', city: 'Birmingham', q: 'rock', expectedCategory: 'LIVE_MUSIC' },
+    { label: 'UK garage / house', city: 'Birmingham', q: 'garage', expectedCategory: 'CLUBBING' },
+    { label: 'Comedy', city: 'Birmingham', q: 'comedy', expectedCategory: 'COMEDY' },
+    { label: 'Football', city: 'Birmingham', q: 'football', expectedCategory: 'SPORT' },
+    { label: 'Japanese food', city: 'Birmingham', q: 'japanese', expectedCategory: 'RESTAURANT' },
+    { label: 'Food festival / market', city: 'Birmingham', q: 'market', expectedCategory: 'FESTIVAL' },
+    { label: 'Theatre', city: 'Birmingham', q: 'theatre', expectedCategory: 'THEATRE' },
+    { label: 'Social activity (bowling/escape room)', city: 'Birmingham', q: 'bowling', expectedCategory: 'DAY_ACTIVITY' },
+  ];
+  app.get('/pilot-certification', async (request, reply) => {
+    const Schema = z.object({ city: z.string().optional(), days: z.coerce.number().int().positive().max(180).default(90) });
+    const parsed = Schema.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const { city: cityOverride, days } = parsed.data;
+
+    const results = await Promise.all(
+      INTENTS.map(async (intent) => {
+        const city = cityOverride ?? intent.city;
+        const { providers } = await probeProviders({ city, days, q: intent.q });
+        const attempted = providers.length;
+        const successful = providers.filter((p) => p.status === 'success').length;
+        const rawTotal = providers.reduce((sum, p) => sum + p.fetchedTotal, 0);
+        const relevantTotal = providers.reduce((sum, p) => sum + p.matched, 0);
+        const categoryMatches = providers.reduce((sum, p) => sum + p.events.filter((e) => e.category === intent.expectedCategory).length, 0);
+        // GOOD/PARTIAL/POOR/UNSUPPORTED/LIVE_VALIDATION_REQUIRED — the same rating vocabulary
+        // docs/PILOT_READINESS_AUDIT.md's Cycle 8 matrix used by hand, now computed from this
+        // run's real data: UNSUPPORTED when no provider that even CLAIMS to cover this category
+        // is live (checked against the adapter's own registered `categories`, not just "is any
+        // adapter live at all" — a real bug this exact line fixes: the first version reported
+        // "Football"/"Food festival" as LIVE_VALIDATION_REQUIRED because OpenStreetMap/FHRS are
+        // always live, even though neither one's own `categories` array has ever claimed SPORT or
+        // FESTIVAL — no amount of network access would make either return a football fixture);
+        // LIVE_VALIDATION_REQUIRED when a covering provider IS live but every one is unreachable/
+        // erroring (this sandbox's own permanent state); GOOD/PARTIAL/POOR once real data
+        // actually comes back, scaled by how much of it matches the expected category
+        // specifically (not just the free-text query).
+        const coveringLiveAdapters = providerRegistry.filter((a) => a.isLive && a.categories.includes(intent.expectedCategory as ExperienceCategory));
+        const anyConfigured = coveringLiveAdapters.length > 0;
+        const anyReachableButEmptyOrError = providers.some((p) => coveringLiveAdapters.some((a) => a.id === p.id) && p.status !== 'success');
+        let viability: string;
+        if (!anyConfigured) viability = 'UNSUPPORTED';
+        else if (categoryMatches === 0 && anyReachableButEmptyOrError && successful === 0) viability = 'LIVE_VALIDATION_REQUIRED';
+        else if (categoryMatches >= 5) viability = 'GOOD';
+        else if (categoryMatches >= 1) viability = 'PARTIAL';
+        else viability = 'POOR';
+
+        return {
+          intent: intent.label,
+          expectedCategory: intent.expectedCategory,
+          city,
+          providersAttempted: attempted,
+          providersSuccessful: successful,
+          rawOpportunities: rawTotal,
+          relevantOpportunities: relevantTotal,
+          categoryMatchedOpportunities: categoryMatches,
+          recommendationViability: viability,
+          perProvider: providers.map((p) => ({ id: p.id, status: p.status, fetchedTotal: p.fetchedTotal, matched: p.matched })),
+        };
+      }),
+    );
+
+    return reply.send({ probeWindowDays: days, ranAt: new Date().toISOString(), intents: results });
   });
 
   // Real gap this closes: `/inventory-probe` shows what a LIVE provider would return right now
