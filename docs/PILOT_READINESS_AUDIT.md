@@ -771,3 +771,93 @@ gathered that the core continuity loop works.
 
 No code changed this cycle — pure live-evidence gathering against the already-shipped pipeline;
 no shipping step needed.
+
+## Cycle 10 — iPhone chat composer, full P0 acceptance matrix re-run, no new bug found
+
+Explicit P0 re-verification requested against the real 25-message "iPhone Chat Test Crew"
+(real account, real session), covering the full matrix: 4 viewports (375×667, 390×844, 393×852,
+430×932) × 9 interaction states (initial load, single-line, multi-line/auto-grow, focused, after
+send, blurred, scrolled away from bottom, scrolled back, simulated reduced-height keyboard-open
+viewport). `getBoundingClientRect()`-measured composer position and an explicit
+`navOverlapsComposer` check at every single one of the 36 combinations: **gap-to-viewport-bottom
+was 0 (sub-pixel) and nav overlap was false in every case, no exceptions.** The textarea correctly
+caps its visual growth at 140px and becomes internally scrollable for longer text (`scrollHeight`
+grows past 140 while rendered `height` stays capped) rather than growing unboundedly.
+
+**A real methodology trap caught mid-test, same discipline as Cycle 6's fullPage-scroll lesson**:
+the first pass's "scroll away from bottom / scroll back" step targeted `.v2-shell-desktop` (the
+scroll container Home/Explore use) with a `[class*="scroll"]` fallback that matched
+`.v2-crew-scroll` — but walking that element's full ancestor chain showed every one of them,
+including `.v2-crew-scroll` itself, has `overflow-y: visible`; the crew chat page's real scroll
+owner is `<html>` itself (document-level scroll, `scrollHeight: 3840` vs `clientHeight: 667`) — a
+genuinely different architecture from Home/Explore's inner-container pattern, not a bug. Corrected
+the test to use `window.scrollTo`/`document.documentElement.scrollTop` directly and re-ran:
+document scroll correctly moves from the real bottom (`docScrollTop: 3173`, showing message #25,
+the true last message) to top (`0`) and back, and — the part that actually matters for composer
+architecture — **the composer's `getBoundingClientRect().bottom` stayed exactly equal to
+`window.innerHeight` in all three document-scroll states**, confirming it is genuinely fixed to
+the visual viewport rather than scrolling with the document, with the header behaving the same way
+(both pinned, only the message list scrolls between them — the same pattern WhatsApp/iMessage use).
+
+**Verdict: no bug found this cycle.** Cycle 5's placeholder-overflow fix remains the one real
+composer bug found and fixed this session; this cycle's exhaustive re-run found the architecture
+genuinely solid across every state in the requested matrix. The one honest, unchanged limitation:
+headless Chromium cannot open a real OS on-screen keyboard, so the `visualViewport`-driven
+`composerBottomGap` WebView-specific fallback path remains unverified from this sandbox, same
+caveat as Cycle 5 — the viewport-height-reduction simulation used here (58% of full height,
+approximating iOS's keyboard proportion) confirmed the base fixed-position layout reflows
+correctly under a smaller viewport, which is the structural property that matters most, but is not
+the same signal a real device would give for that specific correction.
+
+No code changed; no shipping step needed.
+
+## Cycle 11 — unanimous-decline early replacement, shipped and regression-tested
+
+Direct fix for the real, scoped gap Cycle 9 found and deliberately left unimplemented pending
+further evidence: nothing reacted to every active Crew member voting OUT ("Can't make it") on the
+current recommendation — an unambiguous "this one's dead" signal — so the Crew simply waited out
+the same 36h cadence floor as if no one had responded at all.
+
+**Design, in `apps/api/src/services/crewRecommendations.ts`:** a new, shorter cadence floor,
+`MIN_HOURS_AFTER_UNANIMOUS_DECLINE = 8` (comfortably past one periodic sweep interval — 6h — so
+it's never pinned to exactly that number, well under a quarter of the normal 36h), applies ONLY
+when `getCrewActivitySignals`' new `lastRecommendationUnanimouslyDeclined` flag is true — computed
+from the Crew's most recent recommendation's linked Plan: its status is NOT LOCKED/BOOKED/
+COMPLETED/CANCELLED (a Crew that did commit is obviously not "dead"), every currently ACTIVE crew
+member has voted (silence is deliberately not treated as rejection — the normal 36h floor already
+covers "nobody's responded"), and 100% of those votes are OUT. This is computed lazily at the next
+eligibility check (background sweep or explicit trigger) rather than firing a replacement
+synchronously from the vote-submission endpoint — satisfying "never instantly spam a replacement
+into chat seconds after the rejection" by construction, without needing a separate debounce.
+
+**Requirements already met by existing code, verified rather than re-built:**
+- *"Never immediately send a near-duplicate"* — `getCrewExcludedExperienceIds` (match.ts) already
+  permanently excludes any Experience ever recommended or attached to a Plan for this Crew,
+  regardless of outcome; the declined experience can never resurface automatically.
+- *"Situational rejection must not poison taste; taste rejection should influence ranking"* —
+  already fully implemented in `recommendationLearning.ts#deltaFor`: `too_expensive`/`too_far`/
+  `wrong_day_time` reason codes get delta 0 (situational, not taste), genuine taste rejection gets
+  -0.35, an unspecified "not into this" gets the full penalty, `done_enough_lately` is treated as
+  fatigue not rejection. This is a separate mechanism from the IN/MAYBE/OUT Plan vote this cycle's
+  fix hooks into — verified correct, not touched.
+- *"Avoid replacement loops"* — each new recommendation's own unanimous-decline status is
+  evaluated independently, and the weekly cap (`maxPerWeek`, default 3) remains a hard ceiling
+  regardless of the shorter floor, so this cannot compound into a runaway loop.
+
+**Regression tests** (`test/unanimousDeclineReplacement.test.ts`, 4 tests, all against the real
+pipeline — DB, scoring, cadence — no mocking): all-PASS correctly becomes eligible for a
+replacement at 10h (past the 8h override, would have failed the normal 36h floor) and the
+replacement is a genuinely different Experience; mixed IN/PASS is correctly NOT treated as
+unanimous (`unanimousDeclineOverride: false`, 36h floor still applies); one member never
+responding is correctly NOT treated as unanimous (same reason); three consecutive unanimous
+declines within a week correctly hit `weekly_cap_reached` on the 4th attempt regardless of the
+shorter floor. A real methodology snag hit and fixed while writing these: the Crew-taste-set
+PATCH endpoint fires its own unawaited `guaranteeFirst` background trigger (same mechanism the
+1→2-member join trigger uses), which raced against this test's own explicit sweep call for the
+very first recommendation — fixed by reading the result directly from the database after the
+established 500ms settle window (the same pattern `crewFirstValueDerivation.test.ts` and
+`guaranteedFirstRecommendation.test.ts` already use for the identical race), rather than trusting
+whichever of the two concurrent attempts happened to win.
+
+Shipped: typecheck + lint clean, full backend suite green (80 files / 480 tests, the 4 new ones
+included).

@@ -65,6 +65,16 @@ const LOOKBACK_DAYS_FOR_WEEKLY_CAP = 7;
 // letting three consecutive 6-hourly sweep passes (RECOMMENDATION_SWEEP_DUE_INTERVAL_MS) fire
 // one right after another the moment a Crew clears its confidence bar three times in a row.
 const MIN_HOURS_BETWEEN_RECOMMENDATIONS = 36;
+// Real, live-tested gap (Cycle 9's continuity walkthrough): every active member voting OUT on the
+// current recommendation's Plan is an unambiguous "this one's dead" signal — stronger than mere
+// silence, which the normal 36h floor above is calibrated for. A shorter, still-deliberate floor
+// applies ONLY in that specific case (see `getCrewActivitySignals`'s own
+// `lastRecommendationUnanimouslyDeclined`) — long enough that a replacement never reads as instant
+// chat spam seconds after the rejection, short enough to feel like Plot actually listened rather
+// than making the Crew sit out the same wait as if nobody had said anything. Chosen to comfortably
+// exceed one periodic sweep interval (RECOMMENDATION_SWEEP_DUE_INTERVAL_MS, 6h) so it's not
+// artificially pinned to exactly that number, while staying well under half of the normal floor.
+const MIN_HOURS_AFTER_UNANIMOUS_DECLINE = 8;
 // "Do not blindly send three recommendations every week to abandoned Crews" — real signals of a
 // Crew still being a going concern: recent chat, a recent response to a past recommendation, or
 // recent Plan activity. A brand-new Crew gets an onboarding grace period (this same window)
@@ -318,6 +328,12 @@ interface CrewActivitySignals {
   isActive: boolean;
   reason: 'onboarding_grace_period' | 'recent_message' | 'recent_response' | 'recent_plan_activity' | 'inactive';
   lastRecommendationAt: Date | null;
+  // See MIN_HOURS_AFTER_UNANIMOUS_DECLINE's own comment. True only when the Crew's most recent
+  // recommendation's Plan is still in the voting loop (never for a LOCKED/BOOKED one — the Crew
+  // clearly did want it) AND every currently active member has voted, and 100% of those votes
+  // are OUT — not merely "more OUT than IN", and not true while any active member has yet to
+  // respond (silence isn't rejection; the normal 36h floor already covers that case correctly).
+  lastRecommendationUnanimouslyDeclined: boolean;
 }
 
 /** "Do not blindly send three recommendations every week to abandoned Crews" — a real, documented
@@ -329,19 +345,32 @@ interface CrewActivitySignals {
  *  the same real activity window and there's no reason to query it twice. */
 async function getCrewActivitySignals(crewId: string): Promise<CrewActivitySignals> {
   const since = new Date(Date.now() - ACTIVE_CREW_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  const [crew, recentMessage, recentResponse, recentPlanActivity, lastRecommendation] = await Promise.all([
+  const [crew, recentMessage, recentResponse, recentPlanActivity, lastRecommendation, activeMemberCount] = await Promise.all([
     prisma.crew.findUnique({ where: { id: crewId }, select: { createdAt: true } }),
     prisma.crewMessage.findFirst({ where: { crewId, createdAt: { gte: since } }, select: { id: true } }),
     prisma.recommendationResponse.findFirst({ where: { crewRecommendation: { crewId }, createdAt: { gte: since } }, select: { id: true } }),
     prisma.plan.findFirst({ where: { crewId, updatedAt: { gte: since } }, select: { id: true } }),
-    prisma.crewRecommendation.findFirst({ where: { crewId }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+    prisma.crewRecommendation.findFirst({
+      where: { crewId },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true, plan: { select: { status: true, votes: { select: { vote: true } } } } },
+    }),
+    prisma.crewMember.count({ where: { crewId, status: 'ACTIVE' } }),
   ]);
   const lastRecommendationAt = lastRecommendation?.createdAt ?? null;
-  if (crew && crew.createdAt >= since) return { isActive: true, reason: 'onboarding_grace_period', lastRecommendationAt };
-  if (recentMessage) return { isActive: true, reason: 'recent_message', lastRecommendationAt };
-  if (recentResponse) return { isActive: true, reason: 'recent_response', lastRecommendationAt };
-  if (recentPlanActivity) return { isActive: true, reason: 'recent_plan_activity', lastRecommendationAt };
-  return { isActive: false, reason: 'inactive', lastRecommendationAt };
+  const votingPlan = lastRecommendation?.plan;
+  const lastRecommendationUnanimouslyDeclined = Boolean(
+    votingPlan &&
+      !['LOCKED', 'BOOKED', 'COMPLETED', 'CANCELLED'].includes(votingPlan.status) &&
+      activeMemberCount > 0 &&
+      votingPlan.votes.length === activeMemberCount &&
+      votingPlan.votes.every((v) => v.vote === 'OUT'),
+  );
+  if (crew && crew.createdAt >= since) return { isActive: true, reason: 'onboarding_grace_period', lastRecommendationAt, lastRecommendationUnanimouslyDeclined };
+  if (recentMessage) return { isActive: true, reason: 'recent_message', lastRecommendationAt, lastRecommendationUnanimouslyDeclined };
+  if (recentResponse) return { isActive: true, reason: 'recent_response', lastRecommendationAt, lastRecommendationUnanimouslyDeclined };
+  if (recentPlanActivity) return { isActive: true, reason: 'recent_plan_activity', lastRecommendationAt, lastRecommendationUnanimouslyDeclined };
+  return { isActive: false, reason: 'inactive', lastRecommendationAt, lastRecommendationUnanimouslyDeclined };
 }
 
 /** Diversity/fatigue (see CATEGORY_FATIGUE_WINDOW/PENALTY's own comment) — a real, bounded,
@@ -498,11 +527,15 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   }
   // Real cadence spacing — see MIN_HOURS_BETWEEN_RECOMMENDATIONS's own comment. Naturally a
   // no-op for a Crew's true first recommendation (nothing to space against yet), so this never
-  // blocks `guaranteeFirst`'s own "never come up empty on day one" guarantee.
+  // blocks `guaranteeFirst`'s own "never come up empty on day one" guarantee. The shorter
+  // MIN_HOURS_AFTER_UNANIMOUS_DECLINE floor applies instead when every active member has already
+  // voted OUT on the current recommendation — see that constant's own comment and
+  // `lastRecommendationUnanimouslyDeclined`'s.
   if (activity.lastRecommendationAt) {
+    const minHoursBetween = activity.lastRecommendationUnanimouslyDeclined ? MIN_HOURS_AFTER_UNANIMOUS_DECLINE : MIN_HOURS_BETWEEN_RECOMMENDATIONS;
     const hoursSinceLast = (Date.now() - activity.lastRecommendationAt.getTime()) / (1000 * 60 * 60);
-    if (hoursSinceLast < MIN_HOURS_BETWEEN_RECOMMENDATIONS) {
-      return { outcome: 'too_soon', details: { lastRecommendationAt: activity.lastRecommendationAt, hoursSinceLast: Math.round(hoursSinceLast * 10) / 10, minHoursBetween: MIN_HOURS_BETWEEN_RECOMMENDATIONS } };
+    if (hoursSinceLast < minHoursBetween) {
+      return { outcome: 'too_soon', details: { lastRecommendationAt: activity.lastRecommendationAt, hoursSinceLast: Math.round(hoursSinceLast * 10) / 10, minHoursBetween, unanimousDeclineOverride: activity.lastRecommendationUnanimouslyDeclined } };
     }
   }
 
