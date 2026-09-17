@@ -36,6 +36,16 @@ export const AnalyticsEvents = {
   // The New Crew flow's own location step (or a later edit) setting/clearing the Crew's
   // explicit centre point — see Crew.latitude/.longitude's own schema comment.
   CrewLocationUpdated: 'CrewLocationUpdated',
+  // The real "first taste" moment for a Crew — the exact instant `preferencesSetAt` gets
+  // stamped for the first time (services/crewRecommendations.ts#updateSettings,
+  // services/crewTasteDerivation.ts#tryDeriveAndApplyCrewPreferences), the one gate everything
+  // else in the automatic-recommendation pipeline sits behind. Fires exactly once per Crew,
+  // from whichever of the two paths gets there first — a real human decision (source: EXPLICIT)
+  // or the safe member-taste-derivation fallback (source: DERIVED) — so the pilot scorecard can
+  // answer "how many Crews ever reach first value, and by which path" without reconstructing it
+  // from preferencesSource column state alone (which only ever shows the CURRENT source, not
+  // which one actually got there first, nor when).
+  CrewPreferencesSet: 'CrewPreferencesSet',
   CrewInviteSent: 'CrewInviteSent',
   // The invite-preview moment (before auth) and the moment it actually converts into
   // membership — two different funnel steps with a real drop-off between them, worth telling
@@ -69,6 +79,17 @@ export const AnalyticsEvents = {
   // something" flow's own PlanRecommendation model. These are unprompted deliveries.
   CrewRecommendationDelivered: 'CrewRecommendationDelivered',
   CrewRecommendationResponded: 'CrewRecommendationResponded',
+  // Real pilot-analytics gap this closes: every OTHER outcome of the automatic sweep — too_soon,
+  // weekly_cap_reached, no_eligible_candidate, crew_inactive, location_not_set,
+  // preferences_not_set, too_few_members, disabled, error, and 'delivered' itself — used to exist
+  // only as an ephemeral pino log line (crewRecommendations.ts#logRecommendationOutcome), never
+  // persisted anywhere queryable. That made two things the pilot dashboard explicitly needs to
+  // answer — "insufficient-inventory rate" and "suppression rate by reason" — impossible to
+  // compute from analytics data at all, only by grepping production logs by hand. This is the
+  // one durable record of every sweep ATTEMPT and what came of it, delivered or not; think of it
+  // as the denominator CrewRecommendationDelivered's own richer payload (score/confidence/
+  // category) is the numerator for.
+  CrewRecommendationEvaluated: 'CrewRecommendationEvaluated',
 
   // Agree (Plan / consensus)
   SentToCrew: 'SentToCrew',
@@ -125,6 +146,10 @@ export interface AnalyticsEventPayloads {
 
   CrewCreated: { crewId: string; userId: string; memberCount: number };
   CrewLocationUpdated: { crewId: string; userId: string };
+  // No `userId` — the DERIVED path (crewTasteDerivation.ts) isn't attributable to one acting
+  // member, it's inferred from the whole Crew's existing member data. `source` is what actually
+  // answers "explicit vs derived", the exact split the pilot brief asks for by name.
+  CrewPreferencesSet: { crewId: string; source: 'EXPLICIT' | 'DERIVED'; categoryPreferences: string[]; interestPreferences: string[] };
   CrewInviteSent: { crewId: string; channel: 'link' | 'whatsapp' | 'imessage' | 'sms' | 'other' | 'email' };
   InviteOpened: { inviteCode: string; authenticated: boolean };
   InviteAccepted: { crewId: string; userId: string };
@@ -169,6 +194,20 @@ export interface AnalyticsEventPayloads {
     // services/recommendationLearning.ts#reasonOptionsFor), real product signal for "why are
     // recommendations being rejected", not just that they were.
     reasonCode?: string;
+  };
+  CrewRecommendationEvaluated: {
+    crewId: string;
+    outcome:
+      | 'disabled'
+      | 'preferences_not_set'
+      | 'location_not_set'
+      | 'crew_inactive'
+      | 'too_soon'
+      | 'weekly_cap_reached'
+      | 'too_few_members'
+      | 'no_eligible_candidate'
+      | 'delivered'
+      | 'error';
   };
 
   SentToCrew: { crewId: string; planId: string; source: 'find_us_something' | 'individual_send' | 'recommendation' };

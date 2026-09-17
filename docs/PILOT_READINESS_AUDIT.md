@@ -1065,3 +1065,70 @@ reading the actual handling code, not assumed correct because it sounded plausib
 **No new bugs found this cycle** — every failure state the mission listed is already correctly,
 honestly handled, most with their own previously-documented real-bug-fix history rather than being
 untested guesses. No code changed; no shipping step needed.
+
+## Cycle 16 — pilot analytics funnel: two real instrumentation gaps closed
+
+The mission's own analytics list asks for metrics the schema genuinely could not answer yet. A
+full inventory of every existing `track()` call site against `AnalyticsEvents`
+(`packages/shared/src/analytics.ts`) plus a direct read of `crewRecommendations.ts` and
+`crewTasteDerivation.ts` found two real, specific gaps — not "add more events for coverage's own
+sake":
+
+1. **Every non-delivered recommendation-sweep outcome was pino-only.** `logRecommendationOutcome`
+   (crewRecommendations.ts) logged all 10 `RecommendationOutcome` values (`disabled`,
+   `preferences_not_set`, `location_not_set`, `crew_inactive`, `too_soon`, `weekly_cap_reached`,
+   `too_few_members`, `no_eligible_candidate`, `delivered`, `error`) to the server log only — never
+   as a durable `IntentSignal` row. `CrewRecommendationDelivered` already covered the success case
+   richly (score, confidence, category, ticketed fallback), but there was no queryable record of
+   the other 9 — directly blocking two metrics the mission asked for by name: "insufficient-
+   inventory rate" and "suppression rate by reason". Fixed with a new `CrewRecommendationEvaluated`
+   event (`{ crewId, outcome }`), fired from the same one place every outcome already funnels
+   through — no new call sites, no risk of a future outcome path forgetting to log it.
+
+2. **Neither path that stamps a Crew's `preferencesSetAt` for the first time ever fired an
+   analytics event.** The mission's funnel list names "CREW TASTE DERIVED" / "CREW TASTE
+   EXPLICITLY SET" as distinct steps worth measuring — the real "first value" moment for a Crew
+   (docs/DECISIONS.md#crew-first-value). `updateSettings`'s own `justSetPreferencesForFirstTime`
+   branch (a real human decision) and `tryDeriveAndApplyCrewPreferences`'s own `stampingFirstTime`
+   branch (the safe member-taste-derivation fallback, Cycle from earlier work: task #117) both
+   already had the exact boolean needed — neither called `track()`. Fixed with a new
+   `CrewPreferencesSet` event (`{ crewId, source: 'EXPLICIT' | 'DERIVED', categoryPreferences,
+   interestPreferences }`), fired from both existing branches, never re-firing on a later re-tune
+   (matches `preferencesSetAt`'s own stamp-once semantics exactly, verified by a test that
+   explicitly re-tunes an already-EXPLICIT Crew's preferences and confirms no second event).
+
+Both events added to the shared `AnalyticsEvents`/`AnalyticsEventPayloads` taxonomy
+(`packages/shared/src/analytics.ts`) — the same typo-proof, single-source-of-truth mechanism every
+other event already uses. `packages/shared` rebuilt (`apps/api` resolves `@plot/shared` from its
+built `dist/`, not source — a real, easy-to-miss step: the first `apps/api` typecheck after adding
+an event failed until the shared package was rebuilt).
+
+New test file `test/crewRecommendationAnalytics.test.ts`, 6 tests, all live/DB-backed (no mocking
+of `track()` or the DB): asserts `CrewRecommendationEvaluated` actually lands with the correct
+`outcome` for `preferences_not_set`, `no_eligible_candidate`, `delivered`, and `too_soon`; asserts
+`CrewPreferencesSet` lands with `source: 'EXPLICIT'` from a real settings PATCH (and never re-fires
+on a re-tune) and `source: 'DERIVED'` from a real solo-Crew derivation. Deliberately asserts "did
+this outcome ever fire for this Crew" rather than "was it the latest one" — a Crew's very first
+sweep can legitimately trigger more than one internal evaluation within milliseconds (the
+self-healing derivation path and the 1->2-member join trigger can both land close together — see
+`generateRecommendationForCrew`'s own `inFlightGenerations` comment), so a strict last-event
+assertion was a real source of flakiness in this test's own first draft, not a stronger check.
+
+Two real test-fixture lessons the first draft got wrong, both traceable to genuine product
+behaviour rather than bugs in the code under test: (1) a member with ANY personal taste swipes at
+all is enough for `tryDeriveAndApplyCrewPreferences` to self-heal `preferences_not_set` away before
+a sweep ever sees it — even a solo Crew ("Rule 2's own minimum" per that function's own comment) —
+so proving `preferences_not_set` requires a member with genuinely zero taste signal, not just an
+unset Crew-level preference; (2) `ensureInventory` mock-seeds a broad catalog across every category
+for any *recognised* city name, so proving `no_eligible_candidate` requires an unrecognised city
+string (the same technique `test/adminExplainRecommendation.test.ts` already used), not just a
+category with no explicit `seedExperience` call.
+
+Full pipeline run clean: `apps/api` typecheck (after the shared rebuild), `apps/api` lint, full
+backend suite (83 files / 493 tests, the 6 new ones included, no regressions against the prior
+82/487 baseline).
+
+Deliberately NOT done this cycle: `CrewAiTasteSetupApplied` (routes/crews.ts) already exists and
+covers the AI free-text taste-setup flow specifically — left as-is, no overlap with the new
+`CrewPreferencesSet` event (which fires on the underlying `preferencesSetAt`-stamping moment
+regardless of which UI flow triggered it, a different and complementary signal, not a duplicate).

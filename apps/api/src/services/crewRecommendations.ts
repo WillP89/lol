@@ -41,6 +41,14 @@ type RecommendationOutcome =
   | 'error';
 function logRecommendationOutcome(crewId: string, outcome: RecommendationOutcome, extra: Record<string, unknown> = {}) {
   logger.info({ event: 'crew_recommendation_evaluated', crewId, outcome, ...extra }, `Crew recommendation sweep: ${outcome}`);
+  // Real pilot-analytics gap this closes — see CrewRecommendationEvaluated's own comment in
+  // packages/shared/src/analytics.ts: this used to be a pino-only log line, so every sweep
+  // outcome other than an actual delivery (nine different suppression/failure reasons) was
+  // invisible to any real analytics query — "insufficient-inventory rate" and "suppression rate
+  // by reason" were simply not computable. Fire-and-forget (not awaited) — this function's whole
+  // contract is synchronous-looking logging that must never slow down or fail the real sweep it's
+  // reporting on; `track()` itself already never throws (see analytics.ts's own comment).
+  void track('CrewRecommendationEvaluated', { crewId, outcome }, { crewId });
 }
 
 /**
@@ -256,6 +264,11 @@ export async function updateSettings(
     generateRecommendationForCrew(crewId, { guaranteeFirst: true }).catch((err) => {
       logger.error({ err, crewId }, 'Guaranteed first recommendation failed right after crew preferences were first set');
     });
+    void track(
+      'CrewPreferencesSet',
+      { crewId, source: 'EXPLICIT', categoryPreferences: settings.categoryPreferences, interestPreferences: settings.interestPreferences },
+      { crewId },
+    );
   }
 
   return {
