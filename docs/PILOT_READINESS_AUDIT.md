@@ -221,3 +221,72 @@ initially disabled (to capture the debug view before any auto-send) would close 
 4. Re-verify recommendation-learning behaviour with fresh before/after evidence (IN/PASS/LOCK
    changing subsequent candidate rankings), using the same rigor as this cycle's density-starvation
    proof.
+
+## Cycle 2 — closing the "60/60/60/60" flatness and a P0 inventory-suppression bug
+
+Direct follow-up to Cycle 1b's baseline table, where four materially different Crews all scored
+their winning pick at exactly 60. That flatness was investigated rather than assumed benign.
+
+**Root cause found (specificity-evidence-strength bug)**: `experienceInterestTags` scanned
+category, subcategories, AND free-text name/description for interest-keyword hits, so an
+untagged, genuinely generic candidate whose name happened to contain a keyword (or that simply
+matched at the category level) scored the *same* `interest_match` bonus as a candidate with a
+real, curated subcategory tag for that exact interest. Traced with a direct import-level
+test (`scripts/specificityAudit.ts`, calling `scoreExperiencesForCrew` with no HTTP) against 4
+escalating-specificity LIVE_MUSIC candidates for a Rock Crew: untagged / rock-subcategory-tagged /
+alternative-rock-subcategory-tagged / named-artist-via-free-text. Confirmed the scorer did not
+differentiate the first two.
+
+**Fix**: added `experienceInterestTagsFromSubcategories` (subcategory-only, no free-text scan) as
+a strict "strong evidence" signal alongside the existing broad `experienceInterestTags`. Real
+subcategory-tagged interest matches now score a full evidence multiplier; a category-level-only or
+free-text-only match scores at half strength. This directly closes the flatness: candidates with
+real taxonomy-level specificity now out-rank candidates that merely share a category or happen to
+contain a matching word. Regression: `test/interestEvidenceStrength.test.ts` (real scorer, not
+mocked) proves a genre-tagged candidate beats an untagged one for the same Crew interest pick.
+
+**A second, more serious bug found while root-causing the first (P0 — inventory suppression)**:
+while building a regression test to confirm a HIGH-confidence non-ticketed pick gets honest,
+confident copy (see below), the test failed with `totalScored: 0` — a real, well-matched,
+non-chain restaurant was invisible to the scorer entirely. Traced to `derivePlanWorthiness`
+(`opportunityIntent.ts`): every non-chain `PLACE_PROVIDER`-sourced (FHRS/OpenStreetMap/Google
+Places/Foursquare) RESTAURANT/BAR/CLUBBING/FITNESS/COMMUNITY listing was being force-floored to
+`LOW` — and excluded by the `isPlanWorthyForCrew` hard gate — unless its own name or description
+happened to contain a "specialness" word (e.g. "market", "pop-up", "festival"). This is not a
+narrow edge case: it is the fate of essentially all of Plot's real, deepest, most geographically
+complete inventory (FHRS restaurants/bars, OSM-sourced venues) that isn't marketed with
+festival-branded language. A real independent restaurant with an ordinary name ("Corner Café",
+"The Local", the real "Kissho: Japanese Kitchen" used in the regression test) was being treated as
+equivalent to a review-flagged chain, when it should be an ordinary, legitimate baseline
+recommendation on its own merits. Fixed: non-chain place-provider listings in those categories now
+stay at the normal `MEDIUM` baseline (the same baseline as any unknown/manually-curated listing);
+the chain-name exclusion (`isGenericChainName`, e.g. "Caffè Nero") is untouched and still
+force-floors to `VERY_LOW`; a real specialness signal still upgrades a listing to `HIGH`. Full
+`npx vitest run` (76 files / 463 tests) green after the fix; 2 existing tests in
+`test/unit/opportunityIntent.test.ts` were updated (not reverted) because they had encoded the
+buggy LOW/excluded behaviour as the expected result.
+
+**Third, related bug found and fixed in the same investigation (hedging copy)**: the
+"There's not much in your area right now, so how about this" fallback preface was gated purely on
+`usedTicketedFallback` — a SUPPLY-TYPE signal (this pick wasn't itself a ticketed/dated event) —
+not a quality signal. Most real place-provider inventory (restaurants, bars, markets) is
+inherently non-ticketed, so a genuinely excellent, HIGH-confidence match got the identical
+apologetic hedge as an actual last-resort compromise. Fixed: the hedge now only fires when the
+pick is both a ticketed-fallback AND below HIGH confidence
+(`isGenuineCompromise = usedTicketedFallback && confidence !== 'HIGH'`). Regression:
+`test/highConfidenceNonTicketedFraming.test.ts` proves a HIGH-confidence non-ticketed pick now
+gets "We think this is a great fit for your Crew," not the hedge; the pre-existing
+`crewTicketedFirstRecommendation.test.ts` proves the honest hedge still fires for a genuinely
+weak/MEDIUM non-ticketed pick.
+
+All three fixes shipped through the standard pipeline (feature branch → main → back to feature
+branch, full suite + typecheck + lint green throughout).
+
+**What Cycle 2 does NOT close**: the Crew E "first value" problem flagged in Cycle 1b remains
+open by explicit user correction — the `preferencesSet` flag + persistent UI banner shipped in
+Cycle 1b is real but insufficient; a Crew can still exist indefinitely with zero recommendations
+if nobody completes the crew-level taste step. This is the next item being worked, with an
+explicit acceptance test: a realistic new Crew, members invited, no manual rescue, must naturally
+reach a relevant first recommendation, with no silent permanent no-recommendation state, and
+member-derived initial recommendations must not produce obviously bad results for a highly
+conflicted Crew.
