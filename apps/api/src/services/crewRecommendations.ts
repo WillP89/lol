@@ -754,12 +754,21 @@ async function generateRecommendationForCrewNow(crewId: string, opts: { guarante
 
   // Real, evidence-derived confidence (services/recommendationConfidence.ts) — decides the
   // message's own lead-in copy AND is stored on the row for pilot analytics/the card's own
-  // display. Ticketed-fallback takes priority over confidence framing when both could apply (a
-  // more specific honesty signal — "we tried to find a ticket" — than a generic confidence
-  // level); an exploratory send is always labelled EXPLORATORY explicitly (see
+  // display. An exploratory send is always labelled EXPLORATORY explicitly (see
   // CrewEligibilityResult.forceExploratoryConfidence's own comment), never inferred from score.
   const confidence = deriveConfidence(best, { forceExploratory: evaluation.forceExploratoryConfidence }).level;
-  const leadIn = evaluation.usedTicketedFallback ? TICKETED_FALLBACK_PREFACE : confidenceLeadIn(confidence);
+  // Real, live-found bug this closes: `usedTicketedFallback` is a SUPPLY-TYPE signal ("the pick
+  // isn't itself a ticketed/dated event"), not a QUALITY signal — but it used to unconditionally
+  // override confidence-based copy, so a genuinely excellent, high-confidence match that simply
+  // happened to be a restaurant/bar/market (real FHRS/OSM/Google Places/Foursquare inventory —
+  // most of what those sources ARE is inherently non-ticketed) got the SAME hedging "there's not
+  // much in your area right now" preface as a genuine last-resort compromise pick. Confirmed via
+  // a controlled 5-Crew baseline test: an 85-scoring, individually-taste-matched pick got framed
+  // identically to a bare 60-scoring one. Only hedge when the pick genuinely ISN'T a confident
+  // match either — a HIGH-confidence non-ticketed pick is not a compromise, it's exactly what
+  // Plot was asked to find, and the copy must say so.
+  const isGenuineCompromise = evaluation.usedTicketedFallback && confidence !== 'HIGH';
+  const leadIn = isGenuineCompromise ? TICKETED_FALLBACK_PREFACE : confidenceLeadIn(confidence);
 
   const systemUserId = await getPlotSystemUserId();
   const { plan, messageId } = await createRecommendationPlanForCrew(crewId, best.experience.id, systemUserId, { preface: leadIn });
@@ -769,7 +778,7 @@ async function generateRecommendationForCrewNow(crewId: string, opts: { guarante
       crewId,
       experienceId: best.experience.id,
       score: best.matchScore,
-      reasonText: explanationFor(best, { isTicketedFallback: evaluation.usedTicketedFallback }),
+      reasonText: explanationFor(best, { isTicketedFallback: isGenuineCompromise }),
       status: 'SENT',
       confidence,
       planId: plan.id,

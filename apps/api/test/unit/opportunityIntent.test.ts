@@ -70,9 +70,14 @@ describe('derivePlanWorthiness — the actual "Caffè Nero" gate', () => {
     expect(result.reasons).toContain('generic_chain_name');
   });
 
-  test('a PLACE_PROVIDER-sourced generic, non-chain RESTAURANT/BAR with no specialness signal is LOW — "there is a place nearby" is not a plan', () => {
-    expect(derivePlanWorthiness(experience({ name: 'Corner Café', category: 'RESTAURANT', tags: { provider: 'openstreetmap' } })).level).toBe('LOW');
-    expect(derivePlanWorthiness(experience({ name: 'The Local', category: 'BAR', tags: { provider: 'fhrs' } })).level).toBe('LOW');
+  test('a PLACE_PROVIDER-sourced, non-chain RESTAURANT/BAR with no specialness signal is MEDIUM — a real independent venue is a legitimate destination on its own, not force-floored just for lacking festival-branded marketing language', () => {
+    // Real, live-found bug this regression proves fixed: this used to assert LOW here, which
+    // meant every real, non-chain FHRS/OpenStreetMap restaurant or bar — Plot's own deepest,
+    // most geographically complete real inventory — was excluded from ever reaching a Crew's
+    // automatic recommendation. "Corner Café" and "The Local" are exactly what a real
+    // independent venue's own real name looks like; that is not evidence of genericness.
+    expect(derivePlanWorthiness(experience({ name: 'Corner Café', category: 'RESTAURANT', tags: { provider: 'openstreetmap' } })).level).toBe('MEDIUM');
+    expect(derivePlanWorthiness(experience({ name: 'The Local', category: 'BAR', tags: { provider: 'fhrs' } })).level).toBe('MEDIUM');
   });
 
   test('a PLACE_PROVIDER-sourced RESTAURANT with a real specialness signal in its own text is HIGH', () => {
@@ -111,10 +116,12 @@ describe('derivePlanWorthiness — the actual "Caffè Nero" gate', () => {
 });
 
 describe('isPlanWorthyForCrew — the actual hard-gate boundary', () => {
-  test('MEDIUM and above pass; LOW and VERY_LOW fail', () => {
+  test('MEDIUM and above pass; VERY_LOW (an actual chain) fails', () => {
     expect(isPlanWorthyForCrew(experience({ name: 'A Real Show', category: 'LIVE_MUSIC', tags: {} }))).toBe(true);
     expect(isPlanWorthyForCrew(experience({ name: 'Smoking Goat', category: 'RESTAURANT', tags: {} }))).toBe(true);
-    expect(isPlanWorthyForCrew(experience({ name: 'Corner Café', category: 'RESTAURANT', tags: { provider: 'openstreetmap' } }))).toBe(false);
+    // A real, non-chain, place-provider venue now clears the bar on its own merit — see
+    // derivePlanWorthiness's own comment for the real inventory-suppression bug this fixes.
+    expect(isPlanWorthyForCrew(experience({ name: 'Corner Café', category: 'RESTAURANT', tags: { provider: 'openstreetmap' } }))).toBe(true);
     expect(isPlanWorthyForCrew(experience({ name: 'Caffè Nero', category: 'RESTAURANT', tags: { provider: 'openstreetmap' } }))).toBe(false);
   });
 });
