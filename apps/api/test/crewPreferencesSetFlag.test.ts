@@ -24,7 +24,7 @@ async function loginByEmail(email: string): Promise<string> {
 }
 
 describe('GET /crews/:id exposes preferencesSet', () => {
-  test('a brand-new Crew with no settings row at all reports preferencesSet: false', async () => {
+  test('a brand-new Crew with no settings row at all reports preferencesSet: false, preferencesSource: null', async () => {
     await resetDatabase();
     const owner = await loginByEmail('prefs-flag-owner1@plot-test.invalid');
     const createRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner }, payload: { name: 'Abandoned Onboarding Crew' } });
@@ -32,10 +32,12 @@ describe('GET /crews/:id exposes preferencesSet', () => {
 
     const res = await app.inject({ method: 'GET', url: `/crews/${crew.id}`, headers: { cookie: owner } });
     expect(res.statusCode).toBe(200);
-    expect((res.json() as { crew: { preferencesSet: boolean } }).crew.preferencesSet).toBe(false);
+    const body = (res.json() as { crew: { preferencesSet: boolean; preferencesSource: string | null } }).crew;
+    expect(body.preferencesSet).toBe(false);
+    expect(body.preferencesSource).toBeNull();
   });
 
-  test('a Crew that completed the taste step reports preferencesSet: true', async () => {
+  test('a Crew that completed the taste step reports preferencesSet: true, preferencesSource: EXPLICIT', async () => {
     await resetDatabase();
     const owner = await loginByEmail('prefs-flag-owner2@plot-test.invalid');
     const createRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner }, payload: { name: 'Set Up Crew' } });
@@ -49,6 +51,25 @@ describe('GET /crews/:id exposes preferencesSet', () => {
 
     const res = await app.inject({ method: 'GET', url: `/crews/${crew.id}`, headers: { cookie: owner } });
     expect(res.statusCode).toBe(200);
-    expect((res.json() as { crew: { preferencesSet: boolean } }).crew.preferencesSet).toBe(true);
+    const body = (res.json() as { crew: { preferencesSet: boolean; preferencesSource: string | null } }).crew;
+    expect(body.preferencesSet).toBe(true);
+    expect(body.preferencesSource).toBe('EXPLICIT');
+  });
+
+  test('a Crew whose taste was safely inferred from real member overlap reports preferencesSet: true, preferencesSource: DERIVED', async () => {
+    await resetDatabase();
+    const owner = await loginByEmail('prefs-flag-owner3@plot-test.invalid');
+    await app.inject({ method: 'POST', url: '/users/me/taste/interests', headers: { cookie: owner }, payload: { updates: [{ interestId: 'rock', strength: 'love' }] } });
+    const createRes = await app.inject({ method: 'POST', url: '/crews', headers: { cookie: owner }, payload: { name: 'Derived Crew' } });
+    const { crew } = createRes.json() as { crew: { id: string } };
+    // Sweeping runs tryDeriveAndApplyCrewPreferences before evaluating eligibility — the same
+    // real trigger a periodic sweep or a manual "Find us something" would hit.
+    await app.inject({ method: 'POST', url: '/admin/recommendations/sweep', headers: { 'x-admin-key': 'dev_admin_key_change_me' }, payload: { crewId: crew.id } });
+
+    const res = await app.inject({ method: 'GET', url: `/crews/${crew.id}`, headers: { cookie: owner } });
+    expect(res.statusCode).toBe(200);
+    const body = (res.json() as { crew: { preferencesSet: boolean; preferencesSource: string | null } }).crew;
+    expect(body.preferencesSet).toBe(true);
+    expect(body.preferencesSource).toBe('DERIVED');
   });
 });

@@ -815,6 +815,20 @@ model CrewRecommendationSettings {
   /// explicitly allowed ("you can tailor it after and change") — this only ever gates the FIRST
   /// time, not every subsequent edit.
   preferencesSetAt   DateTime?
+  /// Real gap this closes (docs/DECISIONS.md#crew-first-value): `preferencesSetAt` used to be
+  /// stampable only one way — a person explicitly completing the taste step — so a Crew whose
+  /// creator abandoned onboarding between "name" and "taste" (a real DB row already exists,
+  /// already joinable via the invite link sent before the drop-off) sat in `preferences_not_set`
+  /// forever, with nothing but a passive banner nobody was guaranteed to see. `'EXPLICIT'` means
+  /// a person actually picked these; `'DERIVED'` means services/crewTasteDerivation.ts safely
+  /// inferred them from genuine overlap across members' own TasteProfile — never a raw union no
+  /// one member actually agrees with, and never anything a member has actively said they dislike
+  /// (see that file's own veto-rule comment). Null only for rows written before this column
+  /// existed with preferencesSetAt already set — treated as EXPLICIT (the only way it could have
+  /// been stamped back then). A DERIVED value is always eligible to be refined (re-derived) as
+  /// more members join; the moment a person explicitly sets preferences, this flips to EXPLICIT
+  /// and is never auto-overwritten again — an explicit human decision always wins.
+  preferencesSource  String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

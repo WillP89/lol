@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { tryDeriveAndApplyCrewPreferences } from './crewTasteDerivation';
 
 /**
  * Real, live product requirement: "Before creating a crew, one person must fill out the crew's
@@ -30,7 +31,15 @@ export async function assertCrewPreferencesSet(crewId: string): Promise<void> {
     where: { crewId },
     select: { preferencesSetAt: true },
   });
-  if (!settings?.preferencesSetAt) {
-    throw new CrewPreferencesNotSetError(crewId);
-  }
+  if (settings?.preferencesSetAt) return;
+
+  // Real gap this closes: a member manually tapping "Find us something" used to hit the exact
+  // same hard wall the automatic sweep did, even in cases the sweep could (and now does) safely
+  // resolve on its own — see services/crewTasteDerivation.ts#tryDeriveAndApplyCrewPreferences's
+  // own comment. A manual request gets the same self-healing chance before it's told to go set
+  // something up by hand.
+  const derived = await tryDeriveAndApplyCrewPreferences(crewId);
+  if (derived) return;
+
+  throw new CrewPreferencesNotSetError(crewId);
 }

@@ -10,6 +10,7 @@ import { interestLabel } from '@plot/shared';
 import { derivePlanWorthiness, deriveBookingType, deriveSourceKind, isTicketedEvent } from './opportunityIntent';
 import { MIN_RECOMMENDATION_SCORE, EXPLORATION_MIN_SCORE, deriveConfidence, confidenceLeadIn } from './recommendationConfidence';
 import { RecommendationResponseError, type RecommendationResponseAction } from './recommendationLearning';
+import { tryDeriveAndApplyCrewPreferences } from './crewTasteDerivation';
 import { Prisma } from '@prisma/client';
 import type { CrewRecommendation } from '@prisma/client';
 
@@ -137,6 +138,10 @@ export interface RecommendationSettingsDTO {
   // .preferencesSetAt's own schema comment. This is the absolute gate checked first in
   // evaluateCrewEligibility and by services/crewPreferencesGate.ts for the manual flows.
   preferencesSetAt: Date | null;
+  // 'EXPLICIT' | 'DERIVED' | null — see .preferencesSource's own schema comment. Never settable
+  // directly by a client; updateSettings always writes 'EXPLICIT' (every call site is a human
+  // decision), tryDeriveAndApplyCrewPreferences below is the only writer of 'DERIVED'.
+  preferencesSource: string | null;
 }
 
 /** Self-heals a settings row on first read — every Crew gets sane defaults (on, 2/week,
@@ -172,6 +177,11 @@ export async function getOrCreateSettings(crewId: string): Promise<Recommendatio
     categoryPreferences: settings.categoryPreferences,
     interestPreferences: settings.interestPreferences,
     preferencesSetAt: settings.preferencesSetAt,
+    // A row written before preferencesSource existed but with preferencesSetAt already set could
+    // only have gotten there the one way that existed back then — a person explicitly completing
+    // the taste step — so it's treated as EXPLICIT, never mistaken for a safely-overwritable
+    // DERIVED row by tryDeriveAndApplyCrewPreferences below.
+    preferencesSource: settings.preferencesSource ?? (settings.preferencesSetAt ? 'EXPLICIT' : null),
   };
 }
 
@@ -192,11 +202,22 @@ export async function updateSettings(
 ): Promise<RecommendationSettingsDTO> {
   const current = await getOrCreateSettings(crewId); // ensure the row exists, and read prior state for the auto-stamp below
 
+  // Only a patch that actually names categoryPreferences/interestPreferences is a real taste
+  // decision — a PATCH that only touches `enabled`/`maxPerWeek` must never flip a safely-DERIVED
+  // row to EXPLICIT (or re-fire the guarantee below) as a side effect of an unrelated edit.
+  const patchTouchesTaste = patch.categoryPreferences !== undefined || patch.interestPreferences !== undefined;
   const nextCategoryPreferences = patch.categoryPreferences ?? current.categoryPreferences;
   const nextInterestPreferences = patch.interestPreferences ?? current.interestPreferences;
-  const hadNoPreferencesYet = current.categoryPreferences.length === 0 && current.interestPreferences.length === 0;
   const hasPreferencesNow = nextCategoryPreferences.length > 0 || nextInterestPreferences.length > 0;
-  const justSetPreferencesForFirstTime = current.preferencesSetAt === null && hadNoPreferencesYet && hasPreferencesNow;
+  // Fires whenever a human makes a real, explicit taste decision for the first time — whether
+  // this Crew never had any preference at all, or only ever had a safely DERIVED guess (services/
+  // crewTasteDerivation.ts). A DERIVED guess is real value, but it isn't a considered human
+  // choice; the moment someone actually decides deserves the same "never come up empty" guarantee
+  // an explicit first-set always got, even if it completely changes the Crew's candidate pool
+  // (DERIVED rock/live-music -> EXPLICIT food/restaurants, say) — "explicit current Crew intent
+  // wins quickly" is the whole point. Never re-fires once this Crew's preferences are already
+  // EXPLICIT — re-tuning stays unblocked but doesn't re-trigger the guarantee, as before.
+  const justSetPreferencesForFirstTime = patchTouchesTaste && current.preferencesSource !== 'EXPLICIT' && hasPreferencesNow;
 
   const settings = await prisma.crewRecommendationSettings.update({
     where: { crewId },
@@ -207,6 +228,13 @@ export async function updateSettings(
       ...(patch.categoryPreferences !== undefined ? { categoryPreferences: patch.categoryPreferences } : {}),
       ...(patch.interestPreferences !== undefined ? { interestPreferences: patch.interestPreferences } : {}),
       ...(justSetPreferencesForFirstTime ? { preferencesSetAt: new Date() } : {}),
+      // Every call site of updateSettings is a real human decision (the recommendation-settings
+      // PATCH route, the AI free-text taste setup) — so any edit that actually names a taste
+      // array and leaves the Crew with at least one real pick always marks it EXPLICIT,
+      // overwriting a prior 'DERIVED' guess and permanently taking it out of
+      // tryDeriveAndApplyCrewPreferences's reach (see that function's own comment — an explicit
+      // human decision always wins and is never silently replaced again).
+      ...(patchTouchesTaste && hasPreferencesNow ? { preferencesSource: 'EXPLICIT' } : {}),
     },
   });
 
@@ -227,6 +255,7 @@ export async function updateSettings(
     categoryPreferences: settings.categoryPreferences,
     interestPreferences: settings.interestPreferences,
     preferencesSetAt: settings.preferencesSetAt,
+    preferencesSource: settings.preferencesSource,
   };
 }
 
@@ -685,7 +714,15 @@ export function generateRecommendationForCrew(crewId: string, opts: { guaranteeF
 }
 
 async function generateRecommendationForCrewNow(crewId: string, opts: { guaranteeFirst?: boolean } = {}): Promise<CrewRecommendation | null> {
-  const evaluation = await evaluateCrewEligibility(crewId, opts);
+  // Self-healing safety net — see tryDeriveAndApplyCrewPreferences's own comment. Never mutates
+  // `opts` itself (the caller's object may be reused/logged elsewhere); `effectiveOpts` is a
+  // local, this-pass-only upgrade so a Crew whose preferences just got safely derived for the
+  // first time gets the same "never come up empty" guarantee an explicit first-set already gets,
+  // even when this pass was only ever a routine, non-guaranteed sweep.
+  const justDerivedFirstTime = await tryDeriveAndApplyCrewPreferences(crewId);
+  const effectiveOpts = justDerivedFirstTime ? { ...opts, guaranteeFirst: true } : opts;
+
+  const evaluation = await evaluateCrewEligibility(crewId, effectiveOpts);
   if (evaluation.outcome !== 'eligible' || !evaluation.best) {
     logRecommendationOutcome(crewId, evaluation.outcome as RecommendationOutcome, evaluation.details);
     // Real, live-reported gap this closes: this guarantee's whole point (see
@@ -706,7 +743,7 @@ async function generateRecommendationForCrewNow(crewId: string, opts: { guarante
     // updateSettings's own comments on why only one of the two call sites ever reaches a real,
     // 2+-member evaluation) but a concurrent double-fire should still never double up the
     // message a Crew sees.
-    if (opts.guaranteeFirst && evaluation.outcome === 'no_eligible_candidate') {
+    if (effectiveOpts.guaranteeFirst && evaluation.outcome === 'no_eligible_candidate') {
       const systemUserId = await getPlotSystemUserId();
       const alreadySpoken = await prisma.crewMessage.findFirst({ where: { crewId, authorId: systemUserId }, select: { id: true } });
       if (!alreadySpoken) {

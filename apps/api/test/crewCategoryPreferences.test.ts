@@ -114,10 +114,16 @@ describe('crew-level category preferences: tailoring a Crew beyond member-derive
     expect(messages.some((m) => m.body.includes('Truro Walking Tour'))).toBe(false);
   });
 
-  test('setting a crew-level category preference is readable back via GET, defaulting to empty', async () => {
+  test('before any explicit pick, the prior sweep safely derived a real category overlap from both members\' own taste — DERIVED, never EXPLICIT', async () => {
+    // Real consequence of the Crew-first-value fix (services/crewTasteDerivation.ts): both
+    // members genuinely, independently like comedy/live_music/restaurant, so the sweep above
+    // already inferred that real overlap rather than leaving this Crew's settings empty forever.
+    // This is exactly the safety-net working as intended — it does NOT undermine the rest of
+    // this test, which proves an EXPLICIT pick still overrides it and wins.
     const res = await app.inject({ method: 'GET', url: `/crews/${crewId}/recommendation-settings`, headers: { cookie: owner.cookie } });
-    const { settings } = res.json() as { settings: { categoryPreferences: string[] } };
-    expect(settings.categoryPreferences).toEqual([]);
+    const { settings } = res.json() as { settings: { categoryPreferences: string[]; preferencesSource: string | null } };
+    expect(new Set(settings.categoryPreferences)).toEqual(new Set(['COMEDY', 'LIVE_MUSIC', 'RESTAURANT']));
+    expect(settings.preferencesSource).toBe('DERIVED');
   });
 
   test('after the Crew sets DAY_ACTIVITY as a preference, the previously-ineligible event is delivered with a crew_preference reason', async () => {
