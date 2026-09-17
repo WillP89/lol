@@ -25,12 +25,17 @@ import type { Experience, ExperienceCategory } from '@prisma/client';
  *    gate, same "internal decision attributes, not exposed numeric scores" posture the product
  *    spec calls for.
  *
- * A PLACE-sourced RESTAURANT/BAR/CLUBBING/FITNESS/COMMUNITY listing with no specialness signal
- * defaults LOW — below the bar for Plot's own primary Crew recommendation engine (see
- * `isPlanWorthyForCrew`) — while the exact same category from a real EVENT source (a food
- * festival, a themed club night) defaults HIGH, and a well-known CHAIN name (Caffè Nero,
- * Starbucks, a fast-food chain, …) is force-floored regardless of source, because a chain
- * location is never itself a reason a friendship group plans a night out.
+ * A well-known CHAIN name (Caffè Nero, Starbucks, a fast-food chain, …) is force-floored to
+ * VERY_LOW regardless of category or source — a chain location is never itself a reason a
+ * friendship group plans a night out. That is the actual "Caffè Nero" fix, and it alone. A
+ * PLACE-sourced RESTAURANT/BAR/CLUBBING/FITNESS/COMMUNITY listing that ISN'T a chain stays at
+ * the ordinary category baseline (MEDIUM) — a real, specifically-named independent venue is a
+ * legitimate destination on its own merit, the same bar an EVENT-sourced or UNKNOWN-sourced
+ * listing in that category clears. A genuine specialness signal in the listing's own text (a
+ * festival, a market, a tasting, a pop-up, a themed night) still UPGRADES it to HIGH — see
+ * `derivePlanWorthiness`'s own comment for the real, previously-live inventory-suppression bug
+ * this distinction fixes: a real Japanese restaurant a Crew explicitly asked for was excluded
+ * from ever being recommended purely for not using festival-branded marketing language.
  *
  * This governs the CREW recommendation engine specifically (services/match.ts's shared scorer,
  * used by the automatic sweep AND the manual "Find us something"/"Suggest something" flows —
@@ -174,10 +179,23 @@ export function derivePlanWorthiness(
     if (hasSpecialnessSignal(experience)) {
       level = 'HIGH';
       reasons.push('place_provider_but_specialness_signal');
-    } else {
-      level = 'LOW';
-      reasons.push('place_provider_generic_venue');
     }
+    // Real, live-found bug this closes, found running a controlled pilot-readiness audit: this
+    // used to fall through to an ELSE that force-floored to LOW — meaning ANY real, non-chain
+    // restaurant/bar/club/fitness venue from FHRS or OpenStreetMap (Plot's own deepest, most
+    // geographically complete, keyless real inventory) was excluded from ever reaching a Crew's
+    // automatic recommendation, however well it matched taste, UNLESS its own text happened to
+    // contain a marketing word like "pop-up" or "tasting" — which ordinary restaurant/bar
+    // listings essentially never do. That's not "the Caffè Nero fix" (isGenericChainName above,
+    // checked FIRST and unaffected by this change, still force-floors an actual chain to
+    // VERY_LOW regardless) — it was silently suppressing the overwhelming majority of Plot's own
+    // real supply for every Food-, Nightlife-, or Sport-("pubs")-preferring Crew, for every real
+    // independent restaurant, bar, or club whose name is just its own real name (which is what a
+    // real independent venue's name looks like, by definition — "Corner Café" is exactly as real
+    // and legitimate a destination as "Kissho"). A real, specifically-named, non-chain venue now
+    // stays at the ordinary category baseline (MEDIUM) it would get from any other source — the
+    // specialness-word check above still UPGRADES a genuine special occasion to HIGH, it no
+    // longer GATES an ordinary real venue out of consideration entirely.
   } else if (sourceKind === 'EVENT_PROVIDER' && PLACE_PROVIDER_DOWNGRADE_CATEGORIES.has(experience.category)) {
     // A real dated occasion in a normally-generic category (PredictHQ's food-drink -> RESTAURANT,
     // Skiddle's CLUB eventcode -> CLUBBING) — this IS a genuine plan, not "a place exists".
