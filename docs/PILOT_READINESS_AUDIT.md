@@ -365,3 +365,83 @@ slightly; those Crews correctly stay gated until a person acts, which is the rig
 a gap. The next highest-leverage question, per the mission's own next directive, is real inventory
 breadth/depth and a systematic audit of every remaining inventory-suppression gate — not yet
 started this cycle.
+
+## Cycle 4 — systematic inventory-suppression gate audit, 3 real bugs found and fixed
+
+Direct follow-up to the plan-worthiness fix (Cycle 2), run because that fix's own bug shape — a
+real gate applied too late in the pipeline, after a hard geographic/volume cut had already thrown
+away the candidates it would have kept — was a strong signal the same class of bug could exist
+elsewhere. Delegated a full read of every real gate between provider fetch and delivery (quality
+scoring, match.ts's every filter in order, opportunityIntent.ts's downgrade-category coverage,
+provider registration, and each of the 7 live provider adapters' own internal pagination/result
+caps) to a dedicated audit pass. Full findings kept in this session's own transcript; the
+actionable results:
+
+**Bug 1 (shipped) — `isPlanWorthyForCrew` ran after, not before, the nearest-50 geographic cut.**
+Identical shape to the already-fixed `passesPreferenceGate`-after-the-cut incident, just triggered
+by chain-density instead of category-density: a town centre saturated with real chain venues
+(McDonald's/KFC/Subway/Greggs — all correctly force-floored to VERY_LOW) could fill the entire
+top-50 distance slice before a genuine, non-chain restaurant sitting farther out but still
+comfortably in-radius ever got the chance to be scored at all. Fixed by moving the gate to the
+same early stage `passesPreferenceGate` already runs at (before the cut, not after). Regression
+test (`test/planWorthinessBeforeProximityCut.test.ts`) seeds 55 nearer real-UK-chain venues plus
+one genuine independent restaurant farther out, proves the independent one is what gets delivered.
+
+**Bug 2 (shipped) — the Skiddle adapter never paginated.** `fetchOneCategory` made exactly one
+request per event code (limit=50, sorted by date ascending) and never read the response's own
+`totalcount` field, unlike every other paginated adapter in this codebase (Ticketmaster/FHRS/
+PredictHQ all loop). A dense event code in a real city (LIVE/CLUB with 65+ gigs across the sync
+window) would silently and permanently lose everything past the earliest 50 by date, every single
+sync — systematically biasing Skiddle inventory toward near-term dates. Fixed with a real
+offset-based pagination loop (`MAX_PAGES_PER_CATEGORY = 3`, matching Ticketmaster's own page
+count), still bounded by the adapter's existing overall time budget. Two new tests
+(`test/unit/skiddlePagination.test.ts`) mock a 51-result category and prove the 51st result (only
+reachable via a real second page) is not lost, and that a short category never wastes a second
+request.
+
+**Bug 3 (shipped) — near-duplicate dedup had zero location awareness.** `dedupeNearDuplicates`
+(entityResolution.ts) merged purely on category + name-similarity (Jaccard ≥0.82) + time-proximity
+— no coordinate check at all. Two genuinely different real venues sharing a common UK name ("The
+Red Lion", "The Crown" — among the most common pub names in England) could hit the similarity
+threshold and silently lose one, permanently, on every surface that shares this dedup pass (Crew
+recommendations, Explore, Home). Fixed additively: real coordinates on BOTH sides now override a
+would-be merge when the venues are more than ~0.3 miles apart (generous enough to still catch the
+SAME venue geocoded slightly differently by two providers); an item missing coordinates on either
+side falls back to the pre-existing name-only behaviour exactly as before, so this can only make
+dedup more conservative, never less. Three new tests prove: two distinct same-named pubs miles
+apart both survive; the same real venue geocoded ~30m apart by two providers still collapses to
+one; missing coordinates on one side still falls back to the old merge behaviour.
+
+**Findings investigated and NOT changed this cycle** (real, but lower-confidence or genuinely
+product-policy questions rather than bugs): OSM's 120-result-per-sync cap and FHRS's 200-result
+cap could truncate in a genuinely dense city with no signal when they do (worth adding a log
+line, not yet done); Google Places/Foursquare fetch only one page each (currently low real-world
+impact — both are key-gated and neither is confirmed configured in production); Ticketmaster maps
+`offsale`/`postponed`/`rescheduled` to `UNKNOWN` rather than excluding them outright (worth
+confirming intended semantics, not clearly wrong); the permanent, non-decaying
+`getCrewExcludedExperienceIds` exclusion is reasonable for one-off EVENT_PROVIDER occasions but
+arguably too permanent for evergreen PLACE_PROVIDER venues (a genuinely great restaurant rejected
+once for an unrelated scheduling reason can never resurface automatically) — a real product
+question, not a clear bug, flagged for a decision rather than changed unilaterally. Confirmed NOT
+broken: the quality-score gate (every live provider's typical listing clears 40 comfortably); the
+plan-worthiness downgrade-category set is complete for every category a PLACE_PROVIDER adapter can
+currently produce (no other category has the same unfixed bug); provider env-var names in
+registry.ts exactly match config.ts (no wiring bug).
+
+Full suite green throughout (79 files / 476 tests), typecheck + lint clean on every fix, each
+shipped individually through the standard pipeline.
+
+**The real, unavoidable blocker this cycle re-confirms, not new**: none of this — nor anything
+else this session can do — substitutes for live evidence of real provider inventory breadth,
+because this sandbox's outbound network to every live provider host (Ticketmaster, Skiddle,
+PredictHQ, Google Places, Foursquare, OpenStreetMap's Overpass mirrors, FHRS) is proxy-blocked, and
+this session has no access to production's actual deployed environment or its configured
+credentials (`PREDICTHQ_ACCESS_TOKEN`/`GOOGLE_PLACES_API_KEY`/`FOURSQUARE_API_KEY` — confirmed by
+reading `providers/registry.ts`/`lib/config.ts` that these gate real registration, but this
+sandbox cannot read production's own environment). The admin diagnostics already built this
+session (`GET /admin/inventory-probe` — live per-provider raw/normalised/filtered counts;
+`GET /admin/experiences-near` — what's actually in the DB near a city, gate-annotated;
+`GET /admin/crews/:id/explain-recommendation` — full per-Crew scoring trace) already give the
+exact evidence shape needed once run somewhere with real network access — this is the single
+highest-leverage action item for the person running the live product: run `/admin/inventory-probe`
+for each of the intents below in a real UK city and read off the real counts.
