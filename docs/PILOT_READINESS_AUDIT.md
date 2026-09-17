@@ -810,3 +810,54 @@ correctly under a smaller viewport, which is the structural property that matter
 the same signal a real device would give for that specific correction.
 
 No code changed; no shipping step needed.
+
+## Cycle 11 — unanimous-decline early replacement, shipped and regression-tested
+
+Direct fix for the real, scoped gap Cycle 9 found and deliberately left unimplemented pending
+further evidence: nothing reacted to every active Crew member voting OUT ("Can't make it") on the
+current recommendation — an unambiguous "this one's dead" signal — so the Crew simply waited out
+the same 36h cadence floor as if no one had responded at all.
+
+**Design, in `apps/api/src/services/crewRecommendations.ts`:** a new, shorter cadence floor,
+`MIN_HOURS_AFTER_UNANIMOUS_DECLINE = 8` (comfortably past one periodic sweep interval — 6h — so
+it's never pinned to exactly that number, well under a quarter of the normal 36h), applies ONLY
+when `getCrewActivitySignals`' new `lastRecommendationUnanimouslyDeclined` flag is true — computed
+from the Crew's most recent recommendation's linked Plan: its status is NOT LOCKED/BOOKED/
+COMPLETED/CANCELLED (a Crew that did commit is obviously not "dead"), every currently ACTIVE crew
+member has voted (silence is deliberately not treated as rejection — the normal 36h floor already
+covers "nobody's responded"), and 100% of those votes are OUT. This is computed lazily at the next
+eligibility check (background sweep or explicit trigger) rather than firing a replacement
+synchronously from the vote-submission endpoint — satisfying "never instantly spam a replacement
+into chat seconds after the rejection" by construction, without needing a separate debounce.
+
+**Requirements already met by existing code, verified rather than re-built:**
+- *"Never immediately send a near-duplicate"* — `getCrewExcludedExperienceIds` (match.ts) already
+  permanently excludes any Experience ever recommended or attached to a Plan for this Crew,
+  regardless of outcome; the declined experience can never resurface automatically.
+- *"Situational rejection must not poison taste; taste rejection should influence ranking"* —
+  already fully implemented in `recommendationLearning.ts#deltaFor`: `too_expensive`/`too_far`/
+  `wrong_day_time` reason codes get delta 0 (situational, not taste), genuine taste rejection gets
+  -0.35, an unspecified "not into this" gets the full penalty, `done_enough_lately` is treated as
+  fatigue not rejection. This is a separate mechanism from the IN/MAYBE/OUT Plan vote this cycle's
+  fix hooks into — verified correct, not touched.
+- *"Avoid replacement loops"* — each new recommendation's own unanimous-decline status is
+  evaluated independently, and the weekly cap (`maxPerWeek`, default 3) remains a hard ceiling
+  regardless of the shorter floor, so this cannot compound into a runaway loop.
+
+**Regression tests** (`test/unanimousDeclineReplacement.test.ts`, 4 tests, all against the real
+pipeline — DB, scoring, cadence — no mocking): all-PASS correctly becomes eligible for a
+replacement at 10h (past the 8h override, would have failed the normal 36h floor) and the
+replacement is a genuinely different Experience; mixed IN/PASS is correctly NOT treated as
+unanimous (`unanimousDeclineOverride: false`, 36h floor still applies); one member never
+responding is correctly NOT treated as unanimous (same reason); three consecutive unanimous
+declines within a week correctly hit `weekly_cap_reached` on the 4th attempt regardless of the
+shorter floor. A real methodology snag hit and fixed while writing these: the Crew-taste-set
+PATCH endpoint fires its own unawaited `guaranteeFirst` background trigger (same mechanism the
+1→2-member join trigger uses), which raced against this test's own explicit sweep call for the
+very first recommendation — fixed by reading the result directly from the database after the
+established 500ms settle window (the same pattern `crewFirstValueDerivation.test.ts` and
+`guaranteedFirstRecommendation.test.ts` already use for the identical race), rather than trusting
+whichever of the two concurrent attempts happened to win.
+
+Shipped: typecheck + lint clean, full backend suite green (80 files / 480 tests, the 4 new ones
+included).
