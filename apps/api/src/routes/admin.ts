@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Prisma, ExperienceCategory } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { config } from '../lib/config';
+import { constantTimeEqual } from '../lib/crypto';
 import { syncAllProviders, backfillImageQuality, backfillMissingImages, backfillVenueCities } from '../services/inventorySync';
 import { providerRegistry } from '../providers/registry';
 import { buildCanonicalKey } from '../services/entityResolution';
@@ -152,7 +153,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // the value can leak to. Acceptable for a pilot's read-mostly ops routes; see the doc-
     // comment above on why this whole scheme needs replacing before real launch regardless.
     const key = request.headers['x-admin-key'] ?? (request.query as Record<string, string> | undefined)?.key;
-    if (key !== config.ADMIN_API_KEY) {
+    // constantTimeEqual over plain `!==`: this is the ONE secret gating every /admin/* route
+    // (see this function's own doc comment on how minimal that is already) — a `!==` comparison
+    // returns as soon as the first differing byte is found, which is a real, well-documented
+    // timing side channel for guessing a secret character-by-character. crypto.ts already built
+    // this exact primitive for session-token comparison; reusing it here costs nothing.
+    if (typeof key !== 'string' || !constantTimeEqual(key, config.ADMIN_API_KEY)) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
   });
