@@ -532,3 +532,50 @@ all independently re-verified clean with the same corrected methodology; no othe
 this exact gap was found on those four.
 
 Shipped: typecheck clean (CSS-only change).
+
+## Cycle 7 — golden-path walkthrough restart, one real bug found and fixed (entry page font loading)
+
+Continuing the mission's item 13 ("THEN COMPLETE THE PILOT LOOP: ONBOARDING → HOME → ..."),
+started a fresh, unauthenticated Playwright walkthrough of the real entry point (`/`, no session
+cookie — a genuinely new visitor, not the existing test session used for every prior cycle).
+
+**The real bug**: the console logged `net::ERR_CERT_AUTHORITY_INVALID` on every load. Investigated
+with a `page.on('requestfailed', ...)` listener before assuming anything — it traced to exactly
+one request: `globals.css`'s own `@import url('https://fonts.googleapis.com/css2?family=Archivo...
+&family=Inter...')`, a runtime, render-blocking fetch of Google Fonts' CSS from every visitor's own
+browser. In this sandbox that request fails outright (the sandbox's outbound TLS proxy doesn't
+carry a trusted cert for that host), which is itself a sandbox artifact and not what a real user's
+browser would hit — but the underlying pattern is a real, shippable weakness independent of this
+sandbox: a render-blocking third-party request with no error surface a user would ever see if it's
+slow, blocked by a corporate network/ad-blocker/regional restriction, or fails for any reason —
+the UI would just silently fall back to the system font stack, unannounced, on a page's first
+impression of the product.
+
+**Root cause**: `layout.tsx` never used Next.js's own `next/font/google` (which downloads and
+self-hosts font files at build time, eliminating the runtime request entirely) — the CSS `@import`
+was the only thing ever loading `Inter`/`Archivo`.
+
+**Fix**: switched to `next/font/google` in `layout.tsx` (`Inter` with the same weights the old
+`@import` requested — 400/500/600/700/800 — and `Archivo` with 600/700/800/900, normal + italic),
+exposed as CSS custom properties (`--font-inter`, `--font-archivo`, via each font object's
+`variable` option) on `<html>`, removed the `@import` line from `globals.css`, and repointed
+every `font-family: 'Inter'/'Archivo'` reference — three in `globals.css`, two inline `fontFamily`
+style props in `Avatar.tsx`, one in `IdentityPicker.tsx` — to `var(--font-inter)`/
+`var(--font-archivo)` (CSS custom properties inherit through the DOM, so the inline styles
+resolve correctly without needing the font objects threaded as props).
+
+**Verification**: re-ran the same `requestfailed`-listener script after the fix — zero failed
+requests, zero console errors, no external network call at all. Confirmed the real font (not a
+silent system-font fallback) actually renders on real visible text by reading
+`getComputedStyle(...).fontFamily` off actual on-screen elements (`h1`, the headline's own accent
+`span`, both CTA links) — all resolved to the real downloaded `Inter`/`Archivo` font faces, not
+`ui-sans-serif`/generic serif. (`getComputedStyle` queried directly on `<html>`/`<body>` — not on
+any real visible text node — read back a spurious `"Times New Roman"`; investigated before trusting
+it, and it turned out to be an artifact of querying the custom-property-defining elements
+themselves rather than a descendant, not a real rendering defect — every actual text-bearing
+element downstream resolved correctly, and a real screenshot at 430×932 confirms the entry page
+renders pixel-identical to before, just with zero external dependency now.)
+
+Shipped: typecheck + lint clean on both `apps/web` and `apps/api`, full backend suite green
+(79 files / 476 tests — unaffected by this web-only change, re-run per this repo's standing
+pipeline discipline regardless).

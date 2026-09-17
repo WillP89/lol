@@ -93,7 +93,7 @@ export function PersonAvatar({
       ) : (
         <span
           style={{
-            fontFamily: "'Archivo', ui-sans-serif, system-ui, sans-serif",
+            fontFamily: 'var(--font-archivo), ui-sans-serif, system-ui, sans-serif',
             fontWeight: 800,
             fontSize: size * 0.38,
             color: 'rgba(255,255,255,0.92)',
@@ -195,7 +195,7 @@ export function CrewMark({
           <span
             style={{
               position: 'relative',
-              fontFamily: "'Archivo', ui-sans-serif, system-ui, sans-serif",
+              fontFamily: 'var(--font-archivo), ui-sans-serif, system-ui, sans-serif',
               fontWeight: 800,
               fontSize: size * 0.42,
               color: 'rgba(255,255,255,0.94)',

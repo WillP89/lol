@@ -323,7 +323,7 @@ export function IdentityPicker({
               return (
                 <button key="classic" type="button" onClick={() => (active ? commitActive() : scrollTo(i))} style={wrapperStyle}>
                   <div style={{ ...badgeStyle, background: identityGradient(email || name || 'plot') }}>
-                    <span style={{ fontFamily: "'Archivo', sans-serif", fontWeight: 800, fontSize: 56, color: 'rgba(255,255,255,0.95)' }}>{initials}</span>
+                    <span style={{ fontFamily: 'var(--font-archivo), sans-serif', fontWeight: 800, fontSize: 56, color: 'rgba(255,255,255,0.95)' }}>{initials}</span>
                   </div>
                   <span style={captionStyle}>Classic</span>
                 </button>

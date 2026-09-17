@@ -1,5 +1,30 @@
 import type { Metadata, Viewport } from 'next';
+import { Inter, Archivo } from 'next/font/google';
 import './globals.css';
+
+// Self-hosted via next/font (downloaded + served from our own origin at build time) instead of
+// the runtime `@import url('https://fonts.googleapis.com/...')` this used to be: that pattern
+// makes every visitor's browser do a blocking round-trip to Google before the real fonts show up
+// (FOUC while the fallback renders, plus a layout shift once the real font swaps in), and it
+// silently degrades to the system-ui fallback for good with no error a user would ever see if
+// that request is slow, blocked, or fails — which is exactly what happened when this was checked
+// against a real browser in this sandbox (net::ERR_CERT_AUTHORITY_INVALID on the proxied request).
+// next/font eliminates the external request and the failure mode entirely; the weight/style list
+// below matches what the old @import requested.
+const inter = Inter({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  variable: '--font-inter',
+  display: 'swap',
+});
+const archivo = Archivo({
+  subsets: ['latin'],
+  weight: ['600', '700', '800', '900'],
+  style: ['normal', 'italic'],
+  variable: '--font-archivo',
+  display: 'swap',
+});
+
 
 export const metadata: Metadata = {
   title: 'Plot — the decision layer for real-world social life',
@@ -75,7 +100,7 @@ const THEME_INIT_SCRIPT = `
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${inter.variable} ${archivo.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
