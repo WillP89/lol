@@ -861,3 +861,64 @@ whichever of the two concurrent attempts happened to win.
 
 Shipped: typecheck + lint clean, full backend suite green (80 files / 480 tests, the 4 new ones
 included).
+
+## Cycle 12 — full provider-integration audit (no bugs found) + the activation harness
+
+Direct response to the mission's "make provider activation boring" ask: every one of the 7
+registered live-provider adapter files (`apps/api/src/providers/live/*.ts` — ticketmaster,
+skiddle, predicthq, openStreetMap, fhrs, googlePlaces, foursquare; eventbrite deliberately excluded
+per its own file header, see registry.ts) was read in full against the mission's own checklist —
+configuration detection, auth handling, query construction, location/radius/date handling,
+category/subcategory mapping, pagination, rate-limit/timeout/retry handling, bad/empty response
+handling, normalisation, image/price/venue handling, classification, provider attribution,
+observability, failure isolation.
+
+**Result: no P0/P1 bugs found in any of the 7 files.** Every adapter independently implements the
+same consistent, defensive pattern: `isLive`/`healthCheck` correctly gated on real credential
+presence (or `true` unconditionally for the two credential-free sources); bounded pagination with
+a documented per-adapter page cap and a real total-time budget (Skiddle's `OVERALL_BUDGET_MS`,
+Ticketmaster/PredictHQ/FHRS's own `MAX_PAGES` × `PAGE_RETRY`), matched to `inventorySync.ts`'s own
+synchronous read-path constraint; per-request timeouts via `withRetry`'s `AbortController`-backed
+budget; one malformed/uncoordinated listing dropped-and-logged rather than failing the whole sync;
+one failing category/page never taking the rest of that same adapter's request down with it
+(Skiddle's per-category try/catch); honest `null` instead of a fabricated price, booking status,
+or click-through URL everywhere real data doesn't exist (PredictHQ/FHRS/Google/Foursquare's price
+fields; a real Google-Maps-search fallback URL rather than an invented booking link); real
+provider attribution recorded in `tags.provider` on every canonical listing; legal/licensing
+constraints (Skiddle's credit-and-unmodified-link requirement, OSM's ODbL attribution) captured
+and enforced by construction, not convention. Each file's own header comment already honestly
+flags what it could NOT verify from this sandbox (never exercised against the real live API, egress
+blocked) and names the exact place to verify once deployed — this audit did not find anything that
+contradicts those self-assessments. **The conclusion this pass set out to reach: once a credential
+exists and network access is confirmed, the remaining risk genuinely is provider/data behaviour —
+not undiscovered Plot plumbing bugs.** (Lower-priority, non-blocking observations already
+on record from Cycle 4 — OSM/FHRS silent truncation-cap logging, Google/Foursquare single-page-
+only — remain accurate and unchanged; nothing new of that shape was found this pass either.)
+
+**The activation harness**, extending `GET /admin/inventory-probe` (`apps/api/src/routes/admin.ts`)
+rather than adding a new scattered script, per the mission's explicit preference: every per-provider
+result now carries a classified `status` — `not_configured` / `auth_failed` / `rate_limited` /
+`unreachable` / `provider_error` / `provider_empty` / `no_matches_for_query` / `success` — computed
+from the adapter's own real fetch outcome (an HTTP status code parsed out of the consistent
+`"<Provider> returned <status>: <body>"` error shape every adapter throws) instead of a bare error
+string someone has to interpret by hand. No more ambiguous "0 results."
+
+**A real classification bug caught immediately by testing the harness against itself, not assumed
+correct**: the first version mapped a bare HTTP 403 straight to `auth_failed` — but running it live
+against this sandbox's own egress-blocked OpenStreetMap/FHRS showed both reporting `auth_failed`,
+which is actively wrong: neither adapter ever sends a credential (`isLive: true` unconditionally,
+no key required), so there is no auth to have failed, and the 403 never reached the real provider
+at all — it came from the network policy sitting in front of it. Fixed by checking for that
+specific egress-block signature (`"Host not in allowlist"`, the sandbox proxy's own wording) before
+the generic status-code mapping, correctly reclassifying both as `unreachable`. Re-verified live
+after the fix: `openstreetmap`/`fhrs` now correctly report `unreachable`, not `auth_failed`. This
+distinction matters for real production use too — an operator seeing `auth_failed` would go
+double-check an API key that was never the problem; `unreachable` correctly points at network/
+egress configuration instead, whatever policy a real deployment sits behind.
+
+`test/inventoryProbe.test.ts` extended (still exercised only against the mock registry, per this
+suite's own documented sandbox-network constraint) to assert the new `status`/`fetchedTotal` fields
+read identically for a non-live adapter as a real un-configured live one would — one honest
+vocabulary for every caller, test mode included, not a special case.
+
+Shipped: typecheck + lint clean, full backend suite green (80 files / 480 tests).
