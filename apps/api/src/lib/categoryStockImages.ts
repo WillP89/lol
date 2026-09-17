@@ -171,9 +171,29 @@ async function fetchCandidatePool(query: string): Promise<{ images: EnrichedImag
   }
 }
 
-async function getCandidatePool(category: string): Promise<EnrichedImage[]> {
-  const query = CATEGORY_SEARCH_QUERY[category] ?? DEFAULT_QUERY;
-  const cached = pool.get(category);
+/**
+ * P0 FOUNDATION FAILURE (real, live-reported): "restaurant imagery is inaccurate" — a Japanese
+ * restaurant getting the exact same generic "restaurant interior dining table" photo pool as any
+ * other restaurant, cuisine completely ignored, is a real instance of the SAME specificity failure
+ * the P0-1 taste-matching fix closed (docs/PILOT_READINESS_AUDIT.md Cycle 17): a caller had a real,
+ * specific signal (the listing's own subcategory-confirmed genre/cuisine) and this file simply
+ * never asked for it, always falling back to the bare category's generic query. `genreHint` — the
+ * same kind of confirmed, subcategory-sourced evidence P0-1's own `narrows`/`contradictsCrew
+ * InterestPreference` uses, computed by the caller (services/inventorySync.ts) via
+ * `experienceInterestTagsFromSubcategories` + `interestLabel`, never invented here — is appended to
+ * the base category query when present, so a confirmed Japanese restaurant searches Commons for
+ * "restaurant interior dining table japanese" instead of the bare category term. A listing with no
+ * confirmed genre/cuisine tag (most of them — this is real subcategory data, not guaranteed to
+ * exist) keeps the original, unqualified category query exactly as before — never guessed, never
+ * degraded. The candidate pool itself is cached per category+hint combination (not per bare
+ * category) so a hinted and an unhinted search for the same category never share a pool built for
+ * a different query.
+ */
+async function getCandidatePool(category: string, genreHint?: string | null): Promise<EnrichedImage[]> {
+  const baseQuery = CATEGORY_SEARCH_QUERY[category] ?? DEFAULT_QUERY;
+  const query = genreHint ? `${baseQuery} ${genreHint}` : baseQuery;
+  const poolKey = `${category}::${genreHint ?? ''}`;
+  const cached = pool.get(poolKey);
   if (cached) {
     const ttl = cached.images.length > 0 ? POOL_TTL_MS : EMPTY_POOL_TTL_MS;
     if (Date.now() - cached.fetchedAt < ttl) return cached.images;
@@ -188,8 +208,16 @@ async function getCandidatePool(category: string): Promise<EnrichedImage[]> {
     logger.warn({ err, category, query }, 'Wikimedia Commons category-stock image search failed — continuing without one');
     return { images: [] as EnrichedImage[], rawCount: 0 };
   });
+  // A hinted query can genuinely come back empty (Commons just doesn't have 20+ freely-licensed
+  // "restaurant interior dining table klingon-cuisine" photos) — falls back to the honest, real
+  // photos the bare category query already reliably has, rather than leaving this specific listing
+  // with no real photo at all over a hint that happened to be too narrow for Commons' own coverage.
+  if (images.length === 0 && genreHint) {
+    logger.info({ category, genreHint, query }, 'Hinted Commons search came back empty — falling back to the bare category query');
+    return getCandidatePool(category, null);
+  }
   logger.info({ category, query, rawCount, keptCount: images.length }, 'Wikimedia Commons category-stock search complete');
-  pool.set(category, { images, fetchedAt: Date.now() });
+  pool.set(poolKey, { images, fetchedAt: Date.now() });
   return images;
 }
 
@@ -198,10 +226,12 @@ async function getCandidatePool(category: string): Promise<EnrichedImage[]> {
  * last resort tried before a listing is left with no imageUrl at all (inventorySync.ts). `seed`
  * should be stable per listing (its name, or canonical key) so the SAME listing always lands on
  * the same photo across resyncs, while DIFFERENT listings in the same category spread across the
- * whole candidate pool instead of all converging on the pool's first/best result.
+ * whole candidate pool instead of all converging on the pool's first/best result. `genreHint` —
+ * see `getCandidatePool`'s own comment — narrows the search when the caller has real, confirmed
+ * evidence of a more specific genre/cuisine than the bare category.
  */
-export async function getCategoryStockImage(category: string | null | undefined, seed: string): Promise<EnrichedImage | null> {
-  const images = await getCandidatePool(category ?? 'CUSTOM');
+export async function getCategoryStockImage(category: string | null | undefined, seed: string, genreHint?: string | null): Promise<EnrichedImage | null> {
+  const images = await getCandidatePool(category ?? 'CUSTOM', genreHint);
   if (images.length === 0) return null;
   const idx = hashString(`${category ?? 'CUSTOM'}:${seed}`) % images.length;
   return images[idx];

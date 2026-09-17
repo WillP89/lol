@@ -176,4 +176,43 @@ describe('getCategoryStockImage', () => {
 
     nowSpy.mockRestore();
   });
+
+  /**
+   * P0 FOUNDATION FAILURE (real, live-reported): "restaurant imagery is inaccurate" — a Japanese
+   * restaurant got the exact same generic "restaurant interior dining table" photo pool as any
+   * other restaurant, cuisine completely ignored. `genreHint` fixes this by appending a real,
+   * confirmed genre/cuisine term (computed upstream in inventorySync.ts) to the base category
+   * query, with its own separate cache entry and an honest fallback to the bare category when the
+   * hinted search comes up empty.
+   */
+  describe('genreHint (P0-2)', () => {
+    test('a genre hint is appended to the base category search query', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ query: { pages: commonsPage(20, 'File:Japanese restaurant.jpg', 1920, 1280) } }),
+      });
+      await getCategoryStockImage('RESTAURANT', 'Sushi Sakura', 'japanese');
+      expect(fetchMock.mock.calls[0][0]).toContain(encodeURIComponent('restaurant interior dining table japanese').replace(/%20/g, '+'));
+    });
+
+    test('the same category with different hints is cached separately — a hinted and an unhinted search never share a pool', async () => {
+      fetchMock
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ query: { pages: commonsPage(21, 'File:Generic restaurant.jpg', 1920, 1280) } }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ query: { pages: commonsPage(22, 'File:Japanese restaurant.jpg', 1920, 1280) } }) });
+      const unhinted = await getCategoryStockImage('RESTAURANT', 'Some Diner', null);
+      const hinted = await getCategoryStockImage('RESTAURANT', 'Sushi Sakura', 'japanese');
+      expect(fetchMock).toHaveBeenCalledTimes(2); // a real second search, not a shared cache hit
+      expect(unhinted?.sourcePage).toBe('File:Generic restaurant.jpg');
+      expect(hinted?.sourcePage).toBe('File:Japanese restaurant.jpg');
+    });
+
+    test('a hinted search that comes back empty honestly falls back to the bare category query, never leaving the listing with no real photo', async () => {
+      fetchMock
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ query: { pages: {} } }) }) // the hinted search: nothing found
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ query: { pages: commonsPage(23, 'File:Generic restaurant fallback.jpg', 1920, 1280) } }) }); // the bare-category fallback
+      const result = await getCategoryStockImage('RESTAURANT', 'Some Rare Cuisine Place', 'a-cuisine-commons-has-no-photos-of');
+      expect(result?.sourcePage).toBe('File:Generic restaurant fallback.jpg');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+  });
 });

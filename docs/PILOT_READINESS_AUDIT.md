@@ -1228,3 +1228,78 @@ there.
 
 **Not yet done**: P0-2 (image pipeline truthfulness) and P0-3 (mass-market chain exclusion) are the
 two remaining P0 foundation failures the mission named — next.
+
+## Cycle 18 — P0-2: image pipeline truthfulness (wrong/misleading imagery)
+
+Two real, live-reported foundation failures: an "RM" headline show — a real drill/hip-hop event —
+displayed rock-band imagery; and "restaurant imagery is inaccurate" (generic, cuisine-blind stock
+photos). Traced the full chain (provider image -> Wikipedia/TheSportsDB entity lookup -> Commons/
+Pexels category-stock search -> UI) rather than swapping the two reported images by hand.
+
+**Root cause 1 — no entity-resolution confidence check at all** (`lib/imageEnrichment.ts`):
+`enrichImageFromWikipedia` passed a raw name straight to Wikipedia's page-summary endpoint and
+trusted ANY `type: 'standard'` result outright — `type` only proves Wikipedia found SOME real,
+unambiguous page for that exact string, never that it's the RIGHT one. A short or ambiguous name
+("RM" is a real collision risk — a K-pop artist, an American rock band's initials, or anything else
+a title/redirect could resolve to) that happened to land on a real page was accepted with zero cross-
+check against what KIND of subject Plot's own category data expected. Fixed with
+`CATEGORY_PLAUSIBILITY_KEYWORDS` + `plausibleForCategory` — a cheap check using `description`/
+`extract`, fields the SAME API response already includes (no extra request), against a curated list
+of domain-plausible terms per category (LIVE_MUSIC/CLUBBING/FESTIVAL: musician/rapper/band/dj/…;
+COMEDY: comedian; THEATRE/CINEMA: actor/director/…; SPORT: footballer/athlete/team/…). A resolved
+page whose own description contradicts the expected domain (an "American rock band" for a LIVE_MUSIC
+lookup) is rejected; a page with NO description/extract at all is treated as unverifiable, not
+confirmed (WRONG IMAGE IS WORSE THAN NO IMAGE) — never trusted on `type: 'standard'` alone. A
+category with no keyword list defined (RESTAURANT, BAR, ART_CULTURE, FITNESS, DAY_ACTIVITY,
+COMMUNITY — venue names collide far less than short artist names) keeps the original behaviour,
+unchanged. Deliberately a wrong-DOMAIN check only (is this even a musician/team/comedian at all),
+never a wrong-GENRE check (Plot has no reliable way to tell rock from drill from a one-line
+description) — the same narrow, precise-not-over-broad discipline `isPlanWorthyForCrew`'s own
+history already teaches.
+
+**Root cause 2 — category-stock search was cuisine/genre-blind** (`lib/categoryStockImages.ts`,
+`lib/pexelsStockImages.ts`): `CATEGORY_SEARCH_QUERY` is a flat category->query map ("restaurant
+interior dining table") with no awareness of anything more specific — a Japanese restaurant, a
+techno night, and a jazz gig all drew from the exact same generic per-category photo pool, real but
+uninformative. The same specificity gap P0-1 closed for taste-matching (Cycle 17), just in the
+image pipeline. Fixed with a new `genreHint` parameter on both `getCategoryStockImage` and
+`getPexelsStockImage`: the caller (`services/inventorySync.ts#deriveStockImageHint`) computes it
+from the listing's own CONFIRMED subcategory data (`experienceInterestTagsFromSubcategories` — never
+the loose keyword scan) via P0-1's own `narrows: true` taxonomy field, so only a genuine genre/
+cuisine/discipline (never a broad/format pick like "restaurants" itself, which would just repeat the
+base query) ever narrows the search. "restaurant interior dining table" becomes "restaurant interior
+dining table japanese" for a confirmed Japanese restaurant. The candidate pool is cached per
+category+hint combination, never shared with the bare-category pool; a hinted search that comes back
+genuinely empty (Commons/Pexels just doesn't have 20+ free photos for an obscure hint) honestly falls
+back to the bare category query rather than leaving that one listing with no real photo at all over a
+hint too narrow for either source's own coverage.
+
+**Provenance**: already adequate — the existing `ImageSource` enum (TICKETMASTER/EVENTBRITE/
+OPENSTREETMAP/WIKIPEDIA/THESPORTSDB/SKIDDLE/GOOGLE_PLACES/CATEGORY_STOCK/PEXELS_STOCK) plus a null
+`imageUrl` falling through to the web app's own branded `v2Art.ts` editorial fallback already gives
+every image a real, queryable source — functionally equivalent to the mission's own EXACT_EVENT/
+EXACT_ARTIST/EXACT_VENUE/EXACT_PLACE/EDITORIAL_CATEGORY_FALLBACK/NO_IMAGE list. No schema change
+needed this cycle.
+
+**Regression coverage**: 10 new tests, both against mocked `fetch` (the live Wikipedia/Commons/
+Pexels APIs are unreachable from this sandbox — same documented restriction as every other external
+API touched this session), following the same pattern the existing `imageEnrichment.test.ts`/
+`categoryStockImages.test.ts` files already establish (a real, documented response shape, not a live
+call). `test/unit/imageEnrichment.test.ts` (+7): the RM-rock-band rejection and RM-rapper acceptance
+cases verbatim, an unverifiable (no description) rejection, an unchanged-behaviour case for a
+category with no domain check, a COMEDY acceptance case, a SPORT rejection case, and a same-name-
+different-category cache-isolation case (proving the identical Wikipedia page is accepted for
+LIVE_MUSIC and rejected for SPORT — the cache key includes category precisely so this can never
+cross-contaminate). `test/unit/categoryStockImages.test.ts` (+3): a hint is appended to the query, a
+hinted and unhinted search for the same category never share a cache entry, and an empty hinted
+search falls back to the bare category query.
+
+Full pipeline validated: `apps/api` typecheck + lint clean, full backend suite 84 files / 508 tests
+(the 10 new ones included), zero regressions against the prior 498-test baseline (one transient
+deadlock in `resetDatabase`'s own TRUNCATE under parallel test load — confirmed transient by an
+immediate clean re-run, the same known flake pattern documented in earlier cycles, not a real
+regression).
+
+**Not yet done**: P0-3 (mass-market chain exclusion policy) is the last remaining P0 foundation
+failure — next, followed by the P0 acceptance test (task #138) before resuming the paused pilot-
+scorecard/analytics/ops mission.
