@@ -141,6 +141,22 @@ if (!parsed.success) {
 
 export const config = parsed.data;
 
+// Security/production-hygiene gap this closes: ADMIN_API_KEY's own default above is a literal,
+// public string (readable by anyone with this repo) — same "silently ships a known secret"
+// class of bug PUBLIC_API_URL's own production guard below was written for. Every /admin/* route
+// (including hard-delete of users and, as of the pilot scorecard, real aggregate user/Crew
+// analytics) is gated on nothing but this key — see routes/admin.ts's own doc comment. Same
+// fail-loud-at-boot pattern as resolvePublicApiUrl(), not a runtime check, so a misconfigured
+// deploy never even accepts its first request instead of silently running wide open.
+if (config.NODE_ENV === 'production' && config.ADMIN_API_KEY === 'dev_admin_key_change_me') {
+  throw new Error(
+    'ADMIN_API_KEY is unset in production (still the public default from this codebase). Every ' +
+      '/admin/* route — including user hard-delete and pilot analytics — would be reachable by ' +
+      'anyone who has read this source. Set a real, random ADMIN_API_KEY before starting in ' +
+      'production. See docs/DECISIONS.md#admin-auth.',
+  );
+}
+
 /**
  * The API's real, browser-reachable origin — resolved once at startup, not left to a single
  * env var nobody remembers to set. Explicit `API_PUBLIC_URL` always wins; otherwise this reads
