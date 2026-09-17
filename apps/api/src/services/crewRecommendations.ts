@@ -625,6 +625,11 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
       const rejectionReasons: string[] = [];
       if (excluded.has(o.experience.id)) rejectionReasons.push('ALREADY_RECOMMENDED_OR_SHARED');
       if (o.withinRadius !== true) rejectionReasons.push(o.withinRadius === false ? 'OUTSIDE_CREW_RADIUS' : 'DISTANCE_UNKNOWN');
+      // See match.ts#contradictsCrewInterestPreference's own comment — the P0 fix for "Live gigs
+      // + Rock recommended K-pop". Checked before the generic NO_TASTE_SIGNAL below so the debug
+      // trail names the SPECIFIC reason (confirmed evidence of a different, non-matching genre/
+      // cuisine/discipline within the same territory the Crew picked), not just "no signal at all".
+      if (o.reasons.some((r) => r.code === 'genre_contradiction')) rejectionReasons.push('GENRE_MISMATCH');
       if (!hasTasteSignal(o)) rejectionReasons.push('NO_TASTE_SIGNAL');
       if (o.matchScore < MIN_RECOMMENDATION_SCORE) rejectionReasons.push('BELOW_CONFIDENCE_THRESHOLD');
       return {

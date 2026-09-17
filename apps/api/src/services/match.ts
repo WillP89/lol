@@ -268,6 +268,80 @@ export async function scoreExperiencesForCrew(
     return false;
   }
 
+  // THE P0 FIX for "a Crew that picked LIVE GIGS + ROCK got recommended a K-pop show" — a real,
+  // live-reported architectural failure, not a K-pop-specific one. Root cause: every one of a
+  // Crew's own interestPreferences was treated as an independent, additive OR condition
+  // throughout this whole file — `passesPreferenceGate` above admits a candidate the moment ANY
+  // one pick matches (including a broad, context-setting pick like "Live gigs", which a K-pop
+  // show genuinely, honestly satisfies), and the scoring loop below only ever ADDS bonus for a
+  // literal match, never asks whether the candidate's own confirmed genre data actually
+  // CONTRADICTS a different, more specific pick the same Crew also made. "Live gigs" + "Rock"
+  // was never composed into "live ROCK gigs" anywhere — it was always "live gigs OR rock",
+  // independently satisfiable by two completely unrelated pieces of evidence.
+  //
+  // This is the fix: a candidate CONTRADICTS a Crew's own taste the moment it carries CONFIRMED
+  // evidence (subcategory-sourced — `experienceInterestTagsFromSubcategories`, never the loose
+  // name/description keyword scan `experienceInterestTags` also does, which is exactly the weak
+  // evidence that let "Live gigs" match a K-pop show's marketing copy in the first place) of a
+  // DIFFERENT `narrows: true` interest in the SAME taxonomy territory as one the Crew explicitly
+  // picked — and neither literally matches it nor is a curated `RELATED_INTERESTS` sibling. Only
+  // interests marked `narrows: true` (a genre, a cuisine, a sport discipline — see that field's
+  // own doc comment) can ever trigger this: a Crew that picked ONLY "Live gigs" (broad/context,
+  // `narrows: false`) has made no genre claim at all, so nothing can contradict it — matches the
+  // brief's own worked example verbatim ("If the Crew preference had ONLY been LIVE GIGS then a
+  // local Stafford K-pop show could actually be a reasonable recommendation"). A candidate with
+  // NO confirmed narrowing evidence at all (a genuinely untagged "Live Music Night") is never a
+  // contradiction either — Plot doesn't know enough to call it wrong, and must still be able to
+  // explore broadly (brief: "do not accidentally make the system so strict that a broad-interest
+  // user receives nothing"). This only catches real, positive evidence of the WRONG specific
+  // thing — never an absence of evidence.
+  //
+  // Deliberately NOT a hard exclusion from the candidate pool (unlike `passesPreferenceGate`
+  // above) — a binary gate would make a contradicting candidate invisible to the recommendation-
+  // debugger's own "what did Plot consider and why did it lose" trail (routes/admin.ts's
+  // `explain-recommendation`), which the brief explicitly wants ("WHAT PLOT CONSIDERED, WHAT IT
+  // REJECTED, WHY"). Instead this is consulted by the scoring loop below to cap a contradicting
+  // candidate's score far under MIN_RECOMMENDATION_SCORE and strip any reason that would make it
+  // read as a genuine taste match (see that loop's own comment) — visible in the debug trail with
+  // an honest, specific rejection reason, never silently vanished, but never winning either.
+  function contradictsCrewInterestPreference(experience: { category: string; subcategories: unknown }): { contradicts: boolean; pickedInterestId: string | null; conflictingTag: string | null } {
+    if (crewInterestPreferences.size === 0) return { contradicts: false, pickedInterestId: null, conflictingTag: null };
+    const strongTags = experienceInterestTagsFromSubcategories(experience);
+    if (strongTags.length === 0) return { contradicts: false, pickedInterestId: null, conflictingTag: null };
+    for (const pickedId of crewInterestPreferences) {
+      const entry = TASTE_INTEREST_INDEX.get(pickedId);
+      if (!entry || !entry.interest.narrows) continue; // only a genuine narrowing pick can ever be contradicted
+      const territory = entry.territory;
+      if (!territory.categories.includes(experience.category as (typeof territory.categories)[number])) continue;
+      const related = new Set(RELATED_INTERESTS[pickedId] ?? []);
+      for (const tag of strongTags) {
+        // A tag that matches THIS pick, a curated close relation of it, or ANY OTHER narrowing
+        // interest the Crew ALSO explicitly picked is never a contradiction — real bug this
+        // exact check fixes: a Crew that picked both `electronic` and `uk_garage` (two genuinely
+        // different, both genuinely wanted, narrowing picks in the same territory) had a
+        // confirmed UK-garage-tagged event flagged as "contradicting" the `electronic` pick,
+        // purely because it wasn't a literal match or curated relation of THAT ONE pick — even
+        // though it was a direct, literal match of the Crew's OTHER pick. A Crew is always
+        // allowed to want more than one specific thing in the same territory.
+        if (tag === pickedId || related.has(tag) || crewInterestPreferences.has(tag)) continue;
+        const tagEntry = TASTE_INTEREST_INDEX.get(tag);
+        if (tagEntry?.interest.narrows && tagEntry.territory.id === territory.id) {
+          return { contradicts: true, pickedInterestId: pickedId, conflictingTag: tag };
+        }
+      }
+    }
+    return { contradicts: false, pickedInterestId: null, conflictingTag: null };
+  }
+  // Comfortably under MIN_RECOMMENDATION_SCORE (55, crewRecommendations.ts) even after every
+  // other bonus (distance/availability/quality/ticketed) stacks on top of it — a contradicting
+  // candidate must never clear the normal delivery bar through sheer unrelated score volume.
+  const MAX_SCORE_FOR_CONTRADICTING_CANDIDATE = 20;
+  // Reason codes crewRecommendations.ts#hasTasteSignal treats as genuine taste evidence — stripped
+  // from a contradicting candidate's own reasons so it can never read as a taste-matched pick
+  // (free_text_match deliberately excluded: a literal, deliberate mention of an artist/event name
+  // is always real, first-person evidence and must never be overridden by a taxonomy inference).
+  const TASTE_SIGNAL_CODES_OVERRIDABLE_BY_CONTRADICTION = new Set(['category_affinity', 'crew_dna_match', 'crew_preference', 'interest_match', 'crew_interest_preference']);
+
   // SAME bug shape as passesPreferenceGate above, found in the follow-up gate audit that
   // shipped alongside the "Caffè Nero in London" plan-worthiness fix: isPlanWorthyForCrew used
   // to run only AFTER the nearest-50-by-distance cut below (see `filteredCandidates`, further
@@ -676,6 +750,25 @@ export async function scoreExperiencesForCrew(
     if (isTicketedEvent(experience)) {
       score += 14;
       reasons.push({ code: 'ticketed_event', label: 'Real tickets available' });
+    }
+
+    // See `contradictsCrewInterestPreference`'s own comment — the P0 fix for a Crew's specific
+    // pick (Rock) being silently overridable by its own broader pick (Live gigs) matching
+    // something else entirely (K-pop). Applied last, after every other bonus, so it can never be
+    // outrun by unrelated score volume (distance/availability/quality/ticketed all still apply
+    // above, on purpose — this caps the TOTAL, not just the taste-signal component).
+    const contradiction = contradictsCrewInterestPreference(experience);
+    if (contradiction.contradicts) {
+      score = Math.min(score, MAX_SCORE_FOR_CONTRADICTING_CANDIDATE);
+      const survivingReasons = reasons.filter((r) => !TASTE_SIGNAL_CODES_OVERRIDABLE_BY_CONTRADICTION.has(r.code));
+      reasons.length = 0;
+      reasons.push(
+        {
+          code: 'genre_contradiction',
+          label: `You said ${interestLabel(contradiction.pickedInterestId!)} — this is ${interestLabel(contradiction.conflictingTag!)}, not a match`,
+        },
+        ...survivingReasons,
+      );
     }
 
     const matchScore = Math.max(0, Math.min(100, Math.round(score)));

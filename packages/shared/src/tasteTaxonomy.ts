@@ -47,6 +47,33 @@ export interface TasteInterest {
    *  tag. Matching is case-insensitive substring/token matching (see tasteSignals.ts), not ML —
    *  deliberately simple enough to be explainable and extensible by hand. */
   synonyms: string[];
+  /**
+   * Real, live-reported P0 failure this exists to fix: a Crew that picked BOTH "Live gigs" (a
+   * broad activity/context pick) AND "Rock" (a specific genre pick within that same territory)
+   * still got recommended a K-pop show — because every interest in a territory was treated as an
+   * interchangeable, independent, additive tag: matching ANY one of a Crew's picks (including the
+   * broad "Live gigs" one) was enough to admit a candidate, regardless of what a Crew's OTHER,
+   * more specific pick said. `narrows: true` marks an interest as a genuine REFINEMENT of its
+   * territory — a genre (rock, uk_garage), a cuisine (japanese, italian), a league (championship_
+   * football) — evidence about WHAT WITHIN the territory, not just THAT the territory applies.
+   * `narrows: false` (the default — see `t()` below) marks a broad/context/format pick — "Live
+   * gigs", "Restaurants", "Watching big matches" — which describes the shape of the activity, not
+   * a specific flavour within it, and is genuinely satisfied by anything in its territory (a
+   * K-pop show IS honestly a "live gig" — that match is correct; the bug was letting it stand in
+   * for "Rock" too). See services/match.ts#contradictsCrewInterestPreference (apps/api) for
+   * exactly how this is used: a candidate carrying its own CONFIRMED (subcategory-sourced, never
+   * a loose keyword hit) evidence of a DIFFERENT narrowing interest in the same territory as one a
+   * Crew explicitly picked — and neither matching it nor a curated `RELATED_INTERESTS` sibling —
+   * is a genuine contradiction, not just an unrelated broad match. A candidate with no confirmed
+   * narrowing evidence at all is never a contradiction (Plot doesn't know enough to call it wrong)
+   * — this only catches real, positive evidence of the WRONG specific thing. Deliberately narrow
+   * in scope so far (music genres, food cuisines, sport leagues/disciplines — the exact examples
+   * the P0 report gave); comedy/culture/drinks/outdoors territories are left `narrows: false`
+   * throughout for now, same "grow it only with real, defensible cases" discipline
+   * `TERRITORIES_REQUIRING_EXPLICIT_RELATION`/`RELATED_INTERESTS` already established, not a
+   * blanket "mark everything narrowing" pass.
+   */
+  narrows?: boolean;
 }
 
 export interface TasteTerritory {
@@ -63,6 +90,12 @@ function t(id: string, label: string, ...synonyms: string[]): TasteInterest {
   return { id, label, synonyms: [label.toLowerCase(), ...synonyms.map((s) => s.toLowerCase())] };
 }
 
+/** Same as `t()`, but marks the interest `narrows: true` — see `TasteInterest.narrows`'s own doc
+ *  comment for exactly what that means and why it exists. */
+function tn(id: string, label: string, ...synonyms: string[]): TasteInterest {
+  return { ...t(id, label, ...synonyms), narrows: true };
+}
+
 export const TASTE_TAXONOMY: TasteTerritory[] = [
   {
     id: 'music',
@@ -75,34 +108,37 @@ export const TASTE_TAXONOMY: TasteTerritory[] = [
       t('club_nights', 'Club nights', 'clubbing'),
       t('dj_sets', 'DJ sets', 'dj'),
       t('tribute_throwback', 'Tribute & throwback nights', 'tribute act', 'tribute'),
-      t('indie', 'Indie', 'indie rock'),
-      t('rock', 'Rock'),
-      t('alternative', 'Alternative', 'alt rock'),
-      t('pop', 'Pop'),
-      t('hip_hop', 'Hip-hop & rap', 'hip-hop/rap', 'rap'),
+      // Genre picks — each one a genuine REFINEMENT of "live gigs"/"club nights", not just
+      // another independent broad tag (see `narrows`'s own doc comment, and the K-pop-to-a-Rock-
+      // crew P0 failure it exists to fix).
+      tn('indie', 'Indie', 'indie rock'),
+      tn('rock', 'Rock'),
+      tn('alternative', 'Alternative', 'alt rock'),
+      tn('pop', 'Pop'),
+      tn('hip_hop', 'Hip-hop & rap', 'hip-hop/rap', 'rap'),
       // Real gap this closes (live product directive, worked example verbatim): "RAP / UK RAP /
       // GRIME / DRILL / OLD SCHOOL... where metadata genuinely supports it" — grime and drill are
       // real, distinct UK genres, not synonyms of the broader "hip-hop & rap" bucket above; a
       // person who's specifically into one shouldn't be treated as generically "into rap".
-      t('grime', 'Grime'),
-      t('drill', 'Drill', 'uk drill'),
-      t('rnb', 'R&B', 'r and b', 'rnb'),
-      t('house', 'House'),
-      t('techno', 'Techno'),
-      t('drum_and_bass', 'Drum & bass', "d'n'b", 'dnb', 'jungle'),
-      t('uk_garage', 'UK garage', 'garage', '2-step'),
-      t('disco', 'Disco'),
-      t('soul_funk', 'Soul & funk', 'soul', 'funk'),
-      t('jazz', 'Jazz'),
-      t('country', 'Country'),
-      t('folk', 'Folk'),
-      t('metal', 'Metal'),
-      t('punk', 'Punk'),
-      t('classical', 'Classical'),
-      t('electronic', 'Electronic'),
-      t('afrobeats', 'Afrobeats'),
-      t('reggae', 'Reggae', 'dancehall'),
-      t('latin', 'Latin'),
+      tn('grime', 'Grime'),
+      tn('drill', 'Drill', 'uk drill'),
+      tn('rnb', 'R&B', 'r and b', 'rnb'),
+      tn('house', 'House'),
+      tn('techno', 'Techno'),
+      tn('drum_and_bass', 'Drum & bass', "d'n'b", 'dnb', 'jungle'),
+      tn('uk_garage', 'UK garage', 'garage', '2-step'),
+      tn('disco', 'Disco'),
+      tn('soul_funk', 'Soul & funk', 'soul', 'funk'),
+      tn('jazz', 'Jazz'),
+      tn('country', 'Country'),
+      tn('folk', 'Folk'),
+      tn('metal', 'Metal'),
+      tn('punk', 'Punk'),
+      tn('classical', 'Classical'),
+      tn('electronic', 'Electronic'),
+      tn('afrobeats', 'Afrobeats'),
+      tn('reggae', 'Reggae', 'dancehall'),
+      tn('latin', 'Latin'),
       t('nineties', '90s'),
       t('noughties', '00s', '2000s'),
     ],
@@ -112,7 +148,14 @@ export const TASTE_TAXONOMY: TasteTerritory[] = [
     label: 'Sport',
     categories: ['SPORT'],
     interests: [
-      t('football', 'Football', 'footy'),
+      // `football` (and every other discipline below) is the narrowing pick relative to the bare
+      // SPORT category — a genuinely different sport is real, positive contradicting evidence.
+      // The football-specific leagues directly below are deliberately left `narrows: false`: they
+      // sit WITHIN football, not alongside it as a different discipline, so a confirmed Premier
+      // League tag must never register as "contradicting" a Championship pick (or vice versa) —
+      // that finer distinction is handled by the existing `crew_interest_preference` scoring
+      // bonus (a literal league match already outranks a bare football one), never by exclusion.
+      tn('football', 'Football', 'footy'),
       t('premier_league', 'Premier League'),
       t('championship_football', 'Championship football', 'championship'),
       t('league_one_two', 'League One & Two', 'league one', 'league two'),
@@ -122,19 +165,19 @@ export const TASTE_TAXONOMY: TasteTerritory[] = [
       t('champions_league', 'Champions League & Europe', 'europa league', 'champions league'),
       t('local_football', 'Local football'),
       t('watching_big_matches', 'Watching big matches', 'sports bar', 'sports bars'),
-      t('rugby', 'Rugby', 'rugby union', 'rugby league'),
-      t('cricket', 'Cricket'),
-      t('boxing', 'Boxing'),
-      t('mma', 'MMA', 'ufc'),
-      t('tennis', 'Tennis'),
-      t('darts', 'Darts'),
-      t('motorsport', 'F1 & motorsport', 'formula 1', 'f1', 'motorsport'),
-      t('basketball', 'Basketball'),
-      t('ice_hockey', 'Ice hockey'),
-      t('athletics', 'Athletics'),
-      t('golf', 'Golf'),
-      t('cycling', 'Cycling'),
-      t('horse_racing', 'Horse racing', 'racing'),
+      tn('rugby', 'Rugby', 'rugby union', 'rugby league'),
+      tn('cricket', 'Cricket'),
+      tn('boxing', 'Boxing'),
+      tn('mma', 'MMA', 'ufc'),
+      tn('tennis', 'Tennis'),
+      tn('darts', 'Darts'),
+      tn('motorsport', 'F1 & motorsport', 'formula 1', 'f1', 'motorsport'),
+      tn('basketball', 'Basketball'),
+      tn('ice_hockey', 'Ice hockey'),
+      tn('athletics', 'Athletics'),
+      tn('golf', 'Golf'),
+      tn('cycling', 'Cycling'),
+      tn('horse_racing', 'Horse racing', 'racing'),
     ],
   },
   {
@@ -166,16 +209,19 @@ export const TASTE_TAXONOMY: TasteTerritory[] = [
       t('fine_dining', 'Fine dining', 'tasting menu', 'michelin'),
       t('casual_dining', 'Casual dining', 'casual'),
       t('markets', 'Food markets', 'market'),
-      t('italian', 'Italian'),
-      t('japanese', 'Japanese', 'sushi'),
-      t('thai', 'Thai'),
-      t('indian', 'Indian'),
-      t('mexican', 'Mexican'),
-      t('korean', 'Korean'),
-      t('middle_eastern', 'Middle Eastern'),
-      t('steak', 'Steak'),
-      t('seafood', 'Seafood'),
-      t('vegan', 'Vegan', 'plant-based'),
+      // Cuisine/dietary picks — the same narrowing-within-a-broad-pick relationship as music
+      // genres within "live gigs" (see `narrows`'s own doc comment): "Food" + "Japanese" should
+      // mean Japanese food specifically, not any restaurant that happens to be nearby and cheap.
+      tn('italian', 'Italian'),
+      tn('japanese', 'Japanese', 'sushi'),
+      tn('thai', 'Thai'),
+      tn('indian', 'Indian'),
+      tn('mexican', 'Mexican'),
+      tn('korean', 'Korean'),
+      tn('middle_eastern', 'Middle Eastern'),
+      tn('steak', 'Steak'),
+      tn('seafood', 'Seafood'),
+      tn('vegan', 'Vegan', 'plant-based'),
     ],
   },
   {
@@ -371,4 +417,15 @@ export const RELATED_INTERESTS: Readonly<Record<string, readonly string[]>> = {
   // honest without narrowing which real inventory a Crew can be shown at all).
   boxing: ['mma'],
   mma: ['boxing'],
+  // Real, defensible genre-family relationships within `music` (the P0 "K-pop to a Rock crew"
+  // fix's own regression coverage: a Crew that picked Rock should see indie/alternative/punk/
+  // metal as sensible, closely-related exploration — never treated as a contradiction the same
+  // way an unrelated genre like K-pop/pop correctly is — see match.ts's own
+  // `contradictsCrewInterestPreference` for exactly how this keeps that distinction honest).
+  // Deliberately just this one well-established cluster, not an attempt at a full genre graph.
+  rock: ['indie', 'alternative', 'punk', 'metal'],
+  indie: ['rock', 'alternative'],
+  alternative: ['rock', 'indie'],
+  punk: ['rock', 'metal'],
+  metal: ['rock', 'punk'],
 };
