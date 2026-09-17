@@ -771,3 +771,42 @@ gathered that the core continuity loop works.
 
 No code changed this cycle — pure live-evidence gathering against the already-shipped pipeline;
 no shipping step needed.
+
+## Cycle 10 — iPhone chat composer, full P0 acceptance matrix re-run, no new bug found
+
+Explicit P0 re-verification requested against the real 25-message "iPhone Chat Test Crew"
+(real account, real session), covering the full matrix: 4 viewports (375×667, 390×844, 393×852,
+430×932) × 9 interaction states (initial load, single-line, multi-line/auto-grow, focused, after
+send, blurred, scrolled away from bottom, scrolled back, simulated reduced-height keyboard-open
+viewport). `getBoundingClientRect()`-measured composer position and an explicit
+`navOverlapsComposer` check at every single one of the 36 combinations: **gap-to-viewport-bottom
+was 0 (sub-pixel) and nav overlap was false in every case, no exceptions.** The textarea correctly
+caps its visual growth at 140px and becomes internally scrollable for longer text (`scrollHeight`
+grows past 140 while rendered `height` stays capped) rather than growing unboundedly.
+
+**A real methodology trap caught mid-test, same discipline as Cycle 6's fullPage-scroll lesson**:
+the first pass's "scroll away from bottom / scroll back" step targeted `.v2-shell-desktop` (the
+scroll container Home/Explore use) with a `[class*="scroll"]` fallback that matched
+`.v2-crew-scroll` — but walking that element's full ancestor chain showed every one of them,
+including `.v2-crew-scroll` itself, has `overflow-y: visible`; the crew chat page's real scroll
+owner is `<html>` itself (document-level scroll, `scrollHeight: 3840` vs `clientHeight: 667`) — a
+genuinely different architecture from Home/Explore's inner-container pattern, not a bug. Corrected
+the test to use `window.scrollTo`/`document.documentElement.scrollTop` directly and re-ran:
+document scroll correctly moves from the real bottom (`docScrollTop: 3173`, showing message #25,
+the true last message) to top (`0`) and back, and — the part that actually matters for composer
+architecture — **the composer's `getBoundingClientRect().bottom` stayed exactly equal to
+`window.innerHeight` in all three document-scroll states**, confirming it is genuinely fixed to
+the visual viewport rather than scrolling with the document, with the header behaving the same way
+(both pinned, only the message list scrolls between them — the same pattern WhatsApp/iMessage use).
+
+**Verdict: no bug found this cycle.** Cycle 5's placeholder-overflow fix remains the one real
+composer bug found and fixed this session; this cycle's exhaustive re-run found the architecture
+genuinely solid across every state in the requested matrix. The one honest, unchanged limitation:
+headless Chromium cannot open a real OS on-screen keyboard, so the `visualViewport`-driven
+`composerBottomGap` WebView-specific fallback path remains unverified from this sandbox, same
+caveat as Cycle 5 — the viewport-height-reduction simulation used here (58% of full height,
+approximating iOS's keyboard proportion) confirmed the base fixed-position layout reflows
+correctly under a smaller viewport, which is the structural property that matters most, but is not
+the same signal a real device would give for that specific correction.
+
+No code changed; no shipping step needed.
