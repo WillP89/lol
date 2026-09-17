@@ -273,6 +273,29 @@ export function experienceInterestTags(experience: {
   return [...ids];
 }
 
+/**
+ * Real gap this closes, found running a controlled specificity test (an untagged, generic "Live
+ * Music Night" scored IDENTICALLY to a genuinely genre-tagged rock gig — both satisfied a Crew's
+ * interest pick via `experienceInterestTags` above, which merges real provider genre data
+ * (Ticketmaster/Skiddle/OSM's own `subcategories`) and a loose name/description keyword scan
+ * into one undifferentiated set. A real subcategory tag is strong, specific evidence — a
+ * provider explicitly classified this exact thing as "alternative rock". A name/description
+ * keyword hit is much weaker: a generic event merely happening to contain the phrase "live
+ * music" is not the same claim. `services/match.ts`'s scoring (not eligibility — the broader,
+ * more inclusive `experienceInterestTags` stays the gate everywhere else, deliberately, so a
+ * genuinely under-tagged real listing still gets a fair chance to be SEEN) uses this narrower,
+ * subcategory-only set to tell "confirmed by real provider data" apart from "merely mentioned",
+ * and scores the two differently — never claiming more specificity confidence than the
+ * underlying evidence actually supports. */
+export function experienceInterestTagsFromSubcategories(experience: { category: string; subcategories: unknown }): string[] {
+  const ids = new Set<string>();
+  const subcats = Array.isArray(experience.subcategories) ? (experience.subcategories as string[]) : [];
+  for (const raw of subcats) {
+    for (const interest of matchInterestsForCategory(raw, experience.category)) ids.add(interest.id);
+  }
+  return [...ids];
+}
+
 /** Does this Experience's own text literally contain a person's raw free-text signal (e.g. an
  *  artist name Plot's taxonomy has no genre entry for)? The one case a plain substring check is
  *  MORE honest than a taxonomy match — "Fred again.." either is or isn't in this event's name. */

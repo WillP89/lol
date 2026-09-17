@@ -8,7 +8,7 @@ import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { haversineMiles } from '../lib/geo';
 import { track } from './analytics';
 import { sendExperienceToCrew } from './plan';
-import { experienceInterestTags, experienceMatchesFreeText, categoryToTasteKey, type FreeTextSignal } from './tasteSignals';
+import { experienceInterestTags, experienceInterestTagsFromSubcategories, experienceMatchesFreeText, categoryToTasteKey, type FreeTextSignal } from './tasteSignals';
 import { assertCrewPreferencesSet } from './crewPreferencesGate';
 import { interestLabel, TASTE_INTEREST_INDEX, UNAMBIGUOUS_CATEGORIES, TERRITORIES_REQUIRING_EXPLICIT_RELATION, RELATED_INTERESTS } from '@plot/shared';
 import { isPlanWorthyForCrew, isTicketedEvent } from './opportunityIntent';
@@ -463,13 +463,22 @@ export async function scoreExperiencesForCrew(
     let bestInterestId: string | null = null;
     let bestInterestMemberCount = 0;
     const tags = experienceInterestTags(experience);
+    // Real gap this closes, found running a controlled specificity test: an untagged, generic
+    // "Live Music Night" scored IDENTICALLY to a genuinely genre-tagged rock gig, because `tags`
+    // above blends real provider genre data with a loose name/description keyword scan into one
+    // undifferentiated set — see `experienceInterestTagsFromSubcategories`'s own comment. Used
+    // below to scale both taste-signal bonuses by evidence strength: a real subcategory tag is
+    // confirmed, specific evidence; a bare keyword hit in a title is much weaker and must never
+    // score as if it were the same claim.
+    const strongTags = experienceInterestTagsFromSubcategories(experience);
     if (tags.length > 0 && tasteProfiles.length > 0) {
       for (const tag of tags) {
         const tagBias = learningBias.interest.get(tag) ?? 0;
         const perMember = tasteProfiles.map((tp) => ((tp.interestAffinity as Record<string, number> | undefined) ?? {})[tag] ?? 0);
         const positiveCount = perMember.filter((v) => v > 0).length;
         const avg = (perMember.length ? perMember.reduce((a, b) => a + b, 0) / perMember.length : 0) + tagBias;
-        const contribution = Math.max(0, avg) * 30;
+        const evidenceMultiplier = strongTags.includes(tag) ? 1 : 0.5;
+        const contribution = Math.max(0, avg) * 30 * evidenceMultiplier;
         if (contribution > interestScore) {
           interestScore = contribution;
           bestInterestId = tag;
@@ -489,10 +498,13 @@ export async function scoreExperiencesForCrew(
     }
 
     // Crew-level specific-interest picks — one level more precise than crewCategoryPreferences
-    // ("we're specifically a UK garage crew", not just "a music crew").
-    const matchedCrewInterest = tags.find((tag) => crewInterestPreferences.has(tag));
+    // ("we're specifically a UK garage crew", not just "a music crew"). Prefer a strong
+    // (subcategory-confirmed) match over a weak (text-only) one when both exist, and score a
+    // confirmed match higher — the same evidence-strength distinction as interest_match above.
+    const matchedCrewInterest = strongTags.find((tag) => crewInterestPreferences.has(tag)) ?? tags.find((tag) => crewInterestPreferences.has(tag));
     if (matchedCrewInterest) {
-      score += 18;
+      const isStrongMatch = strongTags.includes(matchedCrewInterest);
+      score += isStrongMatch ? 18 : 9;
       reasons.push({ code: 'crew_interest_preference', label: `Your Crew set ${interestLabel(matchedCrewInterest)} as a preference` });
     } else if (categoriesImpliedByInterests.has(experience.category)) {
       // REAL, LIVE-REPORTED BUG this closes: "no boxing or mma or street food or food festivals
