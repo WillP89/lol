@@ -1371,6 +1371,23 @@ a.v2-card:active, button.v2-card:active { transform: scale(0.98); }
   margin: 0 -20px;
   padding: 10px 20px calc(env(safe-area-inset-bottom, 0px) + 14px);
 }
+/* Real, reproduced-with-evidence fix (Playwright screenshots + a live DOM measurement, found
+   root-causing the iPhone composer from scratch): the composer textarea is deliberately
+   `rows={1}` with real multi-line auto-grow for TYPED content only (crews/[id]/page.tsx's own
+   auto-resize effect) — but that effect only ever measures the actual value, never the
+   placeholder, so a placeholder long enough to wrap onto a second line rendered that second
+   line past the textarea's own one-row box, off the bottom of the real screen on a real phone
+   width. The page-side fix (composerPlaceholderName) shortens the Crew-name portion, but name
+   length alone can't account for real font-metric variance across devices/Crew names — this is
+   the actual, robust guarantee: the placeholder can never render as more than one line, on any
+   device, regardless of text length, the same way it would on any other real chat app. Scoped to
+   `::placeholder` only — the textarea's own TYPED value still wraps/grows normally; only the
+   placeholder (shown while empty) is ever forced single-line. */
+.v2-crew-composer textarea::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 @media (min-width: 1280px) {
   .v2-crew-fill { flex: 1 1 auto; min-height: 0; }
   .v2-crew-scroll { overflow-y: auto; }

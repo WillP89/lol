@@ -445,3 +445,56 @@ session (`GET /admin/inventory-probe` — live per-provider raw/normalised/filte
 exact evidence shape needed once run somewhere with real network access — this is the single
 highest-leverage action item for the person running the live product: run `/admin/inventory-probe`
 for each of the intents below in a real UK city and read off the real counts.
+
+## Cycle 5 — iPhone chat composer, re-verified from scratch (prior "completed" label not trusted)
+
+Per the mission's own explicit instruction not to trust a prior session's "completed" label, this
+re-traced the composer's entire keyboard/safe-area/viewport architecture from the actual code
+(never from the task history), then verified it live: started both the real API and web dev
+servers, created a real 2-member Crew with 25 real chat messages via the real API (a solo/
+1-member Crew turns out to render an entirely different empty-invite screen, not the chat thread —
+found and worked around while setting this up), and used Playwright with a real iOS Safari user
+agent to screenshot the actual rendered page at all four specified viewports (375×667, 390×844,
+393×852, 430×932), plus a simulated multi-line message and a simulated viewport shrink
+approximating a keyboard opening.
+
+**The architecture itself is sound, not a "magic pixel offset" hack**: `layout.tsx` sets
+`interactiveWidget: 'resizes-content'` (the real, standards-track, platform-level fix — Safari
+17.4+/Chrome 108+ — that makes the browser itself resize the layout viewport for the keyboard,
+the same way it already does for the address bar), with a documented `window.visualViewport`-based
+correction (`composerBottomGap`) as a fallback for the one real WebView (Gmail's in-app browser)
+found on a real device not to fully honour it. The composer uses plain `position: sticky; bottom:
+0`, never `position: fixed` + manual coordinate reconstruction (an earlier round's approach,
+explicitly reverted per its own comment). Safe-area padding lives in exactly one place
+(`.v2-crew-composer`'s own bottom padding), correctly zeroed on desktop where the wrapper takes
+over — no double safe-area found.
+
+**A real bug WAS found and fixed**: the composer's placeholder (`Message ${crew.name}…`) could
+wrap onto a second line for a longer Crew name (confirmed with a real 22-character name at 375px
+width), and the auto-grow effect that sizes the textarea only ever measures the actual typed
+VALUE — on load that's empty, so the box renders at exactly one row regardless of placeholder
+length. The wrapped second line then rendered past that one-row box, uncontained, landing off the
+bottom of the real screen — confirmed with a direct DOM measurement (`scrollHeight: 67` vs. actual
+rendered `height: 45.6`) before being fixed, reproduced identically at 375×667 and 430×932. Fixed
+two ways: (1) `composerPlaceholderName()` shortens the Crew-name portion client-side (defense in
+depth, but char-count alone can't reliably predict wrapped width across real font metrics); (2)
+the real, deterministic fix — `.v2-crew-composer textarea::placeholder { white-space: nowrap;
+overflow: hidden; text-overflow: ellipsis; }`, scoped to the placeholder only (never affecting the
+textarea's own real multi-line typed-value growth). Re-verified after the fix: single-line
+placeholder with a clean ellipsis at all four viewports, composer fully contained within the
+viewport with no overlap or clipped content, both before and after the simulated keyboard-open
+resize.
+
+**What this does NOT close**: headless Playwright cannot open a real OS on-screen keyboard, so the
+`visualViewport`-driven `composerBottomGap` correction — the part specifically added for the one
+real WebView quirk found on an actual device — could not be exercised here; a shrunk-viewport
+approximation confirmed the base sticky/flex layout reflows correctly under a smaller viewport,
+which is the structural property that matters most, but is not the same signal a real device
+would give for that specific WebView-timing correction. That fallback code path remains unverified
+by this cycle, same honest limitation as every other real-device-only behaviour this session has
+flagged rather than claimed to have proven from a sandbox.
+
+Shipped: typecheck + lint clean (this repo's web app has no automated test suite — typecheck/lint
+is the full CI gate, matching every prior round's own verification method for this exact class of
+bug, which has consistently relied on live/Playwright screenshot evidence over unit tests for
+viewport-dependent rendering).
