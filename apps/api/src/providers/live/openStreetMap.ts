@@ -242,6 +242,16 @@ export const openStreetMapProvider: ProviderAdapter = {
       logger.warn({ err, city: params.city }, 'Every Overpass mirror failed — no OpenStreetMap inventory this sync');
       return [];
     }
+    // Real operator-visibility gap flagged (not fixed) in Cycle 4's own gate audit: the query's
+    // `out center tags ${MAX_RESULTS}` clause silently truncates at the server side with no
+    // signal in the response distinguishing "this city genuinely only has N venues" from "there
+    // were more, and the rest were cut off" — a dense city hitting this cap loses real inventory
+    // with nothing an operator could notice short of counting rows by hand. Logged, not silently
+    // swallowed, whenever the returned count reaches the cap — the one cheap signal available
+    // without a second, more expensive query just to find the real total.
+    if (elements.length >= MAX_RESULTS) {
+      logger.warn({ city: params.city, maxResults: MAX_RESULTS }, 'OpenStreetMap query hit MAX_RESULTS — real inventory may have been truncated for this city');
+    }
 
     const listings: RawListing[] = [];
     for (const el of elements) {
