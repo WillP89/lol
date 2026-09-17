@@ -50,7 +50,7 @@ export interface ExplorePersonalisationResult {
  * against. `filterToTaste: false` is the explicit escape hatch (the client's "Show everything"
  * toggle) for anyone who wants to browse unfiltered even once they do have taste signal. */
 async function finishExploreList(rows: ExperienceWithVenue[], userId?: string, opts?: { filterToTaste?: boolean }): Promise<ExplorePersonalisationResult> {
-  const deduped = dedupeNearDuplicates(rows, (e) => ({ name: e.name, category: e.category, startsAt: e.startsAt }));
+  const deduped = dedupeNearDuplicates(rows, (e) => ({ name: e.name, category: e.category, startsAt: e.startsAt, latitude: e.venue?.latitude ?? null, longitude: e.venue?.longitude ?? null }));
 
   if (!userId) return { experiences: deduped, filteredToTaste: false, totalBeforeFilter: deduped.length };
   const tasteProfile = await prisma.tasteProfile.findUnique({

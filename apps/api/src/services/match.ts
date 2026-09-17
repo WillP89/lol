@@ -695,11 +695,21 @@ export async function scoreExperiencesForCrew(
   // Near-duplicate suppression (see entityResolution.ts#dedupeNearDuplicates) — runs after
   // sorting so the kept representative of any cluster is the best-scoring one, not just
   // whichever happened to be fetched first.
-  return dedupeNearDuplicates(scored, (option) => ({
-    name: option.experience.name,
-    category: option.experience.category,
-    startsAt: option.experience.startsAt,
-  }));
+  return dedupeNearDuplicates(scored, (option) => {
+    // `option.experience` is structurally `Experience & { venue: Venue | null }` at runtime
+    // (every candidate here was hydrated with `include: { venue: true }` above) even though
+    // MatchOption's own declared type only promises the bare `Experience` shape — see
+    // entityResolution.ts's own comment for why real coordinates matter here (never merging two
+    // different real venues that happen to share a common name).
+    const withVenue = option.experience as Experience & { venue: Venue | null };
+    return {
+      name: withVenue.name,
+      category: withVenue.category,
+      startsAt: withVenue.startsAt,
+      latitude: withVenue.venue?.latitude ?? null,
+      longitude: withVenue.venue?.longitude ?? null,
+    };
+  });
 }
 
 /**

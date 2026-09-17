@@ -111,3 +111,41 @@ describe('dedupeNearDuplicates: the actual "Jorja Smith DJ Set" bug', () => {
     expect(result[0].id).toBe('a');
   });
 });
+
+/**
+ * Real gap this closes, found in a follow-up gate audit: name-similarity alone, with no location
+ * awareness, could silently collapse two genuinely DIFFERENT real venues sharing a common UK
+ * name ("The Red Lion", "The Crown" — among the most common pub names in England). Coordinates
+ * are additive and only ever a reason to REJECT a would-be merge, never to force one — an item
+ * missing coordinates on either side falls back to the pre-existing name-only behaviour.
+ */
+describe('dedupeNearDuplicates: location awareness stops two distinct common-named venues merging', () => {
+  type ItemWithLocation = { id: string; name: string; category: string; startsAt: Date; latitude: number | null; longitude: number | null };
+  const getFields = (i: ItemWithLocation) => i;
+
+  test('two different real pubs both named "The Crown", miles apart, on the same night are both kept', () => {
+    const items: ItemWithLocation[] = [
+      { id: 'crown-north', name: 'The Crown', category: 'BAR', startsAt: new Date('2026-09-11T20:00:00Z'), latitude: 52.86, longitude: -2.12 },
+      { id: 'crown-south', name: 'The Crown', category: 'BAR', startsAt: new Date('2026-09-11T20:00:00Z'), latitude: 52.75, longitude: -2.05 }, // ~8 miles away — a genuinely different real pub
+    ];
+    expect(dedupeNearDuplicates(items, getFields)).toHaveLength(2);
+  });
+
+  test('the SAME real venue geocoded slightly differently by two providers still collapses to one', () => {
+    const items: ItemWithLocation[] = [
+      { id: 'osm', name: 'The Crown', category: 'BAR', startsAt: new Date('2026-09-11T20:00:00Z'), latitude: 52.8062, longitude: -2.1169 },
+      { id: 'fhrs', name: 'The Crown', category: 'BAR', startsAt: new Date('2026-09-11T20:00:00Z'), latitude: 52.8065, longitude: -2.1172 }, // ~30m away — same building, different geocoding
+    ];
+    const result = dedupeNearDuplicates(items, getFields);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('osm');
+  });
+
+  test('missing coordinates on one side falls back to the pre-existing name-only behaviour (still merges)', () => {
+    const items: ItemWithLocation[] = [
+      { id: 'known-location', name: 'The Crown', category: 'BAR', startsAt: new Date('2026-09-11T20:00:00Z'), latitude: 52.8062, longitude: -2.1169 },
+      { id: 'unknown-location', name: 'The Crown', category: 'BAR', startsAt: new Date('2026-09-11T20:00:00Z'), latitude: null, longitude: null },
+    ];
+    expect(dedupeNearDuplicates(items, getFields)).toHaveLength(1);
+  });
+});
