@@ -179,6 +179,27 @@ const POLL_INTERVAL_MS = 3000;
 // The composer's auto-grow ceiling — about 6 lines at the composer's own font size, past which
 // it scrolls internally rather than eating the whole screen on a long paste.
 const COMPOSER_MAX_HEIGHT = 140;
+
+// Real, reproduced-with-evidence bug this closes (Playwright screenshots at 375x667/390x844/
+// 393x852/430x932, a real DOM measurement, found root-causing the iPhone composer from
+// scratch): the composer's placeholder is `Message ${crew.name}…`, and the auto-grow effect
+// above only ever measures `textarea.scrollHeight` for the ACTUAL TYPED VALUE — on load, that
+// value is empty, so the textarea renders at exactly one row's height regardless of how long
+// the placeholder text is. A Crew name long enough to wrap the placeholder onto a second line
+// (confirmed with a real 22-character Crew name at 375px width) then has that second line
+// render past the textarea's own one-row box — and because the composer sits flush against the
+// bottom safe area, that overflow lands off the bottom of the screen, not just visually inside
+// some other element. Truncating the NAME (not just relying on CSS ellipsis, which browsers
+// apply inconsistently to a <textarea>'s own ::placeholder, especially wrapped multi-line
+// overflow) guarantees the whole placeholder — "Message " + name + "…" — always fits on Plot's
+// one-row composer at any real phone width, for any real Crew name length.
+const PLACEHOLDER_NAME_MAX_CHARS = 18;
+// Never appends its own ellipsis — the caller's `Message ${...}…` already supplies the one
+// trailing ellipsis for both the truncated and untruncated case, so this only ever shortens the
+// name itself.
+function composerPlaceholderName(name: string): string {
+  return name.length > PLACEHOLDER_NAME_MAX_CHARS ? name.slice(0, PLACEHOLDER_NAME_MAX_CHARS).trimEnd() : name;
+}
 // Two distinct announcement formats land in chat: a member sharing something themselves, and
 // the automatic recommendation engine's own distinct copy (services/plan.ts#
 // createRecommendationPlanForCrew) — deliberately different wording/emoji so a recommendation
@@ -1980,7 +2001,7 @@ export default function CrewPage() {
                   background: 'var(--v2-surface)', boxShadow: 'var(--v2-shadow-sm)', fontSize: 14.5, fontFamily: 'inherit', color: 'var(--v2-ink)',
                   lineHeight: 1.35, maxHeight: COMPOSER_MAX_HEIGHT, overflowY: 'auto',
                 }}
-                placeholder={`Message ${crew.name}…`}
+                placeholder={`Message ${composerPlaceholderName(crew.name)}…`}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
