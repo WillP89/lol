@@ -1383,3 +1383,106 @@ run + full 4-adapter inventory audit) that it still holds today, not a re-build.
 **Next**: task #138, the P0 acceptance test — a fresh manual-quality run through the real product
 across the mission's own named test crews (Rock, Japanese Food, Electronic/UK Garage, Broad), then
 the final P0 sign-off before resuming the paused pilot-scorecard/analytics/ops mission.
+
+## Cycle 20 — P0 acceptance test: real product, real crews, real rendered cards
+
+The mission's own explicit closing gate: "run a fresh Crew through the actual product... not unit
+tests alone... the final proof must include actual rendered recommendation cards." Both the API
+(`tsx watch`) and web (`next dev`) dev servers were started fresh; every crew below was created
+through the real, running HTTP API (magic-link auth, real session cookies, real Crew/settings/join
+calls — the identical calls this session's own automated tests make, just fired live rather than
+inside `vitest`), and every screenshot is the actual rendered chat page, logged in as the real
+Crew owner in a real Chromium browser.
+
+**TEST 1 — ROCK CREW** (Stafford, `Live gigs` + `Rock`). Candidate pool: K Pop Demons (confirmed
+`k-pop` subcategory, description mentions "live gig"), a genuinely untagged "Generic Live Music
+Night", "Stafford Rock Night" (confirmed `rock`), "Alt Rock Live" (confirmed `alternative`). The
+Crew's own immediate first-recommendation trigger fired live, as it would for a real user, and
+delivered **Stafford Rock Night** — never K-pop. Screenshot: the real "Plot Found This" card, caption
+"2/2 of you are into Rock, and it's under a mile from your area" (a real, evidence-backed reason —
+`crew_interest_preference`, a literal match, not an invented one), editorial fallback art rendering
+correctly for the LIVE_MUSIC category (no real photo exists for a manually-seeded test fixture — see
+image caveat below).
+
+**TEST 2 — JAPANESE FOOD CREW** (Stafford, `Restaurants` + `Japanese`). Candidate pool: Sushi Sakura
+(confirmed `japanese`), Bangkok Thai Kitchen (confirmed `thai`), a McDonald's-named venue. Delivered
+**Sushi Sakura** — never Bangkok Thai Kitchen, never McDonald's. Screenshot: real card, "2/2 of you
+are into Japanese, and it's under a mile from your area."
+
+**TEST 3 — UK GARAGE / ELECTRONIC CREW** (Stafford, `Club nights` + `Electronic` + `UK garage`).
+Candidate pool: UK Garage Classics (confirmed `uk_garage`), Big Room Techno Night (confirmed
+`techno`, reached the pool via the broad `club_nights` pick — the same real shape as the original
+reported bug). Delivered **UK Garage Classics** — never the techno night. Screenshot: real card,
+"2/2 of you are into UK garage."
+
+**TEST 4 — BROAD CREW, the mission's own control case** (`Live gigs` ONLY, no genre pick).
+Candidate pool: the same K Pop Demons fixture as Test 1. Delivered **K Pop Demons** — correctly, per
+the mission's own explicit worked example ("If the Crew preference had ONLY been LIVE GIGS then a
+local Stafford K-pop show could actually be a reasonable recommendation"). Screenshot: real card,
+with the product's own existing honest caveat framing: "There's not much in your area right now, so
+how about this — your Crew set Live gigs as a preference, and it's under a mile from your area." This
+is the single most important negative-control result in this cycle — it proves the P0-1 fix narrows
+ONLY when real, specific evidence exists, and never over-restricts a genuinely broad Crew, exactly
+the "do not make the system so strict that a broad-interest user receives nothing" requirement.
+
+**CHAIN EXCLUSION — adversarial live probe.** A Crew with only `Restaurants` set, its candidate pool
+containing Greggs, McDonald's, and one real independent restaurant: delivered the independent
+restaurant. A follow-up, fully isolated probe (a candidate pool containing ONLY a Greggs-named
+fixture, nothing else) confirmed Greggs never even reaches the scored candidate pool at all —
+`isGenericChainName`'s force-floor is applied at `passesEarlyPlanWorthinessGate`, BEFORE the
+nearest-50 proximity cut, so a chain venue is excluded before scoring ever runs, not merely
+outranked. Real, honest finding from this specific probe: because the exclusion happens this early,
+a chain venue's rejection does NOT appear in the `explain-recommendation` debugger's own
+`topCandidates` trail (that trail is built from `scored`, which the venue never reaches) — the
+debugger is fully transparent for every OTHER rejection reason (distance, taste mismatch, cadence,
+now genre mismatch) but has a real, minor blind spot specifically for early-chain-gate exclusions.
+Not a P0-severity issue (the exclusion itself works, confirmed both by this live probe and by 31
+passing automated tests) — noted here honestly rather than glossed over, a real candidate for a
+future, lower-priority debugger-completeness improvement, not fixed this cycle.
+
+**IMAGE TRUTHFULNESS — what could and could not be verified live.** Every live external image
+source this app uses (Wikipedia, Wikimedia Commons, Pexels, Google Places, TheSportsDB) is
+unreachable from this sandbox — documented, confirmed repeatedly throughout this session and every
+prior one, via direct curl and every adapter's own header comment. This means a true 30-card visual
+audit against REAL fetched photographs is not something this environment can produce; claiming
+otherwise would be exactly the fabrication the mission's own standing rules forbid. What WAS
+genuinely verified live this cycle: (1) the P0-2 unit-level fix itself — 10 tests against a mocked
+but realistic Wikipedia/Commons response shape, proving the wrong-entity rejection and the
+cuisine-aware search hint both work; (2) every screenshot above shows the REAL fallback behaviour
+when no photo exists — Plot's own branded editorial art (lib/v2Art.ts), category-appropriate,
+never a broken image or a placeholder that could be mistaken for a real photo. This is the correct,
+honest, live-verifiable half of the "wrong image is worse than no image" requirement; the other half
+(does a REAL Wikipedia lookup for a real ambiguous name actually get rejected in production) can only
+be confirmed once real network access exists — flagged plainly as a live-activation verification
+item, not silently assumed.
+
+**Full pipeline still green**: re-ran the complete backend suite one final time after all three P0
+cycles — 84 files, 508 tests, clean.
+
+## FINAL P0 VERDICT
+
+All three P0 foundation failures the mission named are closed, each with real evidence (not
+self-certified):
+
+1. **Taste specificity/hierarchy** (Cycle 17) — FIXED and live-verified. Specific preferences now
+   genuinely narrow broad ones; adjacent genres are treated as sensible exploration; a broad-only
+   Crew is never over-restricted.
+2. **Image truthfulness** (Cycle 18) — FIXED at the unit level (confirmed by 10 passing tests
+   against realistic API response shapes); the live-network half is unverifiable from this sandbox
+   and is named as such, not assumed.
+3. **Mass-market chain exclusion** (Cycle 19) — CONFIRMED already built and working (no code
+   change needed), live-verified this cycle with an isolated adversarial probe on top of 31 existing
+   passing tests.
+
+Per the mission's own instruction to issue exactly one of NOT READY / PRE-LIVE READY — EXTERNAL
+SUPPLY VALIDATION REQUIRED / LIVE PILOT READY, and given this is specifically the P0-gate check
+(not the full pilot-readiness verdict, which task #134 still owns): **the three named P0 foundation
+failures are closed and proven through the real product.** The pilot's broader external-supply
+situation (no live Ticketmaster/Skiddle/PredictHQ/Google Places/Foursquare credentials, OSM/FHRS
+unreachable from this sandbox specifically) is unchanged by this work and remains exactly the
+PRE-LIVE READY — EXTERNAL SUPPLY VALIDATION REQUIRED condition established in earlier cycles — this
+P0 work closes a real trust/quality risk, it does not manufacture live supply that doesn't exist.
+
+**Resuming the paused mission next**: task #132 (pilot scorecard, picked up exactly where paused),
+then task #133 (security/production hygiene), then task #134 (performance/reliability + final
+multi-archetype simulation + the FULL pilot-readiness verdict).
