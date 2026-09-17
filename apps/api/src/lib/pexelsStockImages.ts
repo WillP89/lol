@@ -142,7 +142,9 @@ async function fetchCandidatePool(query: string, apiKey: string): Promise<{ imag
 // instead of another round of inference.
 let missingKeyLogged = false;
 
-async function getCandidatePool(category: string): Promise<EnrichedImage[]> {
+// See categoryStockImages.ts#getCandidatePool's own comment (the P0 "restaurant imagery is
+// inaccurate" fix) — same `genreHint` contract, applied to this second, independent source.
+async function getCandidatePool(category: string, genreHint?: string | null): Promise<EnrichedImage[]> {
   const apiKey = config.PEXELS_API_KEY;
   if (!apiKey) {
     if (!missingKeyLogged) {
@@ -152,8 +154,10 @@ async function getCandidatePool(category: string): Promise<EnrichedImage[]> {
     return [];
   }
 
-  const query = CATEGORY_SEARCH_QUERY[category] ?? DEFAULT_QUERY;
-  const cached = pool.get(category);
+  const baseQuery = CATEGORY_SEARCH_QUERY[category] ?? DEFAULT_QUERY;
+  const query = genreHint ? `${baseQuery} ${genreHint}` : baseQuery;
+  const poolKey = `${category}::${genreHint ?? ''}`;
+  const cached = pool.get(poolKey);
   if (cached) {
     const ttl = cached.images.length > 0 ? POOL_TTL_MS : EMPTY_POOL_TTL_MS;
     if (Date.now() - cached.fetchedAt < ttl) return cached.images;
@@ -163,8 +167,15 @@ async function getCandidatePool(category: string): Promise<EnrichedImage[]> {
     logger.warn({ err, category, query }, 'Pexels category-stock image search failed — continuing without one');
     return { images: [] as EnrichedImage[], rawCount: 0 };
   });
+  // Same honest fallback as categoryStockImages.ts — a hint too narrow for Pexels' own coverage
+  // must never leave a listing with no real photo at all when the bare category query would have
+  // found one.
+  if (images.length === 0 && genreHint) {
+    logger.info({ category, genreHint, query }, 'Hinted Pexels search came back empty — falling back to the bare category query');
+    return getCandidatePool(category, null);
+  }
   logger.info({ category, query, rawCount, keptCount: images.length }, 'Pexels category-stock search complete');
-  pool.set(category, { images, fetchedAt: Date.now() });
+  pool.set(poolKey, { images, fetchedAt: Date.now() });
   return images;
 }
 
@@ -172,10 +183,11 @@ async function getCandidatePool(category: string): Promise<EnrichedImage[]> {
  * A real, category-appropriate photograph from Pexels — see this file's own header for why this
  * exists as a separate tier from categoryStockImages.ts's Commons search, and inventorySync.ts's
  * call site for where it sits in the overall fallback chain. Same seed/pool-hash contract as
- * categoryStockImages.ts's own `getCategoryStockImage` — see that function's own doc comment.
+ * categoryStockImages.ts's own `getCategoryStockImage` — see that function's own doc comment,
+ * including the `genreHint` narrowing.
  */
-export async function getPexelsStockImage(category: string | null | undefined, seed: string): Promise<EnrichedImage | null> {
-  const images = await getCandidatePool(category ?? 'CUSTOM');
+export async function getPexelsStockImage(category: string | null | undefined, seed: string, genreHint?: string | null): Promise<EnrichedImage | null> {
+  const images = await getCandidatePool(category ?? 'CUSTOM', genreHint);
   if (images.length === 0) return null;
   const idx = hashString(`${category ?? 'CUSTOM'}:${seed}`) % images.length;
   return images[idx];

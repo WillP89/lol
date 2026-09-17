@@ -837,7 +837,7 @@ async function generateRecommendationForCrewNow(crewId: string, opts: { guarante
   // or the source is briefly down) is never fatal — the row simply stays null and the next
   // scheduled sweep still picks it up, same as any other unfilled row.
   if (!best.experience.imageUrl) {
-    await enrichMissingImageForExperience({ id: best.experience.id, name: best.experience.name, category: best.experience.category });
+    await enrichMissingImageForExperience({ id: best.experience.id, name: best.experience.name, category: best.experience.category, subcategories: best.experience.subcategories });
   }
 
   // Real, evidence-derived confidence (services/recommendationConfidence.ts) — decides the

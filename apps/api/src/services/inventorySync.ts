@@ -11,6 +11,21 @@ import { getCategoryStockImage } from '../lib/categoryStockImages';
 import { getPexelsStockImage } from '../lib/pexelsStockImages';
 import { isImageQualityBad } from '../lib/imageDimensions';
 import { config } from '../lib/config';
+import { experienceInterestTagsFromSubcategories } from './tasteSignals';
+import { interestLabel, TASTE_INTEREST_INDEX } from '@plot/shared';
+
+// P0 fix (docs/PILOT_READINESS_AUDIT.md Cycle 18) — see categoryStockImages.ts#getCandidatePool's
+// own comment for the full "restaurant imagery is inaccurate" story this closes. Only a real,
+// subcategory-CONFIRMED narrowing interest (`narrows: true` — the same P0-1 taxonomy field a real
+// genre/cuisine/discipline is marked with, never a broad/format one like "restaurants" itself,
+// which would just repeat the base category query verbatim) is ever used as a hint — never a loose
+// keyword-scan guess, and never more than one (the single strongest confirmed tag, matching
+// `experienceInterestTagsFromSubcategories`'s own "confirmed, not merely mentioned" evidence bar).
+function deriveStockImageHint(category: string, subcategories: unknown): string | null {
+  const tags = experienceInterestTagsFromSubcategories({ category, subcategories });
+  const narrowingTag = tags.find((id) => TASTE_INTEREST_INDEX.get(id)?.interest.narrows);
+  return narrowingTag ? interestLabel(narrowingTag).toLowerCase() : null;
+}
 
 // EVERY provider's image gets byte-verified now, no exceptions — real, repeated live reports
 // ("distorted and shit quality") kept recurring even after this file first shipped, because that
@@ -104,7 +119,7 @@ export async function syncProvider(
         // arbitrary Wikipedia photo for "Aston Villa vs Everton"-shaped titles — then both
         // categories fall through to the generic Wikipedia lookup on a miss.
         const sportBadge = canonicalInput.category === 'SPORT' ? await enrichImageFromTheSportsDb(canonicalInput.name) : null;
-        const enriched = sportBadge ?? (await enrichImageFromWikipedia(canonicalInput.name));
+        const enriched = sportBadge ?? (await enrichImageFromWikipedia(canonicalInput.name, canonicalInput.category));
         if (enriched) {
           canonicalInput.imageUrl = enriched.url;
           canonicalInput.imageSource = sportBadge ? 'THESPORTSDB' : 'WIKIPEDIA';
@@ -121,8 +136,9 @@ export async function syncProvider(
           // same edge), which would otherwise silently defeat the Commons tier alone. See
           // lib/categoryStockImages.ts's and lib/pexelsStockImages.ts's own headers for the full
           // reasoning.
-          const commonsStock = await getCategoryStockImage(canonicalInput.category, canonicalInput.name);
-          const pexelsStock = commonsStock ? null : await getPexelsStockImage(canonicalInput.category, canonicalInput.name);
+          const genreHint = deriveStockImageHint(canonicalInput.category, canonicalInput.subcategories);
+          const commonsStock = await getCategoryStockImage(canonicalInput.category, canonicalInput.name, genreHint);
+          const pexelsStock = commonsStock ? null : await getPexelsStockImage(canonicalInput.category, canonicalInput.name, genreHint);
           const stock = commonsStock ?? pexelsStock;
           if (stock) {
             canonicalInput.imageUrl = stock.url;
@@ -712,9 +728,9 @@ export interface MissingImageBackfillResult {
  * photo was genuinely findable at send time, just because the scheduled sweep hadn't reached
  * that row yet. Returns true only when a real image was found, quality-gated, AND written.
  */
-export async function enrichMissingImageForExperience(row: { id: string; name: string; category: string }): Promise<boolean> {
+export async function enrichMissingImageForExperience(row: { id: string; name: string; category: string; subcategories?: unknown }): Promise<boolean> {
   const sportBadge = row.category === 'SPORT' ? await enrichImageFromTheSportsDb(row.name) : null;
-  const enriched = sportBadge ?? (await enrichImageFromWikipedia(row.name));
+  const enriched = sportBadge ?? (await enrichImageFromWikipedia(row.name, row.category));
   let imageUrl: string | null = null;
   let imageSource: 'THESPORTSDB' | 'WIKIPEDIA' | 'CATEGORY_STOCK' | 'PEXELS_STOCK' | null = null;
   if (enriched) {
@@ -723,8 +739,9 @@ export async function enrichMissingImageForExperience(row: { id: string; name: s
   } else {
     // Same two-independent-sources reasoning as syncProvider's own call site above — see
     // that comment, and categoryStockImages.ts's/pexelsStockImages.ts's own headers.
-    const commonsStock = await getCategoryStockImage(row.category, row.name);
-    const pexelsStock = commonsStock ? null : await getPexelsStockImage(row.category, row.name);
+    const genreHint = deriveStockImageHint(row.category, row.subcategories);
+    const commonsStock = await getCategoryStockImage(row.category, row.name, genreHint);
+    const pexelsStock = commonsStock ? null : await getPexelsStockImage(row.category, row.name, genreHint);
     const stock = commonsStock ?? pexelsStock;
     if (stock) {
       imageUrl = stock.url;
@@ -776,7 +793,7 @@ export async function backfillMissingImages(maxToCheck?: number): Promise<Missin
   // comment documents. One snapshot, taken before any writes happen, removes the moving target.
   const candidates = await prisma.experience.findMany({
     where: { imageUrl: null },
-    select: { id: true, name: true, category: true },
+    select: { id: true, name: true, category: true, subcategories: true },
     orderBy: { id: 'asc' },
     ...(maxToCheck !== undefined ? { take: maxToCheck } : {}),
   });

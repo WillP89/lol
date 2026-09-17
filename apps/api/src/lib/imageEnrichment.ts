@@ -95,12 +95,54 @@ async function fetchTeamBadge(name: string): Promise<EnrichedImage | null> {
   }
 }
 
-export async function enrichImageFromWikipedia(name: string): Promise<EnrichedImage | null> {
-  const key = name.trim().toLowerCase();
-  if (!key) return null;
+/**
+ * P0 FOUNDATION FAILURE (real, live-reported): an "RM" headline show — a real, live drill/hip-hop
+ * event — displayed rock-band imagery. Root cause: `fetchSummary` below trusted Wikipedia's own
+ * page-title resolution completely — any short or ambiguous name ("RM" is a real Wikipedia
+ * disambiguation risk: a K-pop artist, an abbreviation, dozens of other things a specific title
+ * could resolve to depending on capitalisation/redirects) that happened to land on a real,
+ * `type: 'standard'` Wikipedia page was trusted outright, with ZERO check that the resolved page
+ * was actually about the right kind of thing — an artist/comedian/team page confidently returned
+ * for a query that was never that entity at all. `CATEGORY_PLAUSIBILITY_KEYWORDS` is the fix: a
+ * cheap, honest cross-check using data the SAME API response already includes (`description`/
+ * `extract` — no extra request) against what KIND of subject Plot's own category data says this
+ * should be. A LIVE_MUSIC/FESTIVAL/CLUBBING listing whose resolved Wikipedia page describes an
+ * "American rock band" is exactly the P0 failure this catches — mismatched domain, rejected before
+ * ever reaching a listing. Deliberately NOT a wrong-genre check (Plot has no reliable way to tell
+ * "rock" from "drill" from Wikipedia's short description alone) — only a wrong-DOMAIN check (is
+ * this even a musician/team/comedian/etc at all), which is the same category of confidence gate
+ * `isPlanWorthyForCrew`'s own history teaches to keep narrow and precise, never over-broad. A
+ * category with no keyword list here (RESTAURANT, BAR, ART_CULTURE, FITNESS, DAY_ACTIVITY,
+ * COMMUNITY — venue/place names are far less prone to celebrity-name collision than short artist
+ * names) keeps the original behaviour unchanged, never blocked on a check that doesn't exist for
+ * it. A resolved page with NO description/extract at all (Wikipedia genuinely has nothing to say)
+ * is treated as unverifiable, not confirmed — WRONG IMAGE IS WORSE THAN NO IMAGE — so it is
+ * rejected too, never trusted on `type: 'standard'` alone.
+ */
+const CATEGORY_PLAUSIBILITY_KEYWORDS: Partial<Record<string, string[]>> = {
+  LIVE_MUSIC: ['music', 'musician', 'singer', 'rapper', 'band', 'artist', 'songwriter', 'dj', 'composer', 'rap', 'hip hop', 'record producer', 'orchestra', 'vocalist'],
+  CLUBBING: ['music', 'musician', 'dj', 'record producer', 'artist'],
+  FESTIVAL: ['music', 'musician', 'festival', 'artist', 'band', 'dj'],
+  COMEDY: ['comedian', 'comedy', 'stand-up', 'stand up'],
+  THEATRE: ['actor', 'actress', 'theatre', 'theater', 'play', 'musical', 'director', 'playwright'],
+  CINEMA: ['film', 'actor', 'actress', 'director', 'movie', 'filmmaker'],
+  SPORT: ['footballer', 'athlete', 'player', 'team', 'club', 'sport', 'rugby', 'cricketer', 'boxer', 'racing driver', 'coach', 'sportsman', 'sportswoman'],
+};
+
+function plausibleForCategory(summary: WikipediaSummary, category: string | undefined): boolean {
+  const keywords = category ? CATEGORY_PLAUSIBILITY_KEYWORDS[category] : undefined;
+  if (!keywords) return true; // no domain check defined for this category — unchanged behaviour
+  const haystack = `${summary.description ?? ''} ${summary.extract ?? ''}`.toLowerCase();
+  if (!haystack.trim()) return false; // nothing to verify against — unconfirmed, never trusted blind
+  return keywords.some((kw) => haystack.includes(kw));
+}
+
+export async function enrichImageFromWikipedia(name: string, category?: string): Promise<EnrichedImage | null> {
+  const key = `${category ?? ''}::${name.trim().toLowerCase()}`;
+  if (!name.trim()) return null;
   if (cache.has(key)) return cache.get(key) ?? null;
 
-  const result = await fetchSummary(name).catch((err) => {
+  const result = await fetchSummary(name, category).catch((err) => {
     logger.warn({ err, name }, 'Wikipedia image enrichment failed — continuing without an image');
     return null;
   });
@@ -111,6 +153,8 @@ export async function enrichImageFromWikipedia(name: string): Promise<EnrichedIm
 interface WikipediaSummary {
   type?: string; // 'standard' | 'disambiguation' | 'no-extract' | …
   title?: string;
+  description?: string; // short Wikidata-sourced one-liner, e.g. "South Korean rapper"
+  extract?: string; // plain-text first paragraph
   thumbnail?: { source?: string; width?: number; height?: number };
   originalimage?: { source?: string; width?: number; height?: number };
 }
@@ -123,7 +167,7 @@ interface WikipediaSummary {
 // back.
 const MIN_IMAGE_WIDTH = 1600;
 
-async function fetchSummary(name: string): Promise<EnrichedImage | null> {
+async function fetchSummary(name: string, category?: string): Promise<EnrichedImage | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -143,6 +187,14 @@ async function fetchSummary(name: string): Promise<EnrichedImage | null> {
     // A disambiguation page ("Nia" could mean a dozen things) or a stub with no extract is not
     // a confident match — better to show no image than the wrong person/venue's photo.
     if (body.type && body.type !== 'standard') return null;
+    // THE P0 FIX — see `CATEGORY_PLAUSIBILITY_KEYWORDS`'s own comment above. `type: 'standard'`
+    // alone only proves Wikipedia found SOME real, non-ambiguous page for this exact string — not
+    // that it's the RIGHT one. Rejected here, before the image is even looked at, exactly the
+    // "entity-resolution confidence gates image attachment" requirement.
+    if (!plausibleForCategory(body, category)) {
+      logger.info({ name, category, description: body.description }, 'Wikipedia page resolved but its own description does not match the expected category — rejecting to avoid a wrong-entity image');
+      return null;
+    }
 
     // originalimage is the full-resolution source file — trusted at whatever size it reports,
     // since it's never a fixed-width crop the way thumbnail is. A bare thumbnail is only used
