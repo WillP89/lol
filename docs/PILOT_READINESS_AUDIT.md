@@ -922,3 +922,41 @@ read identically for a non-live adapter as a real un-configured live one would �
 vocabulary for every caller, test mode included, not a special case.
 
 Shipped: typecheck + lint clean, full backend suite green (80 files / 480 tests).
+
+## Cycle 13 — the live pilot certification workflow
+
+Direct build of the mission's other explicit ask: one command that runs the 8 representative real
+Crew intents (Alternative rock, UK garage/house, Comedy, Football, Japanese food, Food festival/
+market, Theatre, Social activity) through the activation harness in a single shot, instead of
+running `/inventory-probe?q=...` by hand 8 times and assembling the table manually — exactly how
+Cycle 8's own coverage matrix was originally built. `GET /admin/pilot-certification`
+(`apps/api/src/routes/admin.ts`) shares its core (`probeProviders`, extracted from
+`/inventory-probe` into one real implementation both routes call, so the two can't quietly drift
+apart) and reports, per intent: providers attempted/successful, raw/relevant/category-matched
+opportunity counts, and a `recommendationViability` rating. Diagnostic only, same posture as
+`/inventory-probe` — never writes to the database, never sends anything into a real Crew's chat.
+
+**The viability rating** (`GOOD`/`PARTIAL`/`POOR`/`UNSUPPORTED`/`LIVE_VALIDATION_REQUIRED`) is the
+same vocabulary Cycle 8's matrix used by hand, now computed from live data. **A real classification
+bug caught immediately by running it, not assumed correct**: the first version reported "Football"
+and "Food festival/market" as `LIVE_VALIDATION_REQUIRED` — technically true that *some* provider
+was live (OpenStreetMap/FHRS, always-on), but neither one's own `categories` array has ever claimed
+SPORT or FESTIVAL, so no amount of network access would ever make either return a football fixture
+or a food festival. That's `UNSUPPORTED`, not merely unverified. Fixed by checking live coverage
+against each adapter's own declared `categories` for the intent's expected category, not "is any
+adapter live at all" — re-run live after the fix, and the result now exactly matches Cycle 8's
+hand-built matrix, category for category: **Alternative rock (`UNSUPPORTED`), UK garage/house
+(`LIVE_VALIDATION_REQUIRED`), Comedy (`UNSUPPORTED`), Football (`UNSUPPORTED`), Japanese food
+(`LIVE_VALIDATION_REQUIRED`), Food festival/market (`UNSUPPORTED`), Theatre
+(`LIVE_VALIDATION_REQUIRED`), Social activity (`LIVE_VALIDATION_REQUIRED`)** — the same conclusion
+reached by hand in Cycle 8, now reproducible in one request rather than a repeat of that manual
+work. This is exactly the tool the mission asked for: once real credentials/network exist, running
+`GET /admin/pilot-certification` is the entire re-certification step.
+
+`test/pilotCertification.test.ts` (3 tests, mock-registry path per this suite's own sandbox-network
+convention) proves the request shape, all 8 intents run, the `city` override applies uniformly, and
+— deterministically, since every mock adapter is `isLive: false` — every intent honestly reports
+`UNSUPPORTED` rather than a misleading "unverified."
+
+Shipped: typecheck + lint clean, full backend suite green (81 files / 483 tests, the 3 new ones
+included).
