@@ -1613,3 +1613,112 @@ Task #133 complete.
 
 **Next**: task #134 (performance/reliability check + final multi-archetype simulation + the FULL
 pilot-readiness verdict).
+
+## Cycle 23: Task #134 — performance/reliability check, final simulation, FULL pilot-readiness verdict
+
+**Performance/reliability audit.** Read the actual hot paths, not just their tests:
+
+- `services/match.ts`'s candidate-scoring loop (the engine behind every recommendation) fetches
+  its candidate pool via a small, fixed number of batched `findMany` calls BEFORE the scoring
+  loop runs — confirmed no query is issued per-candidate inside the loop itself (grepped every
+  `for (const ...)` in the file against every `await prisma.`). Same confirmed for
+  `services/personalHome.ts`'s Home feed. No N+1 pattern in either of the two highest-traffic
+  read paths.
+- Every real external network call this app makes (Wikipedia/Wikimedia image enrichment, Pexels,
+  every live ticketing/places provider adapter) already uses an `AbortController` with a bounded
+  timeout (confirmed by reading `lib/imageEnrichment.ts`, `lib/categoryStockImages.ts`,
+  `lib/pexelsStockImages.ts`, `providers/live/*.ts` directly) — a slow/hanging third party can't
+  hang a request indefinitely.
+- `services/inventorySync.ts#ensureInventory` already implements real stale-while-revalidate: a
+  city that already has content is served immediately while a due resync runs in the background
+  (deduped per-city via `inFlightSyncs`, so concurrent Crews in the same city never trigger
+  duplicate syncs); only a genuinely empty city blocks. This is what keeps
+  `runRecommendationSweep`'s own sequential per-Crew loop (`crewRecommendations.ts`) from being a
+  real bottleneck at pilot scale — confirmed live during the final simulation below (multiple
+  fresh Crews delivered within ~1-2s of joining). Honest scaling note, not a pilot-blocking issue:
+  the sweep still processes Crews one at a time, so a much larger Crew count (hundreds, not tens)
+  would eventually make sweep duration worth revisiting — not a concern at pilot scale.
+- **FIXED, real gap found**: `services/chat.ts#listCrewMessages`'s catch-up (`after`) query had no
+  row cap at all, unlike the initial-load branch — a client reconnecting after a long gap (phone
+  offline overnight) against a busy Crew could have pulled an unboundedly large single response.
+  Capped it the same way as the initial-load case; the web client already advances its own
+  polling cursor from whatever it gets back, so catching up now just takes a couple more poll
+  ticks, never loses a message. Proven with `test/messagePagination.test.ts` (130 seeded messages,
+  cap holds, nothing lost or duplicated across two catch-up polls). Shipped through the
+  established pipeline (515+ tests clean on `main`).
+- Checked and found no new issue: DB index coverage on every hot query path (`Crew`,
+  `CrewMessage`, `CrewRecommendation`, `Experience`, `IntentSignal` all have real composite
+  indexes matching their actual query shapes); no unsafe/unparameterized SQL anywhere in `src/`;
+  Prisma's connection pool uses its own sane default (no override needed at this scale).
+
+**Final multi-archetype simulation — live, on the real running product, after every change made
+this entire mission.** Ran fresh Comedy, Football, cold-start (no personal taste at all), and
+Restaurant (with an adversarial chain-vs-independent pair) Crews through the real API against a
+freshly-seeded, uniquely-coordinated city:
+
+- **Football Crew**: delivered "Simulation City FC Matchday" at score 100 within ~1.3s of the
+  second member joining.
+- **Restaurant Crew** (Nando's + an independent kitchen both seeded): delivered the independent
+  "The Anchor Independent Kitchen", never the chain — P0-3's mass-market exclusion re-confirmed
+  live, a third time this mission, on brand-new data.
+- **Cold-start Crew** (zero personal taste on either member): correctly reported
+  `preferences_not_set`, never a fabricated guess.
+- **Comedy Crew**: the first attempt used `interestPreferences: ['comedy']` — the taxonomy
+  TERRITORY id, not a real leaf interest — and got a genuine `no_eligible_candidate` with
+  `totalScored: 0`. Investigated fully rather than dismissed: traced to `match.ts`'s
+  `passesPreferenceGate`, which correctly excludes a candidate when the Crew's own picks don't
+  resolve to anything in `TASTE_INTEREST_INDEX` (which only indexes real leaf interests, never
+  bare territory ids). Checked whether a real user or the AI taste-setup path could ever produce
+  this invalid input: the web picker (`CrewTuneSheet.tsx`) only ever sends `interest.id` from the
+  live-loaded taxonomy — a territory id is structurally never one of the buttons rendered; the AI
+  path (`aiTasteSetup.ts`) explicitly re-validates every model-returned id against
+  `TASTE_INTEREST_INDEX` before accepting it. Confirmed not reachable by any real product flow —
+  this was this simulation's own test-script bug, not a product bug. Re-ran with a real leaf
+  interest (`stand_up`): delivered "The Comedy Cellar Special" at score 60. Recorded here in full
+  rather than quietly redone, because a finding that turns out to be a false alarm — with the
+  actual investigation that proved it — is worth exactly as much honesty as a real one.
+- Full lifecycle exercised on the Comedy Crew: both members voted IN on the delivered Plan, the
+  owner locked it — a real `LOCKED` Plan, live.
+- Final `/admin/pilot-scorecard?days=1` read immediately after: 30 users, 17 crews, 88.2%
+  first-value rate, 27 evaluated / 8 delivered (29.6% delivered rate) in the window, 100%
+  rec-to-plan rate — every number internally consistent with what was actually done live in this
+  session. The scorecard itself, built and shipped in Cycle 21, correctly reflects a day's worth
+  of real activity including everything from this final simulation.
+
+## FULL PILOT-READINESS VERDICT
+
+Per the mission's own instruction to issue exactly one of NOT READY / PRE-LIVE READY — EXTERNAL
+SUPPLY VALIDATION REQUIRED / LIVE PILOT READY, considering the full scope of this entire mission
+(the original pilot-readiness workstreams, all three P0 foundation fixes, the pilot scorecard,
+the security review, and this cycle's performance/reliability check and final simulation):
+
+**PRE-LIVE READY — EXTERNAL SUPPLY VALIDATION REQUIRED.**
+
+What's closed:
+- All three P0 foundation failures (taste specificity/hierarchy, image truthfulness, mass-market
+  chain exclusion) — fixed, tested, and now re-confirmed live a further time this cycle on fresh
+  data.
+- The pilot scorecard — built, live-verified against real data, regression-tested, shipped.
+- Security/production hygiene — the one real gap found (ADMIN_API_KEY's public default with no
+  production guard) fixed and tested; the admin-key comparison hardened to constant-time; one
+  safe dependency patch applied; everything else audited and either confirmed already sound or
+  explicitly flagged (two dependency CVEs needing major version bumps, a lower-severity upload
+  MIME-sniffing gap) rather than silently deferred.
+- Performance/reliability — no N+1 patterns in either hot read path, every external call already
+  timeout-bounded, the inventory-sync stale-while-revalidate design already sound; one real gap
+  (the unbounded chat catch-up query) found and fixed.
+- The final multi-archetype simulation passed live, end-to-end, including a full
+  join→deliver→vote→lock lifecycle and a scorecard read that correctly reflects it — with one
+  investigated-and-resolved false alarm recorded honestly rather than hidden.
+
+What's still outstanding, unchanged by this cycle's work and not something a hygiene/simulation
+pass can manufacture: no live ticketed/places provider credentials are configured
+(TICKETMASTER_API_KEY, SKIDDLE_API_KEY, GOOGLE_PLACES_API_KEY, etc. all unset — confirmed
+repeatedly throughout this mission), and this sandbox's own outbound network access cannot reach
+the real external APIs (Wikipedia/Wikimedia/Pexels all confirmed unreachable from here directly,
+separately confirmed reachable from the real Render deployment in earlier cycles) to verify live
+image enrichment end-to-end. Real, live supply and a live-network image-enrichment check are the
+condition that gates LIVE PILOT READY — nothing else does.
+
+This closes the mission's full task list. Tasks #132, #133, #134 (and their P0 dependents,
+#135-138) are complete.
