@@ -290,3 +290,78 @@ explicit acceptance test: a realistic new Crew, members invited, no manual rescu
 reach a relevant first recommendation, with no silent permanent no-recommendation state, and
 member-derived initial recommendations must not produce obviously bad results for a highly
 conflicted Crew.
+
+## Cycle 3 — Crew first-value: genuinely solved, not just made visible
+
+Direct follow-up to the explicit correction that the Cycle 1b/2 banner (`preferencesSet` +
+persistent UI notice) was real, useful work but did NOT solve the underlying problem — a Crew
+could still exist indefinitely with zero recommendations if nobody completed the crew-level taste
+step. Fixed properly this cycle with a new module, `apps/api/src/services/crewTasteDerivation.ts`.
+
+**Design**: rather than replacing the explicit "a person decides the Crew's own taste" model (a
+deliberate prior product decision, `docs/DECISIONS.md`'s "no events or things should be done on
+crew until preference set... explicitly NOT derived/averaged from individual members"), this adds
+a safety net underneath it. When a Crew has no explicit pick, Plot now safely infers one from real
+overlap across its own members' individual `TasteProfile` data (built from their own onboarding
+swipes/interest picks — never invented). Two rules keep this from ever fabricating a false
+consensus:
+
+1. **Veto** — any member's real, meaningfully negative affinity for a category/interest excludes
+   it outright, regardless of how much everyone else likes it.
+2. **Real agreement, not one voice** — for a Crew of 2+ members, a preference needs a genuine
+   positive opinion from at least 2 DIFFERENT members, not just one enthusiast with everyone else
+   silent. This was the subtle failure mode found while building the first version of this fix:
+   without it, "no one objects" alone let almost every member's individual, unshared taste leak
+   through as if it were a Crew consensus — exactly the "average everyone's interests together and
+   recommend random generic things" failure the mission explicitly warned against. A solo Crew (1
+   member) is the one exception — that member's own real taste IS the only signal there is yet.
+
+A `CrewRecommendationSettings.preferencesSource` column (`'EXPLICIT' | 'DERIVED' | null`, new
+migration) tracks provenance. An explicit human pick always wins and can never be silently
+overwritten by a later derivation; a DERIVED guess is safely refined as membership/taste data
+changes, and the moment a person makes a real explicit choice it supersedes the guess immediately
+(re-fires the same "never come up empty" guarantee an explicit first-set already gets — proven via
+a dedicated test: a DERIVED rock/live-music guess, then an explicit switch to food/restaurants,
+delivers the food candidate, not the old rock guess).
+
+Wired into every real (non-diagnostic) evaluation path — the automatic sweep, the post-join
+trigger, and the manual "Find us something"/chat-suggest gate — so no path is left behind; kept
+out of `explainCrewRecommendation`, which is documented and relied on as a read-only admin
+diagnostic and must never have a side effect.
+
+**Full mission-specified acceptance suite**, `apps/api/test/crewFirstValueDerivation.test.ts`, all
+passing against the real pipeline (no mocking):
+- **Solo Crew, one member** — derives that member's own real taste alone.
+- **Two genuinely aligned members** — only the interest truly shared by both (rock) becomes the
+  derived direction; each member's own solo-held interests (comedy, pubs, etc.) do NOT leak in.
+  Confirmed against real seeded inventory: the rock-tagged candidate is delivered, an unrelated
+  jazz one is not.
+- **Highly conflicted trio** (football/boxing/pubs vs. restaurants/theatre/markets vs. live
+  music/comedy — every interest held by exactly one member) — derivation correctly stays empty,
+  no forced pick, and no recommendation of any kind is sent.
+- **Explicit override** — a Crew with a DERIVED rock guess adopts an explicit food/restaurants
+  pick and it wins quickly (immediate guaranteed delivery), and a later sweep never lets
+  derivation quietly revert it.
+- **Member changes** — a 3rd member joining refines a DERIVED guess (adds jazz once a 2nd person
+  shares it); a 4th member joining a Crew that's already EXPLICIT never touches it.
+- **The full realistic first-value journey** — create user, set personal taste, create Crew,
+  invite second member, second member joins, ordinary chat message, real inventory seeded, only
+  the automatic sweep runs (no manual preference rescue of any kind) — Plot safely derives the
+  Crew's shared taste, finds the real matching candidate, delivers it with a truthful (non-score-
+  exposing) reason. Then the Crew explicitly sets its own taste and the next eligible send
+  reflects the new choice.
+
+Web: the crew-detail banner now distinguishes the two real states — the original amber "Set up
+needed" (genuinely blocked, rare now) from a new soft green "Plot's using what your Crew already
+likes — tap to fine-tune it" (DERIVED, not blocked, just honestly labelled as a guess).
+
+Full suite validated on both api and web (typecheck + lint + `npx vitest run`: 77 files / 470
+tests passing) before shipping through the standard pipeline.
+
+**What remains honestly open**: this closes the "silent permanent no-recommendation state" for any
+Crew with real, overlapping member taste data — it does NOT (and structurally cannot) help a Crew
+whose members have no TasteProfile at all (skipped onboarding) or whose tastes never overlap even
+slightly; those Crews correctly stay gated until a person acts, which is the right behaviour, not
+a gap. The next highest-leverage question, per the mission's own next directive, is real inventory
+breadth/depth and a systematic audit of every remaining inventory-suppression gate — not yet
+started this cycle.
