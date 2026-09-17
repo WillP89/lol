@@ -579,3 +579,137 @@ renders pixel-identical to before, just with zero external dependency now.)
 Shipped: typecheck + lint clean on both `apps/web` and `apps/api`, full backend suite green
 (79 files / 476 tests — unaffected by this web-only change, re-run per this repo's standing
 pipeline discipline regardless).
+
+## Cycle 8 — the real inventory coverage matrix, with live per-intent evidence, and a correction
+
+Direct response to the standing, still-unanswered investment question: *can Plot reliably source
+enough real, relevant opportunities for materially different Crews?* Previous cycles fixed real
+pipeline bugs but never definitively separated "the pipeline works" from "the pipeline has real
+data to work with." This cycle does that separation with live evidence, not inference from code.
+
+**A correction, stated plainly first**: earlier in this cycle, a live 2-member Crew ("Stafford
+Rock Crew", real taste picks: Rock/Alternative/Live gigs, real Stafford location) was shown
+receiving an automatic recommendation — "Static Lines: Alternative Rock Live" at The Sugarmill,
+£15 — the instant its second member joined, with no manual trigger, and this was described as
+"real, live proof." That was imprecise and is corrected here: querying `ProviderListing` for that
+Experience shows its source is `mock_ticketing`, not a live provider. **What that run actually
+proves — and it's still real, still valuable evidence — is that the full pipeline mechanics
+(member join → derivation/explicit-preference gate → scoring → delivery → chat UI → vote/lock
+affordances) fire correctly end to end with no manual intervention.** It does NOT prove real-world
+supply. Those are two different claims and conflating them would be exactly the kind of
+overclaiming the mission's standing rules forbid. The rest of this cycle establishes what real
+supply actually looks like right now.
+
+**Decisive evidence, gathered directly, not inferred:**
+
+1. **No live-provider credentials are configured in this sandbox.** `apps/api/.env` has no
+   `TICKETMASTER_API_KEY`, `SKIDDLE_API_KEY`, `PREDICTHQ_ACCESS_TOKEN`, `GOOGLE_PLACES_API_KEY`, or
+   `FOURSQUARE_API_KEY`. Confirmed by direct `grep`, not by reading code and assuming.
+
+2. **This sandbox's network egress hard-blocks every provider host, including the two that need
+   no credential at all.** Direct `curl` against `overpass-api.de`, `api1-ratings.food.gov.uk`,
+   and `app.ticketmaster.com` each returned `CONNECT tunnel failed, response 403` — compared
+   against `api.github.com` succeeding (`200`) in the same test, confirming this is a specific
+   allowlist policy, not a general outage. The app's own `GET /admin/providers` self-reports the
+   identical fact with exact host names and remediation text: `openstreetmap` and `fhrs` both
+   show `health.status: "DOWN"`, error `"...Host not in allowlist: overpass.openstreetmap.ru. Add
+   this host to your network egress settings to allow access."` and `"...Host not in allowlist:
+   api.ratings.food.gov.uk..."` respectively. This is a sandbox/environment network-policy fact,
+   separate from and additional to the missing-credentials fact above — fixing one does not fix
+   the other. **This session has no ability to change either — no environment/infra settings
+   tool is available here, and no access to production's actual deployed configuration to know
+   whether either constraint even applies there.**
+
+3. **A real diagnostic-accuracy bug found and fixed along the way**: `GET /admin/inventory-probe`
+   (the endpoint built specifically to answer "what does Plot itself find" per-provider) was
+   silently reporting `fetchedTotal: 0, error: null` for both OpenStreetMap and FHRS — visually
+   indistinguishable from "this city genuinely has zero real listings." Root cause: `fetchListings()`
+   on every live adapter deliberately swallows its own network/API failures and returns `[]` (so
+   one down provider can never crash a real inventory sync sweep for everyone) — correct behaviour
+   for the sync path, but it meant this specific diagnostic endpoint had no way to tell a real zero
+   apart from a failed fetch, undermining the exact evidence it exists to give. Fixed in
+   `apps/api/src/routes/admin.ts`: when a live adapter's raw fetch returns empty, the probe now
+   additionally calls that adapter's own `healthCheck()` and surfaces its real DOWN reason instead
+   of a bare zero. Re-ran the probe after the fix — `openstreetmap`/`fhrs` now report the exact
+   same precise 403/allowlist error as `/admin/providers`, for every intent queried below, instead
+   of a misleading silent zero. Existing `test/inventoryProbe.test.ts` (mock-registry path, all 3
+   tests) and `test/experiencesNearAdmin.test.ts` re-verified passing; typecheck + lint clean.
+
+4. **Current DB inventory, by real source, queried directly**: `ProviderListing` join shows every
+   single row currently in the database — all 32 of them — comes from `mock_ticketing` (28: 20
+   LIVE_MUSIC, 8 CLUBBING, 4 COMEDY) or `manual_curation` (4 LIVE_MUSIC). Zero rows from
+   OpenStreetMap, FHRS, Ticketmaster, Skiddle, or PredictHQ — consistent with facts 1–2 above.
+
+5. **A second, more severe finding than "the sandbox can't verify real supply": the DEV/PRODUCTION
+   provider registry itself only ever has real coverage for 3 of 14 `ExperienceCategory` values
+   right now, by design, not by sandbox accident.** Reading `registry.ts`: `mockRestaurantProvider`
+   and `mockActivityProvider` were deliberately REMOVED from the non-test registry when
+   OpenStreetMap was added, on the explicit reasoning (in that file's own comment) that OSM would
+   always be live in production and showing fabricated listings alongside it would be the exact
+   "silently mixing stock and real data" the product directive forbids. That reasoning is sound
+   *if* OSM is actually reachable. `providerRegistry` in dev/production (not test) is therefore:
+   `[mock_ticketing-or-live-ticketed] + openstreetmap + fhrs + [google/foursquare if keyed]` — full
+   stop. **If OpenStreetMap and FHRS are down for any reason, in any real deployment — not just
+   this sandbox — 10 of 14 categories (RESTAURANT, BAR, SPORT, THEATRE, CINEMA, ART_CULTURE,
+   FESTIVAL, FITNESS, DAY_ACTIVITY, COMMUNITY) currently have zero fallback of any kind, mock or
+   real, and would return nothing at all, silently, with no operator-visible alarm beyond the
+   `/admin/providers` health check someone has to think to look at.** This is a real architectural
+   single-point-of-failure, independent of whether THIS sandbox's specific network block also
+   applies to the real production deployment — deliberately not changed this cycle (reintroducing
+   a mock fallback for these categories is a real product-policy call the original author already
+   reasoned through once; overriding it unilaterally without knowing whether production's OSM/FHRS
+   access actually works would be guessing at a fix for a problem that may not exist there) but
+   flagged here as a concrete, scoped follow-up worth a real decision: a health-check-gated mock
+   fallback (mirroring the existing `hasLiveTicketedProvider` pattern exactly) would close this
+   gap without ever silently mixing fabricated and real listings.
+
+**The Inventory Coverage Matrix** — built from evidence above plus a live `/admin/inventory-probe`
+run for each named intent against Birmingham (the best-covered real UK city in this DB), not
+inferred from code alone. `LIVE VALIDATION REQUIRED` means: the adapter code correctly targets
+this category and would very likely return real, relevant results once network access + (where
+needed) a credential are both in place — but that is a claim this sandbox cannot verify today, and
+is not being presented as verified.
+
+| Intent | Maps to | Current real status | Rating | Evidence |
+|---|---|---|---|---|
+| Rock / Alternative Rock | LIVE_MUSIC | `mock_ticketing` only; confirmed `categoriesWithNoLiveSource` includes LIVE_MUSIC | **UNSUPPORTED (live)** | `/admin/providers`; pipeline mechanics proven live (Cycle 8 Stafford run) |
+| House / UK Garage / Electronic | CLUBBING | `mock_ticketing` covers CLUBBING generically, not genre-specific; OSM covers nightlife *venues* not lineups; Skiddle (genre-strong per its own file comment) unconfigured | **UNSUPPORTED (live)** | registry.ts categories; no SKIDDLE_API_KEY in .env |
+| Football / Championship football | SPORT | **No adapter targets SPORT at all in the current dev/prod registry** — Ticketmaster/Skiddle/PredictHQ all cover it in code but none are configured; mock_ticketing does not include SPORT | **UNSUPPORTED (live)**, POOR even once keyed (real fixture data, not every club/league) | grep across `src/providers/live/*.ts`; DB has 0 SPORT rows |
+| Comedy | COMEDY | `mock_ticketing` only; confirmed `categoriesWithNoLiveSource` includes COMEDY | **UNSUPPORTED (live)** | `/admin/providers` self-report |
+| Japanese food / Restaurants | RESTAURANT | FHRS + OpenStreetMap both target RESTAURANT (OSM has cuisine tagging incl. Japanese); both DOWN in this sandbox | **LIVE VALIDATION REQUIRED** — code support is GOOD, real status unverifiable here | inventory-probe: fetchedTotal 0, error = allowlist 403 (both providers) |
+| Food festivals | FESTIVAL | **No adapter targets FESTIVAL in dev/prod registry** — Skiddle/PredictHQ/Ticketmaster cover it in code, none configured | **UNSUPPORTED (live)** | grep across providers; DB has 0 FESTIVAL rows |
+| Food markets | RESTAURANT/DAY_ACTIVITY (OSM `amenity=marketplace`) | OSM-only, no ticketed-events equivalent; DOWN in this sandbox | **LIVE VALIDATION REQUIRED**, likely PARTIAL even when live (static markets, not scheduled market *events*) | openStreetMap.ts category coverage; DOWN status |
+| Theatre | THEATRE | OSM covers theatre *venues*, not what's showing; Ticketmaster covers real show listings but unconfigured | **LIVE VALIDATION REQUIRED** for venues, **UNSUPPORTED (live)** for actual programming | registry.ts; no TICKETMASTER_API_KEY |
+| Cinema | CINEMA | OSM covers cinema venues only, not showtimes; no showtime-data adapter implemented at all | **POOR** even with network fixed — venue existence only, never "what's on" | openStreetMap.ts category list; no cinema-listings adapter exists in codebase |
+| Exhibitions / Art & culture | ART_CULTURE | OSM-only; DOWN in this sandbox | **LIVE VALIDATION REQUIRED** | inventory-probe DOWN status |
+| Family activities | DAY_ACTIVITY | OSM-only; DOWN in this sandbox | **LIVE VALIDATION REQUIRED** | inventory-probe DOWN status |
+| Outdoor activities | DAY_ACTIVITY/FITNESS | OSM-only; DOWN in this sandbox | **LIVE VALIDATION REQUIRED** | inventory-probe DOWN status |
+| Escape rooms / Bowling | DAY_ACTIVITY | OSM tags these inconsistently in practice (real-world OSM data-quality risk, not just this sandbox's network); DOWN here regardless | **LIVE VALIDATION REQUIRED**, genuine risk of PARTIAL even when live | openStreetMap.ts scope; general OSM tagging-completeness caveat |
+| Seasonal / local events | FESTIVAL/COMMUNITY | Same as Food festivals — no adapter live/configured | **UNSUPPORTED (live)** | grep across providers |
+
+**Suppression-gate audit status, confirmed**: the user's specific worry — that good inventory
+might still be silently destroyed somewhere between PROVIDER and DELIVERY — was already run as a
+full systematic pass in Cycle 4 above (every gate between fetch and delivery read in order; 3 real
+bugs found, fixed, regression-tested, shipped: plan-worthiness-gate-after-the-cut, Skiddle missing
+pagination, dedup missing location-awareness). That audit is complete, not something this cycle
+needed to redo. Its own "not yet done" list (OSM/FHRS silent truncation-cap logging, Google/
+Foursquare single-page-only, the permanent PLACE_PROVIDER exclusion question) remains accurate and
+unchanged.
+
+**The precise, actionable blocker for the person who can act on it** (per the mission's own "state
+it honestly and continue" rule): two distinct, independent things are needed before Plot can
+source real supply, neither of which this session can do from inside this sandbox —
+(1) **register for and configure at least one real event-ticketing credential**
+(`TICKETMASTER_API_KEY` and/or `SKIDDLE_API_KEY` and/or `PREDICTHQ_ACCESS_TOKEN` — Skiddle has the
+lowest signup friction of the three per its own file's research notes) — this alone would light up
+LIVE_MUSIC, CLUBBING, COMEDY with real data and, depending on which key, SPORT/FESTIVAL/THEATRE
+too; (2) **confirm whether the real production deployment's network egress can reach
+`overpass-api.de`/`*.openstreetmap.ru`/`*.openstreetmap.fr` (OSM mirrors) and
+`api1-ratings.food.gov.uk` (FHRS)** — both need zero signup or credential, and together they are
+the only current path to real RESTAURANT/BAR/THEATRE-venue/CINEMA-venue/ART_CULTURE/DAY_ACTIVITY/
+FITNESS/COMMUNITY coverage. If production's network already allows these (a normal cloud
+deployment usually would; this specific interactive coding sandbox's proxy is a much tighter,
+deliberately restrictive policy that is not evidence production is equally restricted), then
+`/admin/providers` and `/admin/inventory-probe` — both already built and both fixed to be honest
+this cycle — are the exact tools to run there to get the real per-intent counts this matrix could
+not obtain from here.
