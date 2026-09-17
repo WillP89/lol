@@ -101,10 +101,45 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const recommendationWindowEnd = new Date();
     recommendationWindowEnd.setDate(recommendationWindowEnd.getDate() + CANDIDATE_WINDOW_DAYS);
 
+    // Real gap this closes (the "activation harness" — see docs/PILOT_READINESS_AUDIT.md Cycle
+    // 12): a bare `error` string and a raw count left the caller to work out for themselves
+    // whether "0 results" meant no credential, no network, a rejected auth header, the provider
+    // rate-limiting us, a real provider outage, or a city that genuinely has nothing right now —
+    // exactly the ambiguity someone activating a provider for the first time needs resolved
+    // without reading this file's source. `classifyOutcome` turns the raw error text (every
+    // adapter's own fetch throws a consistent `"<Provider> API returned <status>: <body>"` shape
+    // — see e.g. ticketmaster.ts#fetchPage) into one of a small, fixed set of outcomes so the
+    // response can be read as an answer, not a puzzle.
+    type ProbeStatus = 'not_configured' | 'auth_failed' | 'rate_limited' | 'unreachable' | 'provider_error' | 'provider_empty' | 'no_matches_for_query' | 'success';
+    function classifyOutcome(opts: { isLive: boolean; fetchedTotal: number; matchedTotal: number; hadQuery: boolean; rawError: string | null }): ProbeStatus {
+      if (!opts.isLive) return 'not_configured';
+      if (opts.rawError) {
+        // Real bug this specific check fixes, caught by reading this endpoint's own live output
+        // rather than assuming the classifier was right: an outbound network policy (this
+        // sandbox's own egress proxy, or any other allowlist a real deployment might sit behind)
+        // returns a 403 that LOOKS identical, at the raw-status level, to the provider itself
+        // rejecting a credential — but for a no-credential adapter (OpenStreetMap/FHRS) there is
+        // no credential to have failed, and even for a keyed one this 403 never reached the real
+        // provider at all. Labelling it `auth_failed` would send someone straight to the wrong
+        // place (double-checking an API key that was never the problem). Checked first, before
+        // the generic status-code mapping below.
+        if (/host not in allowlist/i.test(opts.rawError)) return 'unreachable';
+        const statusMatch = opts.rawError.match(/returned (\d{3})/);
+        const code = statusMatch ? Number(statusMatch[1]) : null;
+        if (code === 401 || code === 403) return 'auth_failed';
+        if (code === 429) return 'rate_limited';
+        if (code !== null) return 'provider_error';
+        return 'unreachable'; // network-level failure (DNS, timeout, connection refused/reset, egress block) — no HTTP status at all
+      }
+      if (opts.fetchedTotal === 0) return 'provider_empty';
+      if (opts.hadQuery && opts.matchedTotal === 0) return 'no_matches_for_query';
+      return 'success';
+    }
+
     const adapters = providerRegistry.filter((a) => !provider || a.id === provider);
     const perProvider = await Promise.all(
       adapters.map(async (adapter) => {
-        if (!adapter.isLive) return { id: adapter.id, isLive: false, error: null, matched: 0, events: [] as unknown[] };
+        if (!adapter.isLive) return { id: adapter.id, isLive: false, status: 'not_configured' as ProbeStatus, error: null, fetchedTotal: 0, matched: 0, events: [] as unknown[] };
         try {
           const raw = await adapter.fetchListings({ city, fromDate, toDate });
           const mapped = raw
@@ -129,10 +164,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
           // because it's actually unreachable right now, and surface that reason instead of a
           // silent zero — the one piece of evidence this endpoint exists to give.
           const unexplainedEmpty = mapped.length === 0 ? await adapter.healthCheck().catch(() => null) : null;
+          const rawError = unexplainedEmpty && unexplainedEmpty.status === 'DOWN' ? unexplainedEmpty.error ?? 'Provider health check reports DOWN' : null;
           return {
             id: adapter.id,
             isLive: true,
-            error: unexplainedEmpty && unexplainedEmpty.status === 'DOWN' ? unexplainedEmpty.error ?? 'Provider health check reports DOWN' : null,
+            status: classifyOutcome({ isLive: true, fetchedTotal: mapped.length, matchedTotal: filtered.length, hadQuery: Boolean(needle), rawError }),
+            error: rawError,
             fetchedTotal: mapped.length,
             matched: filtered.length,
             events: filtered
@@ -149,7 +186,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
               })),
           };
         } catch (err) {
-          return { id: adapter.id, isLive: true, error: err instanceof Error ? err.message : String(err), matched: 0, events: [] as unknown[] };
+          const rawError = err instanceof Error ? err.message : String(err);
+          return { id: adapter.id, isLive: true, status: classifyOutcome({ isLive: true, fetchedTotal: 0, matchedTotal: 0, hadQuery: Boolean(q), rawError }), error: rawError, fetchedTotal: 0, matched: 0, events: [] as unknown[] };
         }
       }),
     );

@@ -33,12 +33,17 @@ describe('GET /admin/inventory-probe', () => {
   test('reports every registered adapter, honestly marking a non-live one rather than pretending to have probed it', async () => {
     const res = await app.inject({ method: 'GET', url: '/admin/inventory-probe?city=Birmingham', headers: { 'x-admin-key': ADMIN_KEY } });
     expect(res.statusCode).toBe(200);
-    const body = res.json() as { city: string; recommendationWindowDays: number; providers: { id: string; isLive: boolean; events: unknown[] }[] };
+    const body = res.json() as { city: string; recommendationWindowDays: number; providers: { id: string; isLive: boolean; status: string; fetchedTotal: number; events: unknown[] }[] };
     expect(body.city).toBe('Birmingham');
     expect(body.recommendationWindowDays).toBe(45); // CANDIDATE_WINDOW_DAYS — widened from 21, see match.ts's own comment
     expect(body.providers.length).toBeGreaterThan(0);
     for (const p of body.providers) {
       expect(p.isLive).toBe(false); // NODE_ENV=test always runs the mock registry — see registry.ts
+      // The classified-status field (Cycle 12's activation harness) must read exactly the same
+      // as a real un-configured live adapter would, not a distinct "test mode" value — the whole
+      // point is one honest vocabulary for every caller, mock registry included.
+      expect(p.status).toBe('not_configured');
+      expect(p.fetchedTotal).toBe(0);
       expect(p.events).toEqual([]);
     }
   });
