@@ -329,6 +329,15 @@ export async function getCrewDetail(crewId: string, requestingUserId: string) {
         members: { where: { status: 'ACTIVE' }, include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true } } }, orderBy: { joinedAt: 'asc' } },
         dna: true,
         plans: { orderBy: { createdAt: 'desc' }, take: 10, include: { experience: { include: { venue: true } }, votes: true, members: true } },
+        // Real gap this closes: a Crew whose creation flow was abandoned between the mandatory
+        // taste step and "Invite" (closed the tab, backgrounded the app) has a real DB row —
+        // joinable via a link shared before the abandonment — but no preference ever got saved,
+        // so `evaluateCrewEligibility` silently returns `preferences_not_set` forever with no
+        // proactive signal anywhere a member would actually see it (the only existing prompt is
+        // reactive, inside the "Find us something" sheet, never shown just from opening the
+        // Crew). Exposed here so the Crew page itself can show a persistent, honest banner
+        // instead of a Crew that silently never says anything and nobody knows why.
+        recommendationSettings: { select: { preferencesSetAt: true } },
       },
     }),
     // A 3-message preview so the Crew page can answer "what's the conversation about right
@@ -342,14 +351,19 @@ export async function getCrewDetail(crewId: string, requestingUserId: string) {
   ]);
   if (!crew) return null;
 
+  const { recommendationSettings, ...crewFields } = crew;
   return {
-    ...crew,
+    ...crewFields,
     recentMessages: recentMessages.reverse(),
     // The caller's OWN per-Crew email-digest preference (see PATCH /crews/:id/notifications) —
     // exposed here (not a separate GET) since every Crew-page load already fetches this same
     // membership row to gate the whole response; a second round-trip just to read one boolean
     // would be a real, avoidable request the frontend doesn't need.
     myEmailNotificationsEnabled: membership.emailNotificationsEnabled,
+    // A brand-new Crew that never got a settings row at all (never reached the mandatory taste
+    // step) is exactly as "not set" as one that reached it and saved nothing — both mean
+    // `evaluateCrewEligibility` will return `preferences_not_set` forever until someone acts.
+    preferencesSet: Boolean(recommendationSettings?.preferencesSetAt),
   };
 }
 
