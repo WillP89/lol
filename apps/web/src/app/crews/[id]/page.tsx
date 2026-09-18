@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
@@ -17,6 +17,7 @@ import { CrewTuneSheet } from '@/components/CrewTuneSheet';
 import { LocationSearch, type UkPlaceResult } from '@/components/LocationSearch';
 import { IconSpark, IconPlace, IconPoll, IconCalendar, IconFlag, IconLock, IconGathering, IconAddPerson } from '@/components/icons';
 import { identityPair } from '@/lib/identity';
+import { interestLabel } from '@plot/shared';
 
 interface CrewListItem {
   id: string;
@@ -846,7 +847,18 @@ export default function CrewPage() {
   const [respondAckByRecId, setRespondAckByRecId] = useState<Record<string, string>>({});
   // The auto-recommendation system's Crew-level controls (on/off, frequency, travel range) -
   // fetched lazily the first time the Crew info sheet opens.
-  const [recSettings, setRecSettings] = useState<{ enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null; categoryPreferences: string[]; interestPreferences: string[] } | null>(null);
+  const [recSettings, setRecSettings] = useState<{
+    enabled: boolean;
+    maxPerWeek: number;
+    travelRadiusMeters: number | null;
+    categoryPreferences: string[];
+    interestPreferences: string[];
+    // EXPLICIT vs DERIVED vs never-set — see CrewRecommendationSettings.preferencesSource's own
+    // schema comment. Read here (not just on the separate `crew` object) so the settings panel
+    // itself — the exact screen someone opens to check what's selected — can be honest about
+    // whether what's shown is a real human decision or still Plot's own inferred guess.
+    preferencesSource: 'EXPLICIT' | 'DERIVED' | null;
+  } | null>(null);
   const [savingRecSettings, setSavingRecSettings] = useState(false);
   // Real gap this fixes: a failed PATCH used to revert silently with zero feedback — from the
   // user's side that reads as "I tapped a setting and nothing happened" (or worse, "it happened
@@ -856,6 +868,29 @@ export default function CrewPage() {
   // UI consumer until this pass. Lazily loaded alongside recSettings.
   const [crewTaste, setCrewTaste] = useState<{ topInterests: { interestId: string; label: string; overlapCount: number; totalMembers: number; hasConflict: boolean }[] } | null>(null);
   const [tuneCrewOpen, setTuneCrewOpen] = useState(false);
+  // P0-FINAL-3 — EXPLICIT vs DERIVED-but-real vs LEARNED/observed are three genuinely different
+  // concepts (see this file's own settings-panel JSX comment for the real bug this fixes): this
+  // is the Crew's OWN real picks, both levels (category + interest), as one flat, human-labelled
+  // list — exactly and only what `recommendation-settings` actually holds, never anything a
+  // member individually happens to like.
+  const selectedPreferenceChips = useMemo(() => {
+    if (!recSettings) return [];
+    const categories = recSettings.categoryPreferences.map((value) => {
+      const known = CATEGORY_PREFERENCE_CHIPS.find((c) => c.value === value);
+      return { kind: 'category' as const, value, label: known?.label ?? value };
+    });
+    const interests = recSettings.interestPreferences.map((value) => ({ kind: 'interest' as const, value, label: interestLabel(value) }));
+    return [...categories, ...interests];
+  }, [recSettings]);
+  // The LEARNED/observed counterpart (computeCrewTasteSummary) — real, but never a Crew pick on
+  // its own (a single member's own personal affinity is enough to appear here). Anything already
+  // in `selectedPreferenceChips` is filtered out so nothing can ever read as both a suggestion
+  // and a pick at once.
+  const suggestedPreferenceChips = useMemo(() => {
+    if (!crewTaste || !recSettings) return [];
+    const picked = new Set(recSettings.interestPreferences);
+    return crewTaste.topInterests.filter((i) => !picked.has(i.interestId)).slice(0, 6);
+  }, [crewTaste, recSettings]);
   // Real, live-reported bug this fixes: a Crew that predates the location feature (or whose
   // members never set a home location) had no way to give Plot an explicit centre point at
   // all — it silently fell back to a single hardcoded UK-wide default, which could make a
@@ -1394,7 +1429,16 @@ export default function CrewPage() {
   async function loadRecSettings() {
     if (recSettings) return;
     try {
-      const res = await api.get<{ settings: { enabled: boolean; maxPerWeek: number; travelRadiusMeters: number | null; categoryPreferences: string[]; interestPreferences: string[] } }>(`/crews/${crewId}/recommendation-settings`);
+      const res = await api.get<{
+        settings: {
+          enabled: boolean;
+          maxPerWeek: number;
+          travelRadiusMeters: number | null;
+          categoryPreferences: string[];
+          interestPreferences: string[];
+          preferencesSource: 'EXPLICIT' | 'DERIVED' | null;
+        };
+      }>(`/crews/${crewId}/recommendation-settings`);
       setRecSettings(res.settings);
       setSettingsError(null);
     } catch (err) {
@@ -2416,59 +2460,92 @@ export default function CrewPage() {
                     </button>
                   ))}
                 </div>
-                <div className="v2-dim" style={{ fontSize: 11, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>What&rsquo;s this Crew about?</div>
-                <p className="v2-muted" style={{ fontSize: 11.5, marginBottom: 8, lineHeight: 1.5 }}>
-                  Optional — pick anything this Crew is specifically into. Boosts those on top of everyone&rsquo;s own taste, it doesn&rsquo;t replace it.
-                </p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {CATEGORY_PREFERENCE_CHIPS.map((chip) => {
-                    const active = recSettings.categoryPreferences.includes(chip.value);
-                    return (
+                {/* P0-FINAL-3 rebuild — the real, live-reported bug: this section used to show
+                    member-derived "Get specific" chips (computeCrewTasteSummary — one person's own
+                    personal taste is enough to appear there) in the exact same solid chip style as
+                    genuine picks, with only a hover tooltip (invisible on mobile) telling them
+                    apart, right next to a summary that only ever said "N interests picked" without
+                    ever naming them. Someone glancing at this screen could not tell what the Crew
+                    had actually chosen versus what Plot had merely noticed about individual
+                    members. Rebuilt around one rule: THIS BLOCK ANSWERS "WHAT IS THIS CREW INTO?"
+                    — and shows ONLY what the Crew actually picked, by name, nothing else
+                    masquerading as a pick. */}
+                <div className="v2-dim" style={{ fontSize: 11, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>What&rsquo;s this Crew into?</div>
+
+                {/* Honest about DERIVED state right here, not just in the banner above the chat —
+                    this is the exact screen someone opens to check what's selected, so the "this
+                    is still Plot's own guess" caveat has to live here too. */}
+                {recSettings.preferencesSource === 'DERIVED' && (
+                  <p style={{ fontSize: 11.5, marginBottom: 8, lineHeight: 1.5, color: 'var(--v2-green)', fontWeight: 700 }}>
+                    Plot guessed this from what your Crew already likes — tap anything below to confirm or change it.
+                  </p>
+                )}
+
+                {selectedPreferenceChips.length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 4 }}>
+                    {selectedPreferenceChips.map((chip) => (
                       <button
-                        key={chip.value}
-                        onClick={() => toggleCategoryPreference(chip.value)}
+                        key={`${chip.kind}:${chip.value}`}
+                        onClick={() => (chip.kind === 'category' ? toggleCategoryPreference(chip.value) : toggleInterestPreference(chip.value))}
                         disabled={savingRecSettings}
                         className="v2-tap-feedback"
-                        aria-pressed={active}
-                        style={{ padding: '7px 12px', borderRadius: 100, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: active ? 'var(--v2-brand)' : 'var(--v2-bg-deep)', color: active ? 'var(--v2-brand-ink)' : 'var(--v2-ink-muted)' }}
+                        title="Tap to remove"
+                        style={{ padding: '7px 12px', borderRadius: 100, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: 'var(--v2-brand)', color: 'var(--v2-brand-ink)', display: 'flex', alignItems: 'center', gap: 5 }}
                       >
                         {chip.label}
+                        <span style={{ opacity: 0.7, fontSize: 11 }}>×</span>
                       </button>
-                    );
-                  })}
-                </div>
-
-                {/* GET SPECIFIC — the real fix for "crew settings are super limited, it needs to
-                    be as flexible as the personal plot settings". Same "specific interests, not
-                    just broad categories" upgrade Profile already got (TuneMyPlotSheet), applied
-                    here: a real, already-built taste-summary read (crewTaste, previously wired to
-                    no UI at all) plus a launcher into the full territory/interest picker. */}
-                <div className="v2-dim" style={{ fontSize: 11, fontWeight: 700, marginTop: 18, marginBottom: 6 }}>Get specific</div>
-                {crewTaste && crewTaste.topInterests.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                    {crewTaste.topInterests.slice(0, 6).map((i) => (
-                      <span
-                        key={i.interestId}
-                        title={i.hasConflict ? 'Mixed feelings in this Crew' : `${i.overlapCount}/${i.totalMembers} of you are into this`}
-                        style={{ padding: '7px 12px', borderRadius: 100, background: 'var(--v2-bg-deep)', fontSize: 11.5, fontWeight: 700, color: 'var(--v2-ink)' }}
-                      >
-                        {i.label} · {i.overlapCount}/{i.totalMembers}
-                      </span>
                     ))}
                   </div>
+                ) : (
+                  <p className="v2-muted" style={{ fontSize: 12.5, marginBottom: 4, lineHeight: 1.5 }}>
+                    Nothing picked yet — this Crew&rsquo;s Plot is running on members&rsquo; own individual taste alone.
+                  </p>
                 )}
-                <p className="v2-muted" style={{ fontSize: 11.5, marginBottom: 8, lineHeight: 1.5 }}>
-                  {recSettings.interestPreferences.length > 0
-                    ? `${recSettings.interestPreferences.length} specific ${recSettings.interestPreferences.length === 1 ? 'interest' : 'interests'} picked for this Crew.`
-                    : 'Go one level more specific than the categories above — UK garage, not just "music".'}
+                <p className="v2-muted" style={{ fontSize: 11, marginBottom: 14, lineHeight: 1.4 }}>
+                  Exactly what this Crew picked — nothing else. Boosts these on top of everyone&rsquo;s own taste, never replaces it.
                 </p>
+
+                {/* PLOT'S NOTICED — the same member-derived signal the old "Get specific" section
+                    showed, kept (real, useful data — the mission's own "if learned/derived
+                    information is useful, separate it clearly" requirement), but now unmistakably
+                    a SUGGESTION TRAY, never a picks list: outline-only chips (never the solid
+                    brand fill a real pick gets), its own distinct heading, an explicit "+" and
+                    "tap to add" affordance, and anything already picked filtered out so nothing
+                    ever appears to double as both a suggestion and a pick at once. Hidden entirely
+                    when there's nothing worth suggesting, rather than shown empty or low-quality —
+                    "if learned insight quality is not yet strong enough for this screen: DON'T
+                    SHOW IT". */}
+                {suggestedPreferenceChips.length > 0 && (
+                  <>
+                    <div className="v2-dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Plot&rsquo;s noticed</div>
+                    <p className="v2-muted" style={{ fontSize: 11, marginBottom: 8, lineHeight: 1.4 }}>
+                      From your members&rsquo; own individual taste — not picked for this Crew yet. Tap to add.
+                    </p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+                      {suggestedPreferenceChips.map((i) => (
+                        <button
+                          key={i.interestId}
+                          onClick={() => toggleInterestPreference(i.interestId)}
+                          disabled={savingRecSettings}
+                          className="v2-tap-feedback"
+                          title={i.hasConflict ? 'Mixed feelings in this Crew — tap to add anyway' : `${i.overlapCount}/${i.totalMembers} of you are into this — tap to add`}
+                          style={{ padding: '7px 12px', borderRadius: 100, border: '1.5px dashed var(--v2-ink-dim)', cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: 'var(--v2-ink-muted)', background: 'transparent', display: 'flex', alignItems: 'center', gap: 5 }}
+                        >
+                          <span style={{ opacity: 0.7 }}>+</span> {i.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+
                 <button
                   type="button"
                   onClick={() => setTuneCrewOpen(true)}
                   className="v2-btn v2-btn-brand v2-tap-feedback"
                   style={{ width: '100%' }}
                 >
-                  Tune this Crew&rsquo;s Plot
+                  Change what this Crew&rsquo;s into
                 </button>
               </>
             )}
