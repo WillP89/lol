@@ -22,6 +22,19 @@ import type { ProviderAdapter, RawListing, CanonicalListingInput } from '../src/
  * which very likely defeats Commons search too even though it's a different endpoint on the same
  * domain family (see pexelsStockImages.ts's own header for the full story).
  */
+// P0-FINAL image audit: isImageQualityBad now also positively rejects a CONFIRMED-broken URL
+// (a real, resolved non-2xx/206 HTTP status — see lib/imageDimensions.ts's own header), not just
+// a below-floor resolution. The fake `https://…` URLs this file uses to prove fallback ORDER
+// aren't real images at all, and this sandbox's own network policy resolves an outbound fetch to
+// them with a non-2xx status rather than throwing — previously indistinguishable from a genuine
+// network hiccup (both "unprovable, keep"), now correctly read as "confirmed broken" by design.
+// Same established pattern as imageResolutionFloor.test.ts's own mock: this file is about
+// syncProvider's fallback ORDER across tiers, not about re-proving the gate itself (see
+// test/unit/imageDimensions.test.ts for that).
+vi.mock('../src/lib/imageDimensions', async () => {
+  const actual = await vi.importActual<typeof import('../src/lib/imageDimensions')>('../src/lib/imageDimensions');
+  return { ...actual, isImageQualityBad: vi.fn(async () => false) };
+});
 vi.mock('../src/lib/categoryStockImages', async () => {
   const actual = await vi.importActual<typeof import('../src/lib/categoryStockImages')>('../src/lib/categoryStockImages');
   return {

@@ -139,4 +139,18 @@ describe('isImageQualityBad — the real, provider-agnostic gate every source go
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unreachable')));
     expect(await isImageQualityBad('https://img.example/unreachable.jpg')).toBe(false);
   });
+
+  // P0-FINAL image audit — the "BROKEN" bucket: a confirmed dead URL is real, provable evidence
+  // (unlike a network-level probe failure, which stays genuinely ambiguous and must keep failing
+  // open) — this is the actual fix for a broken image URL previously sailing through the gate
+  // as "unprovable, so keep it" exactly like a real network hiccup would.
+  it('flags a confirmed-dead URL (a real HTTP failure status) as bad — provable, unlike a network error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+    expect(await isImageQualityBad('https://img.example/dead-link.jpg')).toBe(true);
+  });
+
+  it('still returns the real width from probeImageWidth even though isImageQualityBad now rejects a 404 — the two checks stay independent', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+    expect(await probeImageWidth('https://img.example/dead-link.jpg')).toBeNull();
+  });
 });

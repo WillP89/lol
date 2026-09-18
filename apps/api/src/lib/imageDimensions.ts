@@ -95,10 +95,22 @@ export function readWidthFromHeader(buf: Buffer): number | null {
   return readDimensionsFromHeader(buf)?.width ?? null;
 }
 
-/** Fetches just enough of `url` to read its real pixel dimensions. null = genuinely couldn't
- *  tell (network failure, server ignored Range, unrecognised format) — treated as "keep it", not
- *  "reject it", so a probe failure never turns a working sync into a broken one. */
-export async function probeImageDimensions(url: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<ImageDimensions | null> {
+export interface ImageProbeResult {
+  dims: ImageDimensions | null;
+  // True ONLY when the URL definitively returned a non-2xx/206 HTTP status (404, 410, 500, a
+  // dead redirect target, …) — real, provable evidence this image is broken, the "BROKEN" bucket
+  // the P0-FINAL image audit specifically calls out. Never set on a network error/timeout/abort —
+  // those stay genuinely unprovable (see this file's own "never reject on an unprovable check"
+  // policy below) since they say nothing about whether the URL itself is actually dead.
+  confirmedBroken: boolean;
+}
+
+/** Fetches just enough of `url` to read its real pixel dimensions AND to positively confirm
+ *  whether the URL itself is dead. `dims: null, confirmedBroken: false` = genuinely couldn't
+ *  tell (network failure, unrecognised format) — treated as "keep it", not "reject it", so an
+ *  unprovable check never turns a working sync into a broken one. `confirmedBroken: true` is the
+ *  one real exception to that — a definitive bad HTTP status is provable, not ambiguous. */
+export async function probeImage(url: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<ImageProbeResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -107,23 +119,32 @@ export async function probeImageDimensions(url: string, timeoutMs = PROBE_TIMEOU
       headers: { Range: `bytes=0-${PROBE_BYTES - 1}`, 'User-Agent': 'Plot/1.0 (https://plotmaker.co.uk; image-quality-check)' },
     });
     // A 200 (Range ignored, whole file came back) is still fine to read from — only a hard
-    // failure status is genuinely "couldn't check this".
-    if (!res.ok && res.status !== 206) return null;
+    // failure status is genuinely "couldn't check this", and that status IS itself real proof
+    // the URL is broken, not just an unreadable-but-maybe-fine response.
+    if (!res.ok && res.status !== 206) return { dims: null, confirmedBroken: true };
     const buf = Buffer.from(await res.arrayBuffer());
-    return readDimensionsFromHeader(buf);
+    return { dims: readDimensionsFromHeader(buf), confirmedBroken: false };
   } catch (err) {
     logger.warn({ err, url }, 'Image dimension probe failed — keeping the image, not rejecting on an unprovable check');
-    return null;
+    return { dims: null, confirmedBroken: false };
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** True only when the real bytes PROVE this image fails the floor or the aspect-ratio sanity
- *  check — an unprovable result (probe failure, unrecognised format) is never treated as a
+/** Back-compat accessor — most callers only ever needed the dimensions, not the broken-status
+ *  flag; kept so the existing unit tests exercise the exact same parser. */
+export async function probeImageDimensions(url: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<ImageDimensions | null> {
+  return (await probeImage(url, timeoutMs)).dims;
+}
+
+/** True when the real bytes PROVE this image fails the floor or the aspect-ratio sanity check,
+ *  OR the URL is confirmed dead (a real, provable HTTP failure — the "BROKEN" case). An
+ *  unprovable result (network-level probe failure, unrecognised format) is never treated as a
  *  failure, see this file's own header comment. */
 export async function isImageQualityBad(url: string): Promise<boolean> {
-  const dims = await probeImageDimensions(url);
+  const { dims, confirmedBroken } = await probeImage(url);
+  if (confirmedBroken) return true;
   if (!dims) return false;
   if (dims.width < MIN_IMAGE_WIDTH) return true;
   const ratio = dims.width / Math.max(dims.height, 1);

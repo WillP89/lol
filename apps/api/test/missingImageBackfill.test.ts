@@ -9,6 +9,17 @@ import { resetDatabase } from './helpers/resetDb';
  * `imageUrl: null` indefinitely on a pilot-scale app with sparse traffic. backfillMissingImages
  * re-runs the full chain against every existing null-image row instead of waiting for that.
  */
+// P0-FINAL image audit: isImageQualityBad now also positively rejects a CONFIRMED-broken URL (a
+// real, resolved non-2xx/206 HTTP status), not just a below-floor resolution — this sandbox's own
+// network policy resolves a real outbound fetch to this file's fake test URLs with a non-2xx
+// status rather than throwing, which used to be indistinguishable from a genuine network hiccup
+// (both "unprovable, keep") and is now correctly read as "confirmed broken". Same established
+// pattern as imageResolutionFloor.test.ts's own mock: this file is about the enrichment chain's
+// fallback ORDER, not about re-proving the gate itself (see test/unit/imageDimensions.test.ts).
+vi.mock('../src/lib/imageDimensions', async () => {
+  const actual = await vi.importActual<typeof import('../src/lib/imageDimensions')>('../src/lib/imageDimensions');
+  return { ...actual, isImageQualityBad: vi.fn(async () => false) };
+});
 vi.mock('../src/lib/imageEnrichment', async () => {
   const actual = await vi.importActual<typeof import('../src/lib/imageEnrichment')>('../src/lib/imageEnrichment');
   return {

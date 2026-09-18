@@ -1,8 +1,20 @@
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { prisma } from '../src/lib/prisma';
 import { resetDatabase } from './helpers/resetDb';
 import { syncProvider } from '../src/services/inventorySync';
 import type { ProviderAdapter, CanonicalListingInput } from '../src/providers/types';
+
+// P0-FINAL image audit: isImageQualityBad now also positively rejects a CONFIRMED-broken URL (a
+// real, resolved non-2xx/206 HTTP status), not just a below-floor resolution — this sandbox's own
+// network policy resolves a real outbound fetch to this file's fake CATEGORY_STOCK/OSM test URLs
+// with a non-2xx status rather than throwing, previously indistinguishable from a genuine network
+// hiccup (both "unprovable, keep") and now correctly read as "confirmed broken". Same established
+// pattern as imageResolutionFloor.test.ts's own mock: this file is about `keepExistingImage`'s own
+// provenance rules, not about re-proving the gate itself (see test/unit/imageDimensions.test.ts).
+vi.mock('../src/lib/imageDimensions', async () => {
+  const actual = await vi.importActual<typeof import('../src/lib/imageDimensions')>('../src/lib/imageDimensions');
+  return { ...actual, isImageQualityBad: vi.fn(async () => false) };
+});
 
 /**
  * TWO real, live-caught bugs this proves fixed, both about the same "should a resync overwrite
