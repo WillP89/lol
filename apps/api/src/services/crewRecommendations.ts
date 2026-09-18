@@ -3,6 +3,7 @@ import { logger } from '../lib/logger';
 import { track } from './analytics';
 import { ensureInventory, enrichMissingImageForExperience } from './inventorySync';
 import { scoreExperiencesForCrew, getCrewExcludedExperienceIds, DEFAULT_RADIUS_METERS, type MatchOption } from './match';
+import { experienceInterestTagsFromSubcategories } from './tasteSignals';
 import { createRecommendationPlanForCrew } from './plan';
 import { sendSystemMessage } from './chat';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
@@ -109,13 +110,46 @@ const MAX_EXPLORATORY_SENDS_PER_WEEK = 1;
 // Real, live-reported product failure this closes: "Plot sent an ordinary Stafford restaurant
 // instead of a genuinely strong food festival that might exist a bit further out" — location was
 // acting as a hard rescue-or-reject filter with no attempt to look wider when nothing near enough
-// cleared the bar. Tried in order, stopping at the first tier that actually produces an eligible
-// (or exploratory) candidate — never relaxes the quality/taste-signal bar itself, only widens the
-// geographic net a real strong match is allowed to be found within. Bounded on purpose ("Plot
-// should not recommend something in London to a Stafford Crew... respect user/Crew travel
-// tolerance") — 3x a Crew's own radius is already a deliberately generous "worth knowing about
-// even though it's a stretch" ceiling, not a search-the-whole-country fallback.
-const RADIUS_EXPANSION_MULTIPLIERS = [2, 3];
+// cleared the bar.
+//
+// P0-FINAL re-audit ("do not assume multiplying radius is automatically correct"): a flat `3x`
+// multiplier is fine for a small preferred radius (10mi -> 30mi is a reasonable stretch) but
+// breaks down at the real range the Crew radius picker actually offers (apps/web's own
+// RADIUS_CHIPS goes up to "Worth travelling" = ~99 miles) — `3x` on a 50-mile preference is a
+// 150-mile recommendation, and nobody asked for that just because the multiplier said so. Three
+// independent bounds, the SMALLEST of which always wins, so none of them alone has to be
+// perfectly tuned:
+//  1. RELATIVE cap — never more than `EXPANSION_RELATIVE_CAP` x the Crew's own preferred radius,
+//     tiered by how much the specific candidate actually earns (see `isSignificantOpportunity`).
+//  2. ADDITIVE cap — never more than a bounded number of EXTRA miles beyond the preferred radius,
+//     also tiered by significance — this is what actually stops a big preferred radius from
+//     blowing up multiplicatively (100mi extra on a 50mi base would still pass the relative cap
+//     at 2x; the additive cap is what catches it).
+//  3. ABSOLUTE ceiling — `HARD_MAXIMUM_RADIUS_MILES` — never exceeded regardless of preference or
+//     significance. Set to the single widest radius the Crew's own picker can ever explicitly
+//     choose ("Worth travelling", ~99mi) — Plot's own automatic reach never exceeds the most
+//     generous distance a Crew could have picked for itself.
+//
+// SIGNIFICANCE — "a major concert/festival can justify more travel than a small comedy night" —
+// is never assumed from distance or category label alone; it's read from the same real evidence
+// this whole file already trusts everywhere else (see `isSignificantOpportunity`): a VERY_HIGH
+// plan-worthiness occasion (FESTIVAL), a real ticket, or a CONFIRMED (subcategory-sourced, not
+// loose text) match to one of the Crew's own specific interest picks. A candidate beyond the
+// STANDARD additive/relative cap must earn one of these to use the wider SIGNIFICANT cap at all
+// — this is the actual "opportunity significance should matter" gate, not a second unconditional
+// multiplier. A weak, generic candidate that merely happens to sit within 3x radius no longer
+// gets to use that allowance for free.
+const EXPANSION_RELATIVE_CAP = { standard: 2, significant: 3 };
+const EXPANSION_ADDITIVE_MILES = { standard: 15, significant: 35 };
+const HARD_MAXIMUM_RADIUS_MILES = 100; // apps/web's own top RADIUS_CHIPS option ("Worth travelling", 160000m)
+
+/** The real, bounded "how far is a sensible stretch" computation — see the constants' own
+ *  comment for why this is three independent caps, smallest wins, rather than a bare multiplier. */
+function computeSensibleExpansionMiles(baseMiles: number, tier: 'standard' | 'significant'): number {
+  const relative = baseMiles * EXPANSION_RELATIVE_CAP[tier];
+  const additive = baseMiles + EXPANSION_ADDITIVE_MILES[tier];
+  return Math.max(baseMiles, Math.min(relative, additive, HARD_MAXIMUM_RADIUS_MILES));
+}
 
 // The real delivery cadence — shared by server.ts's own poll and the admin sweep endpoint's
 // default (non-`force`) path, so there is exactly one place this number lives, not two that can
@@ -306,7 +340,7 @@ function lowerFirst(s: string): string {
 export const TICKETED_FALLBACK_PREFACE = "There's not much in your area right now, so how about this";
 
 // Real, live-reported product requirement: when Plot deliberately searches beyond a Crew's own
-// radius (see RADIUS_EXPANSION_MULTIPLIERS's own comment) and that's what actually found the
+// radius (see computeSensibleExpansionMiles's own comment) and that's what actually found the
 // pick, the delivery copy must say so — "Plot must NEVER pretend the expanded-distance result is
 // local." Computed from the real distance, never a fabricated or rounded-away number.
 function radiusExpansionPreface(extraMiles: number): string {
@@ -492,7 +526,7 @@ export interface CrewEligibilityResult {
   // not the deliberate, evidence-backed exploration this actually is).
   forceExploratoryConfidence?: boolean;
   // True only when `best` was found by deliberately searching wider than this Crew's own radius
-  // (see RADIUS_EXPANSION_MULTIPLIERS's own comment) — never true just because `best` happens to
+  // (see computeSensibleExpansionMiles's own comment) — never true just because `best` happens to
   // sit near the edge of the Crew's normal radius. Tells generateRecommendationForCrewNow to
   // honestly acknowledge the extra distance in the delivery copy, never present an expanded-
   // radius pick as if it were local.
@@ -510,6 +544,25 @@ export interface CrewEligibilityResult {
  *  and only falls back to the highest-scoring candidate overall (ticketed or not) when it
  *  doesn't, flagging that fallback so the caller can preface the message honestly. Sorts its own
  *  copy of `pool` — never assumes the caller already sorted it. */
+/** The actual "opportunity significance should matter" gate (see EXPANSION_ADDITIVE_MILES's own
+ *  comment) — real, checkable evidence only, never inferred from distance or category label.
+ *  Any ONE of: a VERY_HIGH plan-worthiness occasion (FESTIVAL — see opportunityIntent.ts's own
+ *  CATEGORY_BASELINE), a real ticket, or CONFIRMED (subcategory-sourced, never the loose text-
+ *  scan `experienceInterestTags` also does — see match.ts#contradictsCrewInterestPreference's own
+ *  comment on why that distinction matters) evidence of one of the Crew's own specific interest
+ *  picks — "relevance", not just "this happens to be popular". A candidate with none of these is
+ *  an ordinary match that merely sits within the STANDARD sensible-expansion band; asking it to
+ *  also justify the wider SIGNIFICANT band is exactly the "not a dumb multiplier" requirement. */
+function isSignificantOpportunity(option: MatchOption, crewInterestPreferences: Set<string>): boolean {
+  if (derivePlanWorthiness(option.experience).level === 'VERY_HIGH') return true;
+  if (isTicketedEvent(option.experience)) return true;
+  if (crewInterestPreferences.size > 0) {
+    const strongTags = experienceInterestTagsFromSubcategories(option.experience);
+    if (strongTags.some((tag) => crewInterestPreferences.has(tag))) return true;
+  }
+  return false;
+}
+
 function pickBest(pool: MatchOption[]): { best: MatchOption | undefined; usedTicketedFallback: boolean } {
   const sorted = [...pool].sort((a, b) => b.matchScore - a.matchScore);
   const ticketed = sorted.find((o) => isTicketedEvent(o.experience));
@@ -624,7 +677,7 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
       ['category_affinity', 'crew_dna_match', 'crew_preference', 'interest_match', 'free_text_match', 'crew_interest_preference'].includes(r.code),
     );
 
-  // Radius-expansion tiering (see RADIUS_EXPANSION_MULTIPLIERS's own comment) — the scoring +
+  // Radius-expansion tiering (see computeSensibleExpansionMiles's own comment) — the scoring +
   // fatigue + exclusion + radius/taste-signal pipeline, parametrised on the radius override so it
   // can be re-run at progressively wider radii without duplicating the pipeline itself. THE CORE
   // FIX for "Caffè Nero in London sent to a 25-mile Stafford Crew" lives inside here unchanged:
@@ -653,7 +706,16 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   // still shows up in this trail with its real rejection reason, exactly the debugging case the
   // spec calls for — never silently absent from the trail just because it was excluded from
   // consideration. See routes/admin.ts's explain-recommendation endpoint, the only consumer.
-  function buildDetails(pools: Awaited<ReturnType<typeof computePoolsAtRadius>>, radiusMetersUsed: number | null) {
+  function buildDetails(
+    pools: Awaited<ReturnType<typeof computePoolsAtRadius>>,
+    radiusMetersUsed: number | null,
+    // Set only when `pools` was scored against the widened (beyond-preferred-radius) tier — lets
+    // the debug trail name the SPECIFIC reason a real, in-radius-at-this-tier candidate still
+    // isn't eligible: it's further than the Crew's own sensible-expansion band and never earned
+    // the wider allowance (see `isSignificantOpportunity`'s own comment). Omitted for tier0 (the
+    // Crew's own preferred radius — this gate never applies there at all).
+    significanceContext?: { standardMiles: number; crewInterestPreferences: Set<string> },
+  ) {
     const debugCandidates = [...pools.scored]
       .sort((a, b) => b.matchScore - a.matchScore)
       .slice(0, 10)
@@ -662,6 +724,15 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
         const rejectionReasons: string[] = [];
         if (excluded.has(o.experience.id)) rejectionReasons.push('ALREADY_RECOMMENDED_OR_SHARED');
         if (o.withinRadius !== true) rejectionReasons.push(o.withinRadius === false ? 'OUTSIDE_CREW_RADIUS' : 'DISTANCE_UNKNOWN');
+        if (
+          significanceContext &&
+          o.withinRadius === true &&
+          o.distanceMiles !== null &&
+          o.distanceMiles > significanceContext.standardMiles &&
+          !isSignificantOpportunity(o, significanceContext.crewInterestPreferences)
+        ) {
+          rejectionReasons.push('BEYOND_SENSIBLE_EXPANSION_WITHOUT_SIGNIFICANCE');
+        }
         // See match.ts#contradictsCrewInterestPreference's own comment — the P0 fix for "Live
         // gigs + Rock recommended K-pop". Checked before the generic NO_TASTE_SIGNAL below so the
         // debug trail names the SPECIFIC reason (confirmed evidence of a different, non-matching
@@ -710,14 +781,14 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   // Location was acting as a hard rescue-or-reject filter with zero attempt to look wider, EVEN
   // when what qualified locally was only a weak, marginal match. "QUALITY MUST BEAT PROXIMITY" —
   // this is a genuine HEAD-TO-HEAD, not just a last-resort fallback for when local comes up
-  // completely empty: the widest sensible search is always tried too, and whichever candidate
-  // actually scores higher wins, wherever it is. Every tier re-runs the EXACT same quality/taste-
-  // signal bar (MIN_RECOMMENDATION_SCORE, hasTasteSignal, plan-worthiness, chain exclusion —
-  // nothing here is ever relaxed to make a tier "succeed"), only the geographic net widens.
-  // Bounded on purpose ("Plot should not recommend something in London to a Stafford Crew...
-  // respect user/Crew travel tolerance") — RADIUS_EXPANSION_MULTIPLIERS' own widest tier is
-  // already a deliberately generous "worth knowing about even though it's a stretch" ceiling, not
-  // a search-the-whole-country fallback.
+  // completely empty: the widest SENSIBLE search (see `computeSensibleExpansionMiles`'s own
+  // comment — never a bare `Nx` multiplier once the Crew's own preferred radius gets large) is
+  // always tried too, and whichever candidate actually scores higher wins, wherever it is. Every
+  // tier re-runs the EXACT same quality/taste-signal bar (MIN_RECOMMENDATION_SCORE,
+  // hasTasteSignal, plan-worthiness, chain exclusion — nothing here is ever relaxed to make a
+  // tier "succeed"), only the geographic net widens — and even that widened net only admits a
+  // candidate beyond the STANDARD band when it earns the wider SIGNIFICANT one (see
+  // `isSignificantOpportunity`).
   //
   // Computed BEFORE the guaranteeFirst branch below (not after) — real gap this closes: a Crew's
   // very first-ever recommendation is exactly the moment being wrong matters most, and it used to
@@ -725,9 +796,23 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   // impression deserves the same "quality beats proximity" guarantee as every later sweep.
   const baseRadiusMeters = settings.travelRadiusMeters ?? DEFAULT_RADIUS_METERS;
   const baseRadiusMiles = Math.round((baseRadiusMeters / 1609.34) * 10) / 10;
-  const widestMultiplier = RADIUS_EXPANSION_MULTIPLIERS[RADIUS_EXPANSION_MULTIPLIERS.length - 1];
-  const widestRadiusMeters = Math.round(baseRadiusMeters * widestMultiplier);
-  const widePools = await computePoolsAtRadius(widestRadiusMeters);
+  const crewInterestPreferences = new Set(settings.interestPreferences);
+  const standardMiles = computeSensibleExpansionMiles(baseRadiusMiles, 'standard');
+  const significantMiles = computeSensibleExpansionMiles(baseRadiusMiles, 'significant');
+  const widestRadiusMeters = Math.round(significantMiles * 1609.34);
+  const widePoolsRaw = await computePoolsAtRadius(widestRadiusMeters);
+  // The actual "opportunity significance should matter" gate, applied once here rather than
+  // scattered across every consumer below: a candidate within the STANDARD band needs nothing
+  // extra (an ordinary sensible stretch); beyond it, only a genuinely significant one survives.
+  // `inRadius` is rebuilt first (the source of truth), `withTaste`/`eligible` re-derived from it
+  // so the subset invariant `eligible ⊆ withTaste ⊆ inRadius` computePoolsAtRadius relies on
+  // elsewhere stays true here too.
+  const gatedInRadius = widePoolsRaw.inRadius.filter(
+    (o) => o.distanceMiles === null || o.distanceMiles <= standardMiles || isSignificantOpportunity(o, crewInterestPreferences),
+  );
+  const gatedWithTaste = gatedInRadius.filter(hasTasteSignal);
+  const gatedEligible = gatedWithTaste.filter((o) => o.matchScore >= MIN_RECOMMENDATION_SCORE);
+  const widePools = { ...widePoolsRaw, inRadius: gatedInRadius, withTaste: gatedWithTaste, eligible: gatedEligible };
 
   let winnerPools = tier0;
   let winnerRadiusMeters: number | null = settings.travelRadiusMeters;
@@ -744,24 +829,13 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     winnerRadiusMeters = widestRadiusMeters;
     usedRadiusExpansion = wideBest.distanceMiles !== null && wideBest.distanceMiles > baseRadiusMiles;
   }
-
-  if (winnerPools.eligible.length === 0) {
-    // Nothing cleared the bar even at the widest sensible search — try the intermediate tiers
-    // too (finer-grained than the single wide jump above) before giving up entirely, so a
-    // genuinely real match sitting at, say, 2x radius isn't missed purely because 3x's own pool
-    // (a strict superset by candidate membership, but re-scored at a wider radius so the
-    // distance component differs) happened not to contain an eligible one this pass.
-    for (const multiplier of RADIUS_EXPANSION_MULTIPLIERS.slice(0, -1)) {
-      const expandedRadiusMeters = Math.round(baseRadiusMeters * multiplier);
-      const expandedPools = await computePoolsAtRadius(expandedRadiusMeters);
-      if (expandedPools.eligible.length > 0) {
-        winnerPools = expandedPools;
-        winnerRadiusMeters = expandedRadiusMeters;
-        usedRadiusExpansion = true;
-        break;
-      }
-    }
-  }
+  // Nothing else to try beyond this — `widePools` already IS the widest sensible search
+  // (`computeSensibleExpansionMiles`'s own significant tier), gated by real evidence. There is no
+  // "try 2x, then 3x" ladder left to walk: a candidate that didn't clear the gate at the
+  // significant tier was never going to clear it at a narrower one either, and one that did was
+  // already scored and considered above. If nothing here is eligible, nothing genuinely qualifies
+  // — see this function's own `no_eligible_candidate` return below ("SEND NOTHING" is the correct,
+  // honest outcome, never a manufactured one).
 
   const { withTaste } = winnerPools;
 
@@ -838,7 +912,7 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     return {
       outcome: 'eligible',
       details: {
-        ...(guaranteedUsedExpansion ? buildDetails(guaranteedPools, guaranteedRadiusMeters) : details),
+        ...(guaranteedUsedExpansion ? buildDetails(guaranteedPools, guaranteedRadiusMeters, { standardMiles, crewInterestPreferences }) : details),
         guaranteedFirst: true,
         guaranteedFirstHadTasteSignal: guaranteedWithTaste.length > 0,
       },
@@ -869,7 +943,9 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   const { best, usedTicketedFallback } = pickBest(winnerPools.eligible);
   return {
     outcome: 'eligible',
-    details: usedRadiusExpansion ? { ...buildDetails(winnerPools, winnerRadiusMeters), radiusExpansionMiles: baseRadiusMiles } : details,
+    details: usedRadiusExpansion
+      ? { ...buildDetails(winnerPools, winnerRadiusMeters, { standardMiles, crewInterestPreferences }), radiusExpansionMiles: baseRadiusMiles }
+      : details,
     best,
     usedTicketedFallback,
     usedRadiusExpansion,
