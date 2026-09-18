@@ -283,20 +283,26 @@ describe('controlled exploration', () => {
   test('a genuine sub-threshold-but-defensible ticketed candidate is sent as EXPLORATORY when nothing else clears the normal bar, and never displaces a real match', async () => {
     await resetDatabase();
     const { crewId } = await seedRawCrew({ ...HOME, categoryPreferences: ['SPORT'] });
-    // Right at the edge of the radius (small distance bonus), one of two members marked busy
-    // (half availability credit), and a real ticket (+14) — real evidence, but deliberately not
-    // enough to clear the normal MEDIUM floor (55).
+    // Right at the edge of the radius (small distance bonus), both members marked busy (zero
+    // availability credit), and a real ticket (+14) — real evidence, but deliberately not enough
+    // to clear the normal MEDIUM floor (55). Deliberately zero availability credit, not "half"
+    // (P0-FINAL radius-expansion note below): this candidate must stay sub-threshold not just at
+    // the Crew's own 25-mile radius, but also at the widened 3x search evaluateCrewEligibility
+    // always tries too (see RADIUS_EXPANSION_MULTIPLIERS's own comment) — at that far wider
+    // radius this candidate's own distance bonus is no longer small (it's now close to the
+    // WIDE radius's own centre), so every OTHER component must be low enough that even the
+    // maximum possible distance bonus still can't push the total to 55.
     const edgeLat = HOME.lat + 0.34; // ~24 real miles from HOME — just inside a 25-mile radius
     const exp = await seedExperience({ name: 'Exploratory Candidate', category: 'SPORT', lat: edgeLat, lng: HOME.lng, provider: 'mock_ticketing', priceMinMinor: 1500 });
     const members = await prisma.crewMember.findMany({ where: { crewId }, select: { userId: true } });
-    await prisma.availabilityWindow.create({
-      data: {
-        userId: members[0].userId,
+    await prisma.availabilityWindow.createMany({
+      data: members.map((m) => ({
+        userId: m.userId,
         busy: true,
         startsAt: new Date(exp.startsAt.getTime() - 60 * 60 * 1000),
         endsAt: new Date(exp.startsAt.getTime() + 5 * 60 * 60 * 1000),
-        source: 'MANUAL',
-      },
+        source: 'MANUAL' as const,
+      })),
     });
 
     const explain = await explainCrewRecommendation(crewId);
@@ -319,14 +325,17 @@ describe('controlled exploration', () => {
     const edgeLat = HOME.lat + 0.34;
     const exp = await seedExperience({ name: 'Second Exploratory Candidate', category: 'SPORT', lat: edgeLat, lng: HOME.lng, provider: 'mock_ticketing', priceMinMinor: 1500 });
     const members = await prisma.crewMember.findMany({ where: { crewId }, select: { userId: true } });
-    await prisma.availabilityWindow.create({
-      data: {
-        userId: members[0].userId,
+    // Both members busy (zero availability credit), not just one — see the first exploratory
+    // test's own comment on why this must stay sub-threshold at the widened radius too, not just
+    // the Crew's own base radius.
+    await prisma.availabilityWindow.createMany({
+      data: members.map((m) => ({
+        userId: m.userId,
         busy: true,
         startsAt: new Date(exp.startsAt.getTime() - 60 * 60 * 1000),
         endsAt: new Date(exp.startsAt.getTime() + 5 * 60 * 60 * 1000),
-        source: 'MANUAL',
-      },
+        source: 'MANUAL' as const,
+      })),
     });
     // A prior EXPLORATORY send 40 hours ago — outside the 36-hour cadence window (so cadence
     // alone would allow a new send), but still inside the 7-day exploratory rate-limit window.

@@ -97,7 +97,7 @@ describe('golden path: signup through Rewind', () => {
       method: 'PATCH',
       url: `/crews/${crewId}/recommendation-settings`,
       headers: { cookie: sessions.alex.cookie },
-      payload: { categoryPreferences: ['BAR'] },
+      payload: { categoryPreferences: ['LIVE_MUSIC'] },
     });
     expect(prefRes.statusCode).toBe(200);
 
@@ -580,7 +580,7 @@ describe('suggest-to-chat: the core loop puts suggestions straight into the conv
       method: 'PATCH',
       url: `/crews/${crew.id}/recommendation-settings`,
       headers: { cookie: owner.cookie },
-      payload: { categoryPreferences: ['BAR'] },
+      payload: { categoryPreferences: ['LIVE_MUSIC'] },
     });
 
     const res = await app.inject({ method: 'POST', url: `/crews/${crew.id}/suggest-to-chat`, headers: { cookie: owner.cookie } });

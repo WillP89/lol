@@ -27,15 +27,34 @@ import type { Experience, ExperienceCategory } from '@prisma/client';
  *
  * A well-known CHAIN name (Caffè Nero, Starbucks, a fast-food chain, …) is force-floored to
  * VERY_LOW regardless of category or source — a chain location is never itself a reason a
- * friendship group plans a night out. That is the actual "Caffè Nero" fix, and it alone. A
- * PLACE-sourced RESTAURANT/BAR/CLUBBING/FITNESS/COMMUNITY listing that ISN'T a chain stays at
- * the ordinary category baseline (MEDIUM) — a real, specifically-named independent venue is a
- * legitimate destination on its own merit, the same bar an EVENT-sourced or UNKNOWN-sourced
- * listing in that category clears. A genuine specialness signal in the listing's own text (a
- * festival, a market, a tasting, a pop-up, a themed night) still UPGRADES it to HIGH — see
- * `derivePlanWorthiness`'s own comment for the real, previously-live inventory-suppression bug
- * this distinction fixes: a real Japanese restaurant a Crew explicitly asked for was excluded
- * from ever being recommended purely for not using festival-branded marketing language.
+ * friendship group plans a night out. That is the original "Caffè Nero" fix.
+ *
+ * SECOND real, live-reported failure this file now also closes ("The Hidden Chef" — an ordinary,
+ * perfectly pleasant Italian restaurant — was the first thing Plot proactively sent a Crew whose
+ * explicit preferences were FOOD FESTIVALS + STREET FOOD + ITALIAN): an ordinary RESTAURANT/BAR/
+ * CLUBBING/FITNESS/COMMUNITY listing — REGARDLESS of source, chain or not — is now LOW by
+ * default, not MEDIUM. This is a DELIBERATE product-direction override of this file's own earlier
+ * decision (preserved in git history) to keep a real, non-chain PLACE_PROVIDER venue at MEDIUM so
+ * independent restaurants weren't suppressed wholesale. That earlier fix solved the wrong problem
+ * for the wrong surface: it was right that Explore/Home should show real independent places
+ * (they still do — this file has never touched those two surfaces, see the header above), but
+ * WRONG that the proactive `Plot Found This` slot — the one high-confidence interruption into a
+ * Crew's own conversation — should treat "an independent restaurant exists nearby" as a plan on
+ * its own. It should not. "Here is an Italian restaurant near Stafford" is generic local search
+ * Google Maps already does; it is never itself a reason Plot interrupts a Crew's chat. Only a
+ * genuine EVENT_PROVIDER-sourced dated occasion, or a real specialness signal in the listing's
+ * own text (a festival, a market, a tasting, a pop-up, street food, a themed night — see
+ * `hasSpecialnessSignal`), upgrades it back to HIGH — a real destination worth interrupting a
+ * Crew's chat for, not just a venue that exists. This is also what actually composes a Crew's
+ * own multiple preferences into one INTENT rather than treating them as independent OR
+ * conditions: a Crew that picked FOOD FESTIVALS + STREET FOOD + ITALIAN is asking for an
+ * Italian-leaning FOOD FESTIVAL/STREET-FOOD OCCASION, not "anything Italian OR anything
+ * food-related OR anything at all in the food category" — an ordinary Italian restaurant with
+ * zero festival/street-food signal never satisfied the FIRST two picks at all, it only ever
+ * slipped through because the category gate (`categoriesImpliedByInterests` in match.ts) is
+ * necessarily OR-shaped across a Crew's picks (any one interest's parent category is enough to
+ * enter the pool) — this file is what actually enforces that entering the pool and being
+ * plan-worthy were never the same test.
  *
  * This governs the CREW recommendation engine specifically (services/match.ts's shared scorer,
  * used by the automatic sweep AND the manual "Find us something"/"Suggest something" flows —
@@ -101,7 +120,7 @@ export function isGenericChainName(name: string): boolean {
 // PLACE-sourced RESTAURANT tagged `amenity=marketplace` with "Market" literally in its name is
 // exactly the honest signal this exists to catch (see openStreetMap.ts's own `label()`).
 const SPECIALNESS_WORDS =
-  /\b(festival|market|pop-?up|tasting|supper club|bottomless|brunch|workshop|exhibition|late night|special|launch|residency|showcase|tour|street food|takeover|series)\b/i;
+  /\b(festival|market|pop-?up|tasting|supper club|bottomless|brunch|workshop|exhibition|late night|special|launch|residency|showcase|tour|street food|takeover|series|club nights?)\b/i;
 
 function hasSpecialnessSignal(experience: Pick<Experience, 'name' | 'description' | 'subcategories'>): boolean {
   const subcats = Array.isArray(experience.subcategories) ? (experience.subcategories as string[]) : [];
@@ -135,11 +154,14 @@ const CATEGORY_BASELINE: Partial<Record<ExperienceCategory, PlanWorthiness>> = {
   COMMUNITY: 'MEDIUM',
 };
 
-// Categories a PLACE_PROVIDER source downgrades by default — permanent-venue listings in these
-// categories are exactly "there's a coffee shop/bar/gym nearby", not a plan. Deliberately does
+// Categories that default to LOW — not eligible for proactive `Plot Found This` — unless a real
+// occasion signal (EVENT_PROVIDER dated occasion, or a specialness word in the listing's own
+// text) upgrades them. Applies regardless of source (PLACE_PROVIDER, EVENT_PROVIDER, or UNKNOWN
+// alike — see this file's own header for why this is now source-independent). Deliberately does
 // NOT include ART_CULTURE/CINEMA/THEATRE (a museum or cinema, even as a static place listing, is
-// still a real destination a Crew can choose to go to — unlike "there's a Costa nearby").
-const PLACE_PROVIDER_DOWNGRADE_CATEGORIES = new Set<ExperienceCategory>(['RESTAURANT', 'BAR', 'CLUBBING', 'FITNESS', 'COMMUNITY']);
+// still a real destination a Crew can choose to go to — unlike "there's a Costa nearby") or
+// DAY_ACTIVITY (handled separately below via its own activity-venue-word check).
+const PLACE_LIKE_CATEGORIES = new Set<ExperienceCategory>(['RESTAURANT', 'BAR', 'CLUBBING', 'FITNESS', 'COMMUNITY']);
 
 export interface PlanWorthinessResult {
   level: PlanWorthiness;
@@ -175,32 +197,34 @@ export function derivePlanWorthiness(
     }
   }
 
-  if (sourceKind === 'PLACE_PROVIDER' && PLACE_PROVIDER_DOWNGRADE_CATEGORIES.has(experience.category)) {
-    if (hasSpecialnessSignal(experience)) {
+  if (PLACE_LIKE_CATEGORIES.has(experience.category)) {
+    if (sourceKind === 'EVENT_PROVIDER') {
+      // A real dated occasion in a normally-generic category (PredictHQ's food-drink ->
+      // RESTAURANT, Skiddle's CLUB eventcode -> CLUBBING) — this IS a genuine plan, not "a place
+      // exists". Unconditional: a real events API returning a dated row here is by construction
+      // a genuine occasion, whatever words its own listing text happens to use.
       level = 'HIGH';
-      reasons.push('place_provider_but_specialness_signal');
+      reasons.push('event_provider_dated_occasion');
+    } else if (hasSpecialnessSignal(experience)) {
+      level = 'HIGH';
+      reasons.push('specialness_signal');
+    } else {
+      // THE ACTUAL FIX for "The Hidden Chef" (a real, live-reported failure: a Crew whose
+      // explicit preferences were FOOD FESTIVALS + STREET FOOD + ITALIAN got sent an ordinary
+      // Italian restaurant with none of the first two). Deliberately source-independent — this
+      // used to only downgrade a PLACE_PROVIDER-sourced listing, on the reasoning that a real,
+      // specifically-named independent venue (any source) is "a legitimate destination on its
+      // own merit". That reasoning solved the wrong problem for the wrong surface: Explore/Home
+      // (this file has never touched either — see the header above) is exactly where "a real
+      // independent venue exists nearby" belongs; the automatic Crew engine's one proactive
+      // interruption slot is not. An ordinary restaurant/bar/club/fitness/community venue —
+      // manually curated, mock, or place-provider-sourced, chain or not — is now LOW by default,
+      // same bar for the automatic engine and the manual "Find us something"/"Suggest something"
+      // flows alike (see this file's own header on why all three share one bar). Only a real
+      // occasion signal (checked above) earns the interruption.
+      level = 'LOW';
+      reasons.push('ordinary_place_no_occasion_signal');
     }
-    // Real, live-found bug this closes, found running a controlled pilot-readiness audit: this
-    // used to fall through to an ELSE that force-floored to LOW — meaning ANY real, non-chain
-    // restaurant/bar/club/fitness venue from FHRS or OpenStreetMap (Plot's own deepest, most
-    // geographically complete, keyless real inventory) was excluded from ever reaching a Crew's
-    // automatic recommendation, however well it matched taste, UNLESS its own text happened to
-    // contain a marketing word like "pop-up" or "tasting" — which ordinary restaurant/bar
-    // listings essentially never do. That's not "the Caffè Nero fix" (isGenericChainName above,
-    // checked FIRST and unaffected by this change, still force-floors an actual chain to
-    // VERY_LOW regardless) — it was silently suppressing the overwhelming majority of Plot's own
-    // real supply for every Food-, Nightlife-, or Sport-("pubs")-preferring Crew, for every real
-    // independent restaurant, bar, or club whose name is just its own real name (which is what a
-    // real independent venue's name looks like, by definition — "Corner Café" is exactly as real
-    // and legitimate a destination as "Kissho"). A real, specifically-named, non-chain venue now
-    // stays at the ordinary category baseline (MEDIUM) it would get from any other source — the
-    // specialness-word check above still UPGRADES a genuine special occasion to HIGH, it no
-    // longer GATES an ordinary real venue out of consideration entirely.
-  } else if (sourceKind === 'EVENT_PROVIDER' && PLACE_PROVIDER_DOWNGRADE_CATEGORIES.has(experience.category)) {
-    // A real dated occasion in a normally-generic category (PredictHQ's food-drink -> RESTAURANT,
-    // Skiddle's CLUB eventcode -> CLUBBING) — this IS a genuine plan, not "a place exists".
-    level = 'HIGH';
-    reasons.push('event_provider_dated_occasion');
   }
 
   return { level, reasons };
@@ -208,9 +232,11 @@ export function derivePlanWorthiness(
 
 // The bar the automatic Crew engine AND the manual "Find us something"/"Suggest something" flows
 // all require — see this file's own header on why all three share it. MEDIUM is the category
-// baseline for an ordinary, non-downgraded candidate (a mock/manually-curated restaurant, a
-// museum, a cinema) — this bar excludes only what was actually downgraded (a generic PLACE_
-// PROVIDER venue) or force-floored (a chain name), never ordinary real inventory.
+// baseline for an ordinary, non-downgraded candidate (a museum, a cinema, a real ticketed/dated
+// occasion in any category). An ordinary RESTAURANT/BAR/CLUBBING/FITNESS/COMMUNITY listing with
+// no real occasion signal is now LOW (see `derivePlanWorthiness`) and excluded by this same bar —
+// this is the actual, deliberate mechanism of the "ordinary restaurants are not Plot Found This"
+// product rule, not a separate check bolted on elsewhere.
 export const MIN_PLAN_WORTHINESS_FOR_CREW: PlanWorthiness = 'MEDIUM';
 
 export function isPlanWorthyForCrew(

@@ -2,7 +2,7 @@ import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { track } from './analytics';
 import { ensureInventory, enrichMissingImageForExperience } from './inventorySync';
-import { scoreExperiencesForCrew, getCrewExcludedExperienceIds, type MatchOption } from './match';
+import { scoreExperiencesForCrew, getCrewExcludedExperienceIds, DEFAULT_RADIUS_METERS, type MatchOption } from './match';
 import { createRecommendationPlanForCrew } from './plan';
 import { sendSystemMessage } from './chat';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
@@ -106,6 +106,16 @@ const CATEGORY_FATIGUE_PENALTY = [12, 7, 3]; // most-recent-category penalty fir
 // HIGH/MEDIUM pick — see `selectExploratoryCandidate`'s own comment), and rate-limited to at most
 // one per Crew per week so "exploratory" stays genuinely occasional, not a second normal tier.
 const MAX_EXPLORATORY_SENDS_PER_WEEK = 1;
+// Real, live-reported product failure this closes: "Plot sent an ordinary Stafford restaurant
+// instead of a genuinely strong food festival that might exist a bit further out" — location was
+// acting as a hard rescue-or-reject filter with no attempt to look wider when nothing near enough
+// cleared the bar. Tried in order, stopping at the first tier that actually produces an eligible
+// (or exploratory) candidate — never relaxes the quality/taste-signal bar itself, only widens the
+// geographic net a real strong match is allowed to be found within. Bounded on purpose ("Plot
+// should not recommend something in London to a Stafford Crew... respect user/Crew travel
+// tolerance") — 3x a Crew's own radius is already a deliberately generous "worth knowing about
+// even though it's a stretch" ceiling, not a search-the-whole-country fallback.
+const RADIUS_EXPANSION_MULTIPLIERS = [2, 3];
 
 // The real delivery cadence — shared by server.ts's own poll and the admin sweep endpoint's
 // default (non-`force`) path, so there is exactly one place this number lives, not two that can
@@ -295,6 +305,15 @@ function lowerFirst(s: string): string {
 // see why this was sent, not just in the chat line.
 export const TICKETED_FALLBACK_PREFACE = "There's not much in your area right now, so how about this";
 
+// Real, live-reported product requirement: when Plot deliberately searches beyond a Crew's own
+// radius (see RADIUS_EXPANSION_MULTIPLIERS's own comment) and that's what actually found the
+// pick, the delivery copy must say so — "Plot must NEVER pretend the expanded-distance result is
+// local." Computed from the real distance, never a fabricated or rounded-away number.
+function radiusExpansionPreface(extraMiles: number): string {
+  const rounded = Math.max(1, Math.round(extraMiles));
+  return `Not much matching your Crew nearby — this looked worth the extra ${rounded} mile${rounded === 1 ? '' : 's'}`;
+}
+
 /** A real, specific, multi-clause explanation — never the raw score, never a fabricated
  * "insight", every clause traceable to a reason the scorer actually produced (brief §"Why This")
  * example: not "Because your Crew likes music" (tells you nothing) but "2/3 of you are into UK
@@ -304,8 +323,10 @@ export const TICKETED_FALLBACK_PREFACE = "There's not much in your area right no
  * match — more specific claims are more trustworthy), then one supporting context clause. Never
  * asserts a code that isn't actually in `option.reasons`. `isTicketedFallback` prepends the same
  * honest caveat `createRecommendationPlanForCrew`'s chat message uses — see
- * `TICKETED_FALLBACK_PREFACE`'s own comment. */
-function explanationFor(option: MatchOption, opts: { isTicketedFallback?: boolean } = {}): string {
+ * `TICKETED_FALLBACK_PREFACE`'s own comment. `radiusExpansionExtraMiles` does the same for a
+ * deliberately-widened-radius pick — see `radiusExpansionPreface`'s own comment; takes priority
+ * over the ticketed-fallback caveat when both apply (see this function's own caller). */
+function explanationFor(option: MatchOption, opts: { isTicketedFallback?: boolean; radiusExpansionExtraMiles?: number | null } = {}): string {
   const byCode = new Map(option.reasons.map((r) => [r.code, r]));
   const categoryLabel = option.experience.category.replace(/_/g, ' ').toLowerCase();
 
@@ -334,6 +355,9 @@ function explanationFor(option: MatchOption, opts: { isTicketedFallback?: boolea
   }
 
   const explanation = secondary ? `${primary}, and ${secondary}.` : `${primary}.`;
+  if (opts.radiusExpansionExtraMiles !== null && opts.radiusExpansionExtraMiles !== undefined && opts.radiusExpansionExtraMiles > 0) {
+    return `${radiusExpansionPreface(opts.radiusExpansionExtraMiles)} — ${lowerFirst(explanation)}`;
+  }
   return opts.isTicketedFallback ? `${TICKETED_FALLBACK_PREFACE} — ${lowerFirst(explanation)}` : explanation;
 }
 
@@ -467,6 +491,15 @@ export interface CrewEligibilityResult {
   // definition, below the normal MEDIUM floor — inferring from score would just read as LOW,
   // not the deliberate, evidence-backed exploration this actually is).
   forceExploratoryConfidence?: boolean;
+  // True only when `best` was found by deliberately searching wider than this Crew's own radius
+  // (see RADIUS_EXPANSION_MULTIPLIERS's own comment) — never true just because `best` happens to
+  // sit near the edge of the Crew's normal radius. Tells generateRecommendationForCrewNow to
+  // honestly acknowledge the extra distance in the delivery copy, never present an expanded-
+  // radius pick as if it were local.
+  usedRadiusExpansion?: boolean;
+  // The Crew's own real base radius in miles (before expansion) — the reference point the
+  // delivery copy's "worth the extra N miles" framing is computed against.
+  radiusExpansionBaseMiles?: number;
 }
 
 /** THE TIERING RULE this whole rebuild exists to enforce: "I need ticketed only events... don't
@@ -568,14 +601,6 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   const city = await resolveCrewCityForSweep(crewId);
   await ensureInventory(city);
 
-  const scoredBeforeFatigue = await scoreExperiencesForCrew(crewId, { radiusMetersOverride: settings.travelRadiusMeters });
-  // Diversity/fatigue penalty (see CATEGORY_FATIGUE_WINDOW/PENALTY's own comment) — applied here,
-  // to the automatic engine's own pool specifically, never inside match.ts's shared scorer (a
-  // member manually asking "Find us something" wants the single best match, not a diversity-
-  // optimised one). Re-sorted so every downstream consumer (debugger, tiering) sees the
-  // fatigue-adjusted order, not the pre-penalty one.
-  const scored = (await applyCategoryFatigue(crewId, scoredBeforeFatigue)).sort((a, b) => b.matchScore - a.matchScore);
-
   // Never repeat: anything ever recommended to this Crew before (any status — a dismissal is
   // still a "don't show again", not a "try harder next time"), and anything a member has
   // already shared/found themselves — recommending something the Crew is already looking at
@@ -598,18 +623,29 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     o.reasons.some((r) =>
       ['category_affinity', 'crew_dna_match', 'crew_preference', 'interest_match', 'free_text_match', 'crew_interest_preference'].includes(r.code),
     );
-  const notExcluded = scored.filter((o) => !excluded.has(o.experience.id));
-  // THE CORE FIX for "Caffè Nero in London sent to a 25-mile Stafford Crew": `withinRadius` is
-  // `boolean | null` — `null` means genuinely unknown (no venue coordinates, or no location
-  // anchor could be established), never "near". The OLD filter here (`!== false`) treated null
-  // exactly like true — an unknown distance silently passed the radius gate. Now requires
-  // `=== true`: a candidate must be POSITIVELY CONFIRMED within radius to reach the automatic
-  // engine at all — fail closed, never fail open, on a hard eligibility gate. See match.ts's own
-  // `withinRadius` comment for the other half of this fix (the Crew's own explicit location, once
-  // set, is the sole distance anchor — never blended with an individual member's personal home).
-  const inRadius = notExcluded.filter((o) => o.withinRadius === true);
-  const withTaste = inRadius.filter(hasTasteSignal);
-  const eligible = withTaste.filter((o) => o.matchScore >= MIN_RECOMMENDATION_SCORE);
+
+  // Radius-expansion tiering (see RADIUS_EXPANSION_MULTIPLIERS's own comment) — the scoring +
+  // fatigue + exclusion + radius/taste-signal pipeline, parametrised on the radius override so it
+  // can be re-run at progressively wider radii without duplicating the pipeline itself. THE CORE
+  // FIX for "Caffè Nero in London sent to a 25-mile Stafford Crew" lives inside here unchanged:
+  // `withinRadius` is `boolean | null` — `null` means genuinely unknown (no venue coordinates, or
+  // no location anchor could be established), never "near"; a candidate must be POSITIVELY
+  // CONFIRMED within THIS tier's radius to count, fail closed, never fail open.
+  async function computePoolsAtRadius(radiusMetersOverride: number | null) {
+    const scoredBeforeFatigue = await scoreExperiencesForCrew(crewId, { radiusMetersOverride });
+    // Diversity/fatigue penalty (see CATEGORY_FATIGUE_WINDOW/PENALTY's own comment) — applied
+    // here, to the automatic engine's own pool specifically, never inside match.ts's shared
+    // scorer (a member manually asking "Find us something" wants the single best match, not a
+    // diversity-optimised one). Re-sorted so every downstream consumer (debugger, tiering) sees
+    // the fatigue-adjusted order, not the pre-penalty one.
+    const scored = (await applyCategoryFatigue(crewId, scoredBeforeFatigue)).sort((a, b) => b.matchScore - a.matchScore);
+    const notExcluded = scored.filter((o) => !excluded.has(o.experience.id));
+    const inRadius = notExcluded.filter((o) => o.withinRadius === true);
+    const withTaste = inRadius.filter(hasTasteSignal);
+    const eligible = withTaste.filter((o) => o.matchScore >= MIN_RECOMMENDATION_SCORE);
+    return { scored, notExcluded, inRadius, withTaste, eligible };
+  }
+
   // The recommendation debugger (product spec: "for each candidate show TITLE/DISTANCE/PLAN-
   // WORTHINESS/BOOKABILITY/ELIGIBILITY/REJECTION REASON/FINAL RANKING SCORE") — real evidence
   // for "why did #1 beat #2", not just whether #1 passed. Bounded to the top 10 BY SCORE across
@@ -617,51 +653,119 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   // still shows up in this trail with its real rejection reason, exactly the debugging case the
   // spec calls for — never silently absent from the trail just because it was excluded from
   // consideration. See routes/admin.ts's explain-recommendation endpoint, the only consumer.
-  const debugCandidates = [...scored]
-    .sort((a, b) => b.matchScore - a.matchScore)
-    .slice(0, 10)
-    .map((o) => {
-      const worthiness = derivePlanWorthiness(o.experience);
-      const rejectionReasons: string[] = [];
-      if (excluded.has(o.experience.id)) rejectionReasons.push('ALREADY_RECOMMENDED_OR_SHARED');
-      if (o.withinRadius !== true) rejectionReasons.push(o.withinRadius === false ? 'OUTSIDE_CREW_RADIUS' : 'DISTANCE_UNKNOWN');
-      // See match.ts#contradictsCrewInterestPreference's own comment — the P0 fix for "Live gigs
-      // + Rock recommended K-pop". Checked before the generic NO_TASTE_SIGNAL below so the debug
-      // trail names the SPECIFIC reason (confirmed evidence of a different, non-matching genre/
-      // cuisine/discipline within the same territory the Crew picked), not just "no signal at all".
-      if (o.reasons.some((r) => r.code === 'genre_contradiction')) rejectionReasons.push('GENRE_MISMATCH');
-      if (!hasTasteSignal(o)) rejectionReasons.push('NO_TASTE_SIGNAL');
-      if (o.matchScore < MIN_RECOMMENDATION_SCORE) rejectionReasons.push('BELOW_CONFIDENCE_THRESHOLD');
-      return {
-        experienceId: o.experience.id,
-        title: o.experience.name,
-        category: o.experience.category,
-        distanceMiles: o.distanceMiles !== null ? Math.round(o.distanceMiles * 10) / 10 : null,
-        startsAt: o.experience.startsAt.toISOString(),
-        priceMinMinor: o.experience.priceMinMinor,
-        sourceKind: deriveSourceKind(o.experience),
-        planWorthiness: worthiness.level,
-        planWorthinessReasons: worthiness.reasons,
-        bookingType: deriveBookingType(o.experience),
-        matchScore: o.matchScore,
-        reasons: o.reasons,
-        eligible: rejectionReasons.length === 0,
-        rejectionReasons,
-      };
-    });
-  const details = {
-    city,
-    memberLocations: locationSummary,
-    travelRadiusMetersOverride: settings.travelRadiusMeters, // null = falls back to taste-profile median or a default, see match.ts
-    totalScored: scored.length,
-    afterDedup: notExcluded.length,
-    afterRadius: inRadius.length,
-    afterTasteSignal: withTaste.length,
-    bestScoreSeen: withTaste.length > 0 ? Math.max(...withTaste.map((o) => o.matchScore)) : null,
-    scoreThreshold: MIN_RECOMMENDATION_SCORE,
-    topCandidates: debugCandidates,
-  };
-  if (opts.guaranteeFirst && eligible.length === 0 && inRadius.length > 0) {
+  function buildDetails(pools: Awaited<ReturnType<typeof computePoolsAtRadius>>, radiusMetersUsed: number | null) {
+    const debugCandidates = [...pools.scored]
+      .sort((a, b) => b.matchScore - a.matchScore)
+      .slice(0, 10)
+      .map((o) => {
+        const worthiness = derivePlanWorthiness(o.experience);
+        const rejectionReasons: string[] = [];
+        if (excluded.has(o.experience.id)) rejectionReasons.push('ALREADY_RECOMMENDED_OR_SHARED');
+        if (o.withinRadius !== true) rejectionReasons.push(o.withinRadius === false ? 'OUTSIDE_CREW_RADIUS' : 'DISTANCE_UNKNOWN');
+        // See match.ts#contradictsCrewInterestPreference's own comment — the P0 fix for "Live
+        // gigs + Rock recommended K-pop". Checked before the generic NO_TASTE_SIGNAL below so the
+        // debug trail names the SPECIFIC reason (confirmed evidence of a different, non-matching
+        // genre/cuisine/discipline within the same territory the Crew picked), not just "no
+        // signal at all".
+        if (o.reasons.some((r) => r.code === 'genre_contradiction')) rejectionReasons.push('GENRE_MISMATCH');
+        if (!hasTasteSignal(o)) rejectionReasons.push('NO_TASTE_SIGNAL');
+        if (o.matchScore < MIN_RECOMMENDATION_SCORE) rejectionReasons.push('BELOW_CONFIDENCE_THRESHOLD');
+        return {
+          experienceId: o.experience.id,
+          title: o.experience.name,
+          category: o.experience.category,
+          distanceMiles: o.distanceMiles !== null ? Math.round(o.distanceMiles * 10) / 10 : null,
+          startsAt: o.experience.startsAt.toISOString(),
+          priceMinMinor: o.experience.priceMinMinor,
+          sourceKind: deriveSourceKind(o.experience),
+          planWorthiness: worthiness.level,
+          planWorthinessReasons: worthiness.reasons,
+          bookingType: deriveBookingType(o.experience),
+          matchScore: o.matchScore,
+          reasons: o.reasons,
+          eligible: rejectionReasons.length === 0,
+          rejectionReasons,
+        };
+      });
+    return {
+      city,
+      memberLocations: locationSummary,
+      travelRadiusMetersOverride: radiusMetersUsed, // null = falls back to taste-profile median or a default, see match.ts
+      totalScored: pools.scored.length,
+      afterDedup: pools.notExcluded.length,
+      afterRadius: pools.inRadius.length,
+      afterTasteSignal: pools.withTaste.length,
+      bestScoreSeen: pools.withTaste.length > 0 ? Math.max(...pools.withTaste.map((o) => o.matchScore)) : null,
+      scoreThreshold: MIN_RECOMMENDATION_SCORE,
+      topCandidates: debugCandidates,
+    };
+  }
+
+  const tier0 = await computePoolsAtRadius(settings.travelRadiusMeters);
+  const details = buildDetails(tier0, settings.travelRadiusMeters);
+  const { eligible } = tier0;
+
+  // RADIUS EXPANSION — real, live-reported failure this closes: "Plot sent an ordinary Stafford
+  // restaurant instead of a genuinely strong food festival that might exist a bit further out."
+  // Location was acting as a hard rescue-or-reject filter with zero attempt to look wider, EVEN
+  // when what qualified locally was only a weak, marginal match. "QUALITY MUST BEAT PROXIMITY" —
+  // this is a genuine HEAD-TO-HEAD, not just a last-resort fallback for when local comes up
+  // completely empty: the widest sensible search is always tried too, and whichever candidate
+  // actually scores higher wins, wherever it is. Every tier re-runs the EXACT same quality/taste-
+  // signal bar (MIN_RECOMMENDATION_SCORE, hasTasteSignal, plan-worthiness, chain exclusion —
+  // nothing here is ever relaxed to make a tier "succeed"), only the geographic net widens.
+  // Bounded on purpose ("Plot should not recommend something in London to a Stafford Crew...
+  // respect user/Crew travel tolerance") — RADIUS_EXPANSION_MULTIPLIERS' own widest tier is
+  // already a deliberately generous "worth knowing about even though it's a stretch" ceiling, not
+  // a search-the-whole-country fallback.
+  //
+  // Computed BEFORE the guaranteeFirst branch below (not after) — real gap this closes: a Crew's
+  // very first-ever recommendation is exactly the moment being wrong matters most, and it used to
+  // bypass this entirely, sourcing only from the unexpanded tier-0 pool. A brand-new Crew's first
+  // impression deserves the same "quality beats proximity" guarantee as every later sweep.
+  const baseRadiusMeters = settings.travelRadiusMeters ?? DEFAULT_RADIUS_METERS;
+  const baseRadiusMiles = Math.round((baseRadiusMeters / 1609.34) * 10) / 10;
+  const widestMultiplier = RADIUS_EXPANSION_MULTIPLIERS[RADIUS_EXPANSION_MULTIPLIERS.length - 1];
+  const widestRadiusMeters = Math.round(baseRadiusMeters * widestMultiplier);
+  const widePools = await computePoolsAtRadius(widestRadiusMeters);
+
+  let winnerPools = tier0;
+  let winnerRadiusMeters: number | null = settings.travelRadiusMeters;
+  let usedRadiusExpansion = false;
+
+  const tier0Best = eligible.length > 0 ? pickBest(eligible).best : undefined;
+  const wideBest = widePools.eligible.length > 0 ? pickBest(widePools.eligible).best : undefined;
+  // Strictly greater, never a tie-break toward distance — a wider search only wins when it is
+  // ACTUALLY better, per this same trusted scoring function everything else here already relies
+  // on (taste match, ticketed-ness, plan-worthiness, and yes distance too, all baked in already
+  // — this is not a second, competing notion of quality, just the same one applied wider).
+  if (wideBest && (!tier0Best || wideBest.matchScore > tier0Best.matchScore)) {
+    winnerPools = widePools;
+    winnerRadiusMeters = widestRadiusMeters;
+    usedRadiusExpansion = wideBest.distanceMiles !== null && wideBest.distanceMiles > baseRadiusMiles;
+  }
+
+  if (winnerPools.eligible.length === 0) {
+    // Nothing cleared the bar even at the widest sensible search — try the intermediate tiers
+    // too (finer-grained than the single wide jump above) before giving up entirely, so a
+    // genuinely real match sitting at, say, 2x radius isn't missed purely because 3x's own pool
+    // (a strict superset by candidate membership, but re-scored at a wider radius so the
+    // distance component differs) happened not to contain an eligible one this pass.
+    for (const multiplier of RADIUS_EXPANSION_MULTIPLIERS.slice(0, -1)) {
+      const expandedRadiusMeters = Math.round(baseRadiusMeters * multiplier);
+      const expandedPools = await computePoolsAtRadius(expandedRadiusMeters);
+      if (expandedPools.eligible.length > 0) {
+        winnerPools = expandedPools;
+        winnerRadiusMeters = expandedRadiusMeters;
+        usedRadiusExpansion = true;
+        break;
+      }
+    }
+  }
+
+  const { withTaste } = winnerPools;
+
+  if (opts.guaranteeFirst && winnerPools.eligible.length === 0 && (tier0.inRadius.length > 0 || widePools.inRadius.length > 0)) {
     // Real, live product requirement: a brand-new Crew's very first moment must not come up
     // empty — "it should immediately hit them with at LEAST 1 event line with the preferences"
     // — even when nothing yet clears the periodic sweep's deliberately conservative confidence
@@ -695,20 +799,63 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     // the Crew's own explicit preference before any of the pools below are even built) — every
     // pool this function sees is already correctly scoped, so `inRadius` is now a safe last
     // resort here too, not a second place the same bug could sneak back in.
-    const tasteMatchedPool = withTaste.length > 0 ? withTaste : inRadius;
+    //
+    // THIRD real, live-reported bug this closes: everything above (`winnerPools`/`inRadius`/
+    // `withTaste`) is the result of the head-to-head at the `eligible` (score >= 55) threshold —
+    // when NEITHER tier0 nor the widened search has anything scoring that high (exactly the
+    // situation a brand-new Crew is in most often — nobody's swiped enough yet for a big score),
+    // that head-to-head never runs at all, and this guarantee fell all the way back to tier0's
+    // own local pool only, even when a genuinely stronger, more specific match existed a
+    // reasonable stretch further out ("Alt Rock Showcase 20 miles away" losing to "Generic Live
+    // Music Night 5 miles away" on a brand-new Crew's very first recommendation — the exact
+    // "quality beats proximity" case this whole mechanism exists for, just below the normal
+    // confidence floor instead of above it). Fixed by running the SAME head-to-head one level
+    // down: compare tier0's own best taste-matched candidate against the widened search's best
+    // taste-matched candidate (never `eligible`-gated here — neither pool would have one), and
+    // let the genuinely higher-scoring one win, wherever it is — identical principle to the
+    // `eligible`-level head-to-head above, just applied to the guarantee's own relaxed pool.
+    const tier0TasteMatchedPool = tier0.withTaste.length > 0 ? tier0.withTaste : tier0.inRadius;
+    const wideTasteMatchedPool = widePools.withTaste.length > 0 ? widePools.withTaste : widePools.inRadius;
+    const tier0GuaranteedBest = tier0TasteMatchedPool.length > 0 ? pickBest(tier0TasteMatchedPool).best : undefined;
+    const wideGuaranteedBest = wideTasteMatchedPool.length > 0 ? pickBest(wideTasteMatchedPool).best : undefined;
+
+    let guaranteedPools = tier0;
+    let guaranteedRadiusMeters: number | null = settings.travelRadiusMeters;
+    let guaranteedUsedExpansion = false;
+    if (wideGuaranteedBest && (!tier0GuaranteedBest || wideGuaranteedBest.matchScore > tier0GuaranteedBest.matchScore)) {
+      guaranteedPools = widePools;
+      guaranteedRadiusMeters = widestRadiusMeters;
+      guaranteedUsedExpansion = wideGuaranteedBest.distanceMiles !== null && wideGuaranteedBest.distanceMiles > baseRadiusMiles;
+    }
+
+    const guaranteedInRadius = guaranteedPools.inRadius;
+    const guaranteedWithTaste = guaranteedPools.withTaste;
+    const tasteMatchedPool = guaranteedWithTaste.length > 0 ? guaranteedWithTaste : guaranteedInRadius;
     const { best: bestAvailable, usedTicketedFallback } = pickBest(tasteMatchedPool);
+    const guaranteedFirstExpansionMiles = Boolean(
+      guaranteedUsedExpansion && bestAvailable?.distanceMiles !== null && bestAvailable !== undefined && bestAvailable.distanceMiles! > baseRadiusMiles,
+    );
     return {
       outcome: 'eligible',
-      details: { ...details, guaranteedFirst: true, guaranteedFirstHadTasteSignal: withTaste.length > 0 },
+      details: {
+        ...(guaranteedUsedExpansion ? buildDetails(guaranteedPools, guaranteedRadiusMeters) : details),
+        guaranteedFirst: true,
+        guaranteedFirstHadTasteSignal: guaranteedWithTaste.length > 0,
+      },
       best: bestAvailable,
       usedTicketedFallback,
+      usedRadiusExpansion: guaranteedFirstExpansionMiles,
+      radiusExpansionBaseMiles: guaranteedFirstExpansionMiles ? baseRadiusMiles : undefined,
     };
   }
 
-  if (eligible.length === 0) {
+  if (winnerPools.eligible.length === 0) {
     // Controlled exploration (see selectExploratoryCandidate's own comment) — tried only once
-    // the normal HIGH/MEDIUM pool has genuinely come up empty, so this can never displace a real
-    // match, only fill a gap that would otherwise be silence.
+    // the normal HIGH/MEDIUM pool has genuinely come up empty EVEN AFTER radius expansion, so
+    // this can never displace a real match, only fill a gap that would otherwise be silence.
+    // Deliberately still sourced from the ORIGINAL, unexpanded `withTaste` — see that function's
+    // own comment on why an exploratory pick must stay close to home, never a distance-stretched
+    // "worth the trip" candidate on top of being a confidence stretch too.
     const exploratory = await selectExploratoryCandidate(crewId, withTaste);
     if (exploratory) {
       return { outcome: 'eligible', details: { ...details, exploratory: true }, best: exploratory, usedTicketedFallback: false, forceExploratoryConfidence: true };
@@ -719,8 +866,15 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     return { outcome: 'no_eligible_candidate', details };
   }
 
-  const { best, usedTicketedFallback } = pickBest(eligible);
-  return { outcome: 'eligible', details, best, usedTicketedFallback };
+  const { best, usedTicketedFallback } = pickBest(winnerPools.eligible);
+  return {
+    outcome: 'eligible',
+    details: usedRadiusExpansion ? { ...buildDetails(winnerPools, winnerRadiusMeters), radiusExpansionMiles: baseRadiusMiles } : details,
+    best,
+    usedTicketedFallback,
+    usedRadiusExpansion,
+    radiusExpansionBaseMiles: usedRadiusExpansion ? baseRadiusMiles : undefined,
+  };
 }
 
 /**
@@ -856,7 +1010,20 @@ async function generateRecommendationForCrewNow(crewId: string, opts: { guarante
   // match either — a HIGH-confidence non-ticketed pick is not a compromise, it's exactly what
   // Plot was asked to find, and the copy must say so.
   const isGenuineCompromise = evaluation.usedTicketedFallback && confidence !== 'HIGH';
-  const leadIn = isGenuineCompromise ? TICKETED_FALLBACK_PREFACE : confidenceLeadIn(confidence);
+  // Radius expansion has its own, distance-specific honest preface — takes priority over the
+  // ticketed-fallback one when both are true (a pick can be both non-ticketed AND found only by
+  // searching wider; the DISTANCE is the more specific, more useful thing to tell the Crew about
+  // right now). Real distance only — never sent if `distanceMiles` genuinely couldn't be computed.
+  const expansionExtraMiles =
+    evaluation.usedRadiusExpansion && best.distanceMiles !== null && evaluation.radiusExpansionBaseMiles !== undefined
+      ? best.distanceMiles - evaluation.radiusExpansionBaseMiles
+      : null;
+  const leadIn =
+    expansionExtraMiles !== null && expansionExtraMiles > 0
+      ? radiusExpansionPreface(expansionExtraMiles)
+      : isGenuineCompromise
+        ? TICKETED_FALLBACK_PREFACE
+        : confidenceLeadIn(confidence);
 
   const systemUserId = await getPlotSystemUserId();
   const { plan, messageId } = await createRecommendationPlanForCrew(crewId, best.experience.id, systemUserId, { preface: leadIn });
@@ -866,7 +1033,7 @@ async function generateRecommendationForCrewNow(crewId: string, opts: { guarante
       crewId,
       experienceId: best.experience.id,
       score: best.matchScore,
-      reasonText: explanationFor(best, { isTicketedFallback: isGenuineCompromise }),
+      reasonText: explanationFor(best, { isTicketedFallback: isGenuineCompromise, radiusExpansionExtraMiles: expansionExtraMiles }),
       status: 'SENT',
       confidence,
       planId: plan.id,
@@ -905,6 +1072,9 @@ export async function explainCrewRecommendation(crewId: string) {
     crewId,
     outcome: evaluation.outcome,
     ...evaluation.details,
+    usedTicketedFallback: Boolean(evaluation.usedTicketedFallback),
+    usedRadiusExpansion: Boolean(evaluation.usedRadiusExpansion),
+    radiusExpansionBaseMiles: evaluation.radiusExpansionBaseMiles ?? null,
     bestCandidate: evaluation.best
       ? {
           experienceId: evaluation.best.experience.id,

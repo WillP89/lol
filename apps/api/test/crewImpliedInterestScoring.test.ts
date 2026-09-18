@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildApp } from '../src/app';
 import { resetDatabase } from './helpers/resetDb';
+import { prisma } from '../src/lib/prisma';
 
 /**
  * Real, live-reported bug — a screenshot of the actual product: a Crew with preferences boxing/
@@ -26,6 +27,17 @@ import { resetDatabase } from './helpers/resetDb';
  * Nothing is seeded before the Crew forms (guaranteeFirst finds nothing, honestly); the real
  * candidate is seeded afterwards and the sweep triggered manually — same isolation precedent as
  * crewCategoryPreferences.test.ts.
+ *
+ * P0-FINAL note: both fixtures below now carry one extra, real piece of evidence beyond "implied
+ * category alone" — a genuine specialness signal for the restaurant (P0-FINAL-1, "The Hidden
+ * Chef": an ordinary restaurant with no occasion signal is no longer plan-worthy on its own,
+ * any source — ordinary "The Wellington" would now be excluded before scoring even ran, which
+ * would prove nothing about THIS bug), and a real ticket for the sport fixture (P0-FINAL-2,
+ * "quality beats proximity": the nearby-distance bonus this test used to lean on to clear the
+ * confidence bar was deliberately shrunk so proximity alone can no longer rescue a weak match —
+ * exactly the failure mode that constant now exists to prevent). Neither addition uses the
+ * literal wording of the Crew's own interest picks ("street food"/"food festival"/"wine bar"/
+ * "boxing"/"mma") — the implied-category mechanism this test actually proves is untouched.
  */
 const app = buildApp();
 const ADMIN_KEY = 'dev_admin_key_change_me';
@@ -42,31 +54,29 @@ async function loginByEmail(email: string): Promise<{ userId: string; cookie: st
   return { userId: user.id, cookie: `${cookie.name}=${cookie.value}` };
 }
 
-async function seedExperience(name: string, category: string) {
-  const startsAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
-  const res = await app.inject({
-    method: 'POST',
-    url: '/admin/experiences/manual',
-    headers: { 'x-admin-key': ADMIN_KEY },
-    payload: {
+/** Seeded directly via prisma (bypassing /admin/experiences/manual, which always writes
+ *  tags: {} — UNKNOWN source) so this fixture can carry a real EVENT_PROVIDER tag — a genuinely
+ *  ticketed sport fixture, exactly as ordinary as a real boxing/MMA card actually is, and real
+ *  evidence in its own right (P0-FINAL-2's ticketed-event scoring bonus), not literal
+ *  "boxing"/"mma" wording. */
+async function seedTicketedExperience(name: string, category: string, description?: string) {
+  const venue = await prisma.venue.create({ data: { name: `${name} Venue`, city: TEST_CITY.city, latitude: TEST_CITY.lat, longitude: TEST_CITY.lng } });
+  return prisma.experience.create({
+    data: {
+      canonicalKey: `test-implied-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${venue.id}`,
       name,
-      // Deliberately generic — no literal "street food"/"food festival"/"wine bar" wording
-      // anywhere, matching the real-world shape (a normal restaurant listing, not one that
-      // happens to use Plot's own taxonomy vocabulary).
-      description: `${name} — a real test fixture with enough description to pass quality scoring.`,
-      category,
-      venueName: 'Implied Interest Scoring Test Venue',
-      city: TEST_CITY.city,
-      latitude: TEST_CITY.lat,
-      longitude: TEST_CITY.lng,
-      startsAt,
+      description: description ?? `${name} — a real test fixture with enough description to pass quality scoring.`,
+      category: category as never,
+      subcategories: [],
+      venueId: venue.id,
+      startsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+      qualityScore: 80,
+      bookingStatus: 'AVAILABLE',
       priceMinMinor: 1500,
       priceMaxMinor: 3000,
-      externalUrl: `https://example.invalid/${encodeURIComponent(name)}`,
+      tags: { provider: 'skiddle' },
     },
   });
-  expect(res.statusCode).toBe(201);
-  return (res.json() as { experience: { id: string } }).experience;
 }
 
 describe('a candidate admitted only via an implied Crew interest still gets a real, provable reason — proven on the real periodic sweep, not the guaranteeFirst safety net', () => {
@@ -92,7 +102,13 @@ describe('a candidate admitted only via an implied Crew interest still gets a re
     await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
     await new Promise((resolve) => setTimeout(resolve, 500)); // guaranteeFirst settles — honestly finds nothing yet
 
-    await seedExperience('The Wellington', 'RESTAURANT');
+    // P0-FINAL-1: a real EVENT_PROVIDER-sourced occasion — an ordinary restaurant listing alone
+    // no longer clears plan-worthiness, any source. P0-FINAL-2 ("quality beats proximity"): the
+    // nearby-distance bonus this fixture used to lean on alone to clear the confidence bar was
+    // deliberately shrunk, so a real ticket is what actually gets it there — still no literal
+    // "street food"/"food festival"/"wine bar" wording, so this stays a true test of the
+    // implied-category mechanism, not the specialness/ticketed gates.
+    await seedTicketedExperience('The Wellington', 'RESTAURANT');
 
     const sweepRes = await app.inject({ method: 'POST', url: '/admin/recommendations/sweep', headers: { 'x-admin-key': ADMIN_KEY }, payload: { crewId: crew.id } });
     expect((sweepRes.json() as { delivered: number }).delivered).toBe(1);
@@ -126,7 +142,12 @@ describe('a candidate admitted only via an implied Crew interest still gets a re
     await app.inject({ method: 'POST', url: '/crews/join', headers: { cookie: mate.cookie }, payload: { inviteCode: crew.inviteCode } });
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    await seedExperience('Ringside Fight Night', 'SPORT');
+    // P0-FINAL-2 ("quality beats proximity"): the nearby-distance bonus this fixture used to lean
+    // on alone to clear the confidence bar was deliberately shrunk (see match.ts's own
+    // NEARBY_BONUS_CAP) so mere proximity can no longer rescue a weak-evidence match — a real
+    // ticket (a genuinely ordinary thing for a real boxing/MMA card to have) is real evidence in
+    // its own right, still no literal "boxing"/"mma" wording.
+    await seedTicketedExperience('Ringside Fight Night', 'SPORT');
 
     const sweepRes = await app.inject({ method: 'POST', url: '/admin/recommendations/sweep', headers: { 'x-admin-key': ADMIN_KEY }, payload: { crewId: crew.id } });
     expect((sweepRes.json() as { delivered: number }).delivered).toBe(1);

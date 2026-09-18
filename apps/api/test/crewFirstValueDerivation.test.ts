@@ -48,7 +48,7 @@ async function setUpMember(
   return member;
 }
 
-async function seedExperience(name: string, category: string, subcategories: string[], city: { city: string; lat: number; lng: number }) {
+async function seedExperience(name: string, category: string, subcategories: string[], city: { city: string; lat: number; lng: number }, description?: string) {
   const startsAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
   const res = await app.inject({
     method: 'POST',
@@ -56,7 +56,7 @@ async function seedExperience(name: string, category: string, subcategories: str
     headers: { 'x-admin-key': ADMIN_KEY },
     payload: {
       name,
-      description: `${name} — a real test fixture with enough description to pass quality scoring.`,
+      description: description ?? `${name} — a real test fixture with enough description to pass quality scoring.`,
       category,
       subcategories,
       venueName: `${name} Venue`,
@@ -286,7 +286,10 @@ describe('Crew first-value derivation — the mission-specified scenarios', () =
 
     // Real inventory Plot can actually search — seeded AFTER the Crew/members exist, same
     // isolation pattern every other real-pipeline test here uses.
-    await seedExperience('Warehouse Techno Session', 'CLUBBING', ['techno'], city);
+    // P0-FINAL-1: CLUBBING is a "place-like" category (a generic nightclub listing is no more a
+    // reason to interrupt a Crew's chat than an ordinary restaurant is) — a genuine club-night
+    // signal in its own text is what makes this a real occasion, not just "there's a nightclub".
+    await seedExperience('Warehouse Techno Session', 'CLUBBING', ['techno'], city, 'Warehouse Techno Session — a real techno club night, with enough description to pass quality scoring.');
     await seedExperience('Unrelated Folk Night', 'LIVE_MUSIC', ['folk'], city);
 
     // NO MANUAL CREW-PREFERENCE RESCUE — only the ordinary automatic sweep, exactly like

@@ -204,16 +204,21 @@ describe('Taste specificity/hierarchy (P0-1): specific preferences narrow broad 
   });
 
   test('CROSS-DOMAIN — Food: a Japanese Food Crew is not satisfied by a contradicting cuisine', async () => {
+    // P0-FINAL-1 ("The Hidden Chef" fix): an ordinary restaurant is no longer plan-worthy on its
+    // own — both fixtures need a genuine specialness signal (a one-off supper club/tasting event)
+    // to reach eligibility at all, so this test can still prove its actual point (specific cuisine
+    // beats a contradicting one) without depending on behaviour the product deliberately no longer
+    // has.
     await seedExperience({
       name: 'Sushi Sakura',
       category: 'RESTAURANT',
-      description: "One of Stafford's most-loved restaurants, specialising in fresh sushi.",
+      description: "One of Stafford's most-loved supper club tasting nights, specialising in fresh sushi.",
       subcategories: ['japanese'],
     });
     await seedExperience({
       name: 'Bangkok Thai Kitchen',
       category: 'RESTAURANT',
-      description: "A genuinely excellent addition to Stafford's restaurants scene.",
+      description: "A genuinely excellent supper club tasting night, part of Stafford's restaurants scene.",
       subcategories: ['thai'],
     });
     const owner = await setUpMember('food-crew-owner@plot-test.invalid', [{ interestId: 'japanese', strength: 'love' }]);

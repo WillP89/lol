@@ -32,13 +32,13 @@ async function loginByEmail(email: string): Promise<{ userId: string; cookie: st
   return { userId: user.id, cookie: `${cookie.name}=${cookie.value}` };
 }
 
-async function seedPlaceProviderExperience(opts: { name: string; lat: number; lng: number }) {
+async function seedPlaceProviderExperience(opts: { name: string; lat: number; lng: number; description?: string }) {
   const venue = await prisma.venue.create({ data: { name: opts.name, city: CITY.city, latitude: opts.lat, longitude: opts.lng } });
   return prisma.experience.create({
     data: {
       canonicalKey: `test-${opts.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${venue.id}`,
       name: opts.name,
-      description: `${opts.name} — a real test fixture with enough description to pass quality scoring, in ${CITY.city}.`,
+      description: opts.description ?? `${opts.name} — a real test fixture with enough description to pass quality scoring, in ${CITY.city}.`,
       category: 'RESTAURANT',
       subcategories: [],
       venueId: venue.id,
@@ -74,7 +74,17 @@ describe('isPlanWorthyForCrew runs before, not after, the nearest-50 proximity c
 
     // The one genuine, non-chain, independent restaurant — deliberately farther out (~8 miles,
     // well outside the chain cluster) but still comfortably inside the Crew's 25-mile radius.
-    await seedPlaceProviderExperience({ name: 'The Old Mill Bistro', lat: CITY.lat + 0.12, lng: CITY.lng + 0.05 });
+    // P0-FINAL-1 ("The Hidden Chef" fix): an ordinary restaurant no longer clears the plan-
+    // worthiness bar on its own, any source — this fixture needs a genuine specialness signal (a
+    // one-off supper club/tasting event, not a permanent menu) to stay eligible, so this test can
+    // still prove its actual point (the early gate runs before the nearest-50 cut) without
+    // depending on behaviour the product now deliberately no longer has.
+    await seedPlaceProviderExperience({
+      name: 'The Old Mill Bistro',
+      lat: CITY.lat + 0.12,
+      lng: CITY.lng + 0.05,
+      description: 'The Old Mill Bistro — a one-off supper club tasting menu event, with enough description to pass quality scoring.',
+    });
 
     const crewRes = await app.inject({
       method: 'POST',

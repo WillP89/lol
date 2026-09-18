@@ -90,10 +90,23 @@ export const identityRanker: LearnedRanker = {
 // `recommendationWindowDays` field for confirming this value from a live deployment.
 export const CANDIDATE_WINDOW_DAYS = 45;
 const RESULT_COUNT = 3;
+// P0-FINAL — "QUALITY MUST BEAT PROXIMITY": the maximum the in-radius distance bonus can ever
+// add to a candidate's score (see its own use below). Deliberately smaller than every real
+// specificity/evidence-strength gap this file scores (e.g. a confirmed-subcategory
+// `crew_interest_preference` match vs a text-only one) — distance is only ever supposed to
+// decide a genuine near-tie between two comparably good options, per the product's own ranking
+// order (intent match and specificity rank above location/travel). Used to be 15, close enough
+// to that 9-point specificity gap that a closer-but-weaker candidate could out-score a
+// materially stronger, more specific one purely on being a few miles nearer — proximity quietly
+// acting as a quality override. See this constant's own use for the real, live-reported failure
+// this fixes.
+const NEARBY_BONUS_CAP = 8;
 // The onboarding default (see onboarding/page.tsx) — used whenever we need a radius and no
 // member has a real TasteProfile.travelRadiusMeters yet, so a brand-new Crew still gets a
-// sane "worth travelling for" distance rather than an unbounded or zero radius.
-const DEFAULT_RADIUS_METERS = 24000;
+// sane "worth travelling for" distance rather than an unbounded or zero radius. Exported so
+// crewRecommendations.ts's radius-expansion tiering has the same concrete baseline to multiply
+// from when a Crew has no explicit travelRadiusMeters of its own set either.
+export const DEFAULT_RADIUS_METERS = 24000;
 
 async function resolveCrewCity(crewId: string, fallbackUserId?: string): Promise<string> {
   const [crew, requester] = await Promise.all([
@@ -705,9 +718,19 @@ export async function scoreExperiencesForCrew(
       distanceMiles = nearestMiles;
       withinRadius = nearestMiles <= effectiveRadiusMiles;
       if (nearestMiles <= effectiveRadiusMiles) {
-        // Closer scores higher, capped at 15 — a tiebreaker among in-radius options, not a
-        // dominant factor (a great match slightly further is still worth surfacing).
-        score += Math.max(0, 15 - (nearestMiles / effectiveRadiusMiles) * 15);
+        // Closer scores higher, capped at NEARBY_BONUS_CAP — a genuine tiebreaker among in-radius
+        // options, never big enough to outrank real specificity. THE ACTUAL "QUALITY MUST BEAT
+        // PROXIMITY" FIX (P0-FINAL, CASE B — "a strong alternative-rock gig 25 miles away beats a
+        // generic untagged live-music night 5 miles away"): this used to be capped at 15, close
+        // enough to the confirmed-subcategory-vs-text-only specificity gap (isStrongMatch ? 18 : 9
+        // below — a 9-point gap) that a merely-closer, weakly-evidenced candidate could out-score a
+        // clearly stronger, more specific one purely on a few miles' difference — proximity acting
+        // as a QUALITY OVERRIDE, exactly what the product spec's own ranking order (intent/
+        // specificity/quality ABOVE location) forbids. NEARBY_BONUS_CAP is deliberately smaller
+        // than every real specificity/evidence-strength gap this file scores (crew_interest_
+        // preference's own 9-point strong-vs-weak gap included) so distance can decide a genuine
+        // near-tie between two comparably good options, but can never rescue a weaker one.
+        score += Math.max(0, NEARBY_BONUS_CAP - (nearestMiles / effectiveRadiusMiles) * NEARBY_BONUS_CAP);
         const roundedMiles = Math.round(nearestMiles);
         const nearbyLabel = roundedMiles <= 1 ? 'Under a mile from your area' : `${roundedMiles} miles from your area`;
         reasons.push({

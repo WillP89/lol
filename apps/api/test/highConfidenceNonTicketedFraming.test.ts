@@ -38,8 +38,13 @@ describe('a HIGH-confidence non-ticketed pick gets honest, confident framing —
     await prisma.experience.create({
       data: {
         canonicalKey: 'test-high-confidence-kissho',
-        name: 'Kissho: Japanese Kitchen',
-        description: 'A real, specific Japanese restaurant test fixture with enough description to pass quality scoring.',
+        name: 'Kissho: Japanese Supper Club',
+        // P0-FINAL-1 ("The Hidden Chef" fix): an ordinary restaurant is no longer plan-worthy on
+        // its own, any source — this fixture needs a genuine specialness signal (a one-off supper
+        // club event, not a permanent menu) to reach HIGH plan-worthiness, exactly the same as a
+        // real live listing would need to clear the bar this test is actually about (confident,
+        // un-hedged framing for a genuinely strong non-ticketed pick).
+        description: 'A real, specific Japanese supper club test fixture — a one-off tasting menu event, with enough description to pass quality scoring.',
         category: 'RESTAURANT',
         subcategories: ['japanese', 'sushi'],
         venueId: venue.id,
@@ -72,7 +77,7 @@ describe('a HIGH-confidence non-ticketed pick gets honest, confident framing —
 
     const delivered = await prisma.crewRecommendation.findFirst({ where: { crewId: crew.id }, include: { experience: true } });
     expect(delivered).not.toBeNull();
-    expect(delivered!.experience!.name).toBe('Kissho: Japanese Kitchen');
+    expect(delivered!.experience!.name).toBe('Kissho: Japanese Supper Club');
     // The real regression this proves fixed: confirms the setup actually reached HIGH first —
     // otherwise this test would trivially pass for the wrong reason.
     expect(delivered!.confidence).toBe('HIGH');

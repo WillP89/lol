@@ -70,20 +70,30 @@ describe('derivePlanWorthiness — the actual "Caffè Nero" gate', () => {
     expect(result.reasons).toContain('generic_chain_name');
   });
 
-  test('a PLACE_PROVIDER-sourced, non-chain RESTAURANT/BAR with no specialness signal is MEDIUM — a real independent venue is a legitimate destination on its own, not force-floored just for lacking festival-branded marketing language', () => {
-    // Real, live-found bug this regression proves fixed: this used to assert LOW here, which
-    // meant every real, non-chain FHRS/OpenStreetMap restaurant or bar — Plot's own deepest,
-    // most geographically complete real inventory — was excluded from ever reaching a Crew's
-    // automatic recommendation. "Corner Café" and "The Local" are exactly what a real
-    // independent venue's own real name looks like; that is not evidence of genericness.
-    expect(derivePlanWorthiness(experience({ name: 'Corner Café', category: 'RESTAURANT', tags: { provider: 'openstreetmap' } })).level).toBe('MEDIUM');
-    expect(derivePlanWorthiness(experience({ name: 'The Local', category: 'BAR', tags: { provider: 'fhrs' } })).level).toBe('MEDIUM');
+  test('an ordinary RESTAURANT/BAR with no occasion signal is LOW, REGARDLESS OF SOURCE — "The Hidden Chef" fix', () => {
+    // THE ACTUAL FIX for a real, live-reported failure: a Crew whose explicit preferences were
+    // FOOD FESTIVALS + STREET FOOD + ITALIAN was proactively sent "The Hidden Chef", an ordinary
+    // Italian restaurant with none of the first two. This is a DELIBERATE product-direction
+    // override of the earlier "a real independent venue is a legitimate destination on its own"
+    // decision this test used to assert (MEDIUM) — that reasoning is still correct for Explore/
+    // Home (this file has never touched either surface, see the header), but wrong for the
+    // proactive `Plot Found This` slot: "an Italian restaurant exists near Stafford" is generic
+    // local search, never itself a reason Plot interrupts a Crew's chat. Source-independent on
+    // purpose — this used to only apply to PLACE_PROVIDER; a manually-curated or mock-sourced
+    // ordinary restaurant is exactly as ineligible now.
+    for (const provider of ['openstreetmap', 'fhrs', undefined]) {
+      const tags = provider ? { provider } : {};
+      expect(derivePlanWorthiness(experience({ name: 'Corner Café', category: 'RESTAURANT', tags })).level).toBe('LOW');
+      expect(derivePlanWorthiness(experience({ name: 'The Local', category: 'BAR', tags })).level).toBe('LOW');
+    }
   });
 
-  test('a PLACE_PROVIDER-sourced RESTAURANT with a real specialness signal in its own text is HIGH', () => {
-    const result = derivePlanWorthiness(experience({ name: 'Borough Street Food Market', category: 'RESTAURANT', tags: { provider: 'openstreetmap' } }));
-    expect(result.level).toBe('HIGH');
-    expect(result.reasons).toContain('place_provider_but_specialness_signal');
+  test('a RESTAURANT with a real specialness signal in its own text is HIGH, any source — a genuine occasion, not an ordinary venue', () => {
+    for (const provider of ['openstreetmap', undefined]) {
+      const result = derivePlanWorthiness(experience({ name: 'Borough Street Food Market', category: 'RESTAURANT', tags: provider ? { provider } : {} }));
+      expect(result.level).toBe('HIGH');
+      expect(result.reasons).toContain('specialness_signal');
+    }
   });
 
   test('an EVENT_PROVIDER-sourced RESTAURANT (PredictHQ food-drink) is HIGH — a real dated occasion, not a permanent venue', () => {
@@ -92,9 +102,15 @@ describe('derivePlanWorthiness — the actual "Caffè Nero" gate', () => {
     expect(result.reasons).toContain('event_provider_dated_occasion');
   });
 
-  test('an UNKNOWN-sourced RESTAURANT/BAR (mock providers, manual curation) is MEDIUM — the ordinary baseline, never penalised for an unreviewed source it is not', () => {
-    expect(derivePlanWorthiness(experience({ name: 'Smoking Goat', category: 'RESTAURANT', tags: {} })).level).toBe('MEDIUM');
-    expect(derivePlanWorthiness(experience({ name: 'The Wellington', category: 'BAR', tags: {} })).level).toBe('MEDIUM');
+  test('an UNKNOWN-sourced RESTAURANT/BAR (mock providers, manual curation) with no occasion signal is LOW too — manual curation is not itself evidence of specialness', () => {
+    expect(derivePlanWorthiness(experience({ name: 'Smoking Goat', category: 'RESTAURANT', tags: {} })).level).toBe('LOW');
+    expect(derivePlanWorthiness(experience({ name: 'The Wellington', category: 'BAR', tags: {} })).level).toBe('LOW');
+  });
+
+  test('a chain name still wins over everything else — VERY_LOW even with a specialness word in its own text', () => {
+    const result = derivePlanWorthiness(experience({ name: 'Greggs', description: 'A festival pop-up bakery counter.', category: 'RESTAURANT', tags: {} }));
+    expect(result.level).toBe('VERY_LOW');
+    expect(result.reasons).toContain('generic_chain_name');
   });
 
   test('LIVE_MUSIC/FESTIVAL/COMEDY/THEATRE/SPORT default HIGH or above regardless of source', () => {
@@ -116,13 +132,16 @@ describe('derivePlanWorthiness — the actual "Caffè Nero" gate', () => {
 });
 
 describe('isPlanWorthyForCrew — the actual hard-gate boundary', () => {
-  test('MEDIUM and above pass; VERY_LOW (an actual chain) fails', () => {
+  test('LIVE_MUSIC/etc pass on category baseline alone; an ordinary restaurant does not, any source', () => {
     expect(isPlanWorthyForCrew(experience({ name: 'A Real Show', category: 'LIVE_MUSIC', tags: {} }))).toBe(true);
-    expect(isPlanWorthyForCrew(experience({ name: 'Smoking Goat', category: 'RESTAURANT', tags: {} }))).toBe(true);
-    // A real, non-chain, place-provider venue now clears the bar on its own merit — see
-    // derivePlanWorthiness's own comment for the real inventory-suppression bug this fixes.
-    expect(isPlanWorthyForCrew(experience({ name: 'Corner Café', category: 'RESTAURANT', tags: { provider: 'openstreetmap' } }))).toBe(true);
+    // THE ACTUAL "Hidden Chef" GATE: an ordinary restaurant — manually curated or otherwise —
+    // with no real occasion signal no longer clears the bar at all.
+    expect(isPlanWorthyForCrew(experience({ name: 'Smoking Goat', category: 'RESTAURANT', tags: {} }))).toBe(false);
+    expect(isPlanWorthyForCrew(experience({ name: 'Corner Café', category: 'RESTAURANT', tags: { provider: 'openstreetmap' } }))).toBe(false);
     expect(isPlanWorthyForCrew(experience({ name: 'Caffè Nero', category: 'RESTAURANT', tags: { provider: 'openstreetmap' } }))).toBe(false);
+    // A real occasion signal still clears it, any source.
+    expect(isPlanWorthyForCrew(experience({ name: 'Stafford Street Food Market', category: 'RESTAURANT', tags: {} }))).toBe(true);
+    expect(isPlanWorthyForCrew(experience({ name: 'Stafford Food & Drink Market', category: 'RESTAURANT', tags: { provider: 'predicthq' } }))).toBe(true);
   });
 });
 
