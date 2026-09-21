@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, test } from 'vitest';
 import { buildApp } from '../src/app';
 import { resetDatabase } from './helpers/resetDb';
+import { prisma } from '../src/lib/prisma';
 
 /**
  * "Before creating a crew, one person must fill out the crew's specific preferences using the AI
@@ -61,7 +62,12 @@ async function seedExperience(name: string, category: string, venueName: string)
     },
   });
   expect(res.statusCode).toBe(201);
-  return (res.json() as { experience: { id: string } }).experience;
+  // P0-URGENT: proactive Plot Found This now hard-requires a real ticket — see
+  // crewRecommendations.ts's own isProactivelyEligible comment. This file is about the
+  // preferences gate, not the ticket gate itself.
+  const experience = (res.json() as { experience: { id: string } }).experience;
+  await prisma.experience.update({ where: { id: experience.id }, data: { tags: { provider: 'skiddle' } } });
+  return experience;
 }
 
 describe('crew preferences gate: nothing happens on a Crew until its own preferences are set', () => {

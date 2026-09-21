@@ -70,7 +70,12 @@ async function seedExperience(name: string, category: string, subcategories: str
     },
   });
   expect(res.statusCode).toBe(201);
-  return (res.json() as { experience: { id: string } }).experience;
+  // P0-URGENT: proactive Plot Found This now hard-requires a real ticket — see
+  // crewRecommendations.ts's own isProactivelyEligible comment. This file is about first-value
+  // derivation, not the ticket gate itself.
+  const experience = (res.json() as { experience: { id: string } }).experience;
+  await prisma.experience.update({ where: { id: experience.id }, data: { tags: { provider: 'skiddle' } } });
+  return experience;
 }
 
 async function getSettings(crewId: string, cookie: string) {

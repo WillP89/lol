@@ -111,6 +111,11 @@ async function seedExperience(name: string, category: string, interestTag: strin
     },
   });
   expect(res.statusCode).toBe(201);
+  // P0-URGENT: proactive Plot Found This now hard-requires a real ticket — see
+  // crewRecommendations.ts's own isProactivelyEligible comment. This file is about analytics
+  // event recording, not the ticket gate itself.
+  const experienceId = (res.json() as { experience: { id: string } }).experience.id;
+  await prisma.experience.update({ where: { id: experienceId }, data: { tags: { provider: 'skiddle' } } });
 }
 
 async function sweep(crewId: string) {

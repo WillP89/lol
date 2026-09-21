@@ -4,16 +4,15 @@ import { resetDatabase } from './helpers/resetDb';
 import { prisma } from '../src/lib/prisma';
 
 /**
- * Real bug this closes, found running a controlled 5-Crew baseline audit: `usedTicketedFallback`
- * is a SUPPLY-TYPE signal ("this pick isn't itself a ticketed/dated event"), not a QUALITY
- * signal — but it used to unconditionally override confidence-based copy, so a genuinely
- * excellent, HIGH-confidence match that simply happened to be a restaurant/bar/market (real
- * FHRS/OSM/Google Places/Foursquare inventory — most of what those sources ARE is inherently
- * non-ticketed) got the SAME hedging "There's not much in your area right now" preface as a
- * genuine last-resort compromise. That directly undercuts "Plot found this because it
- * understands us" even when the match is genuinely strong. See crewTicketedFirstRecommendation
- * .test.ts's own second test for the case this must NOT change: a genuinely MEDIUM/weak
- * non-ticketed pick still gets the honest hedge.
+ * P0-URGENT SUPERSESSION: this file used to prove that a HIGH-confidence non-ticketed pick got
+ * confident framing instead of the old ticketed-fallback hedge — real behaviour under the
+ * previous "ticket preferred, non-ticketed fallback allowed" contract. Live founder testing of
+ * the actual deployed product found that contract itself was the bug (an unticketed "Copper
+ * Kettle"-class restaurant proactively sent, hedged or not — see crewRecommendations.ts's own
+ * `isProactivelyEligible` comment). New absolute pilot rule: a real ticket is now a hard
+ * eligibility gate, checked BEFORE quality/confidence ever matter. This file now proves the
+ * opposite of what it used to: no amount of quality, specificity, or confidence rescues an
+ * unticketed candidate — a ticket must never be optional, whatever else is true about the match.
  */
 const app = buildApp();
 const STAFFORD = { city: 'High Confidence Framing Test City', lat: 52.8062, lng: -2.1169 };
@@ -31,8 +30,8 @@ async function loginByEmail(email: string): Promise<{ userId: string; cookie: st
   return { userId: user.id, cookie: `${cookie.name}=${cookie.value}` };
 }
 
-describe('a HIGH-confidence non-ticketed pick gets honest, confident framing — never the ticketed-fallback hedge', () => {
-  test('a real, strongly-matched restaurant (place-provider, never ticketed) is framed as a great fit, not a compromise', async () => {
+describe('P0-URGENT: even a HIGH-confidence, genuinely strong non-ticketed pick is never sent proactively', () => {
+  test('a real, strongly-matched restaurant (place-provider, never ticketed) is excluded outright — quality never rescues UNTICKETED', async () => {
     await resetDatabase();
     const venue = await prisma.venue.create({ data: { name: 'Kissho', city: 'Stone', latitude: STONE.lat, longitude: STONE.lng } });
     await prisma.experience.create({
@@ -76,18 +75,14 @@ describe('a HIGH-confidence non-ticketed pick gets honest, confident framing —
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     const delivered = await prisma.crewRecommendation.findFirst({ where: { crewId: crew.id }, include: { experience: true } });
-    expect(delivered).not.toBeNull();
-    expect(delivered!.experience!.name).toBe('Kissho: Japanese Supper Club');
-    // The real regression this proves fixed: confirms the setup actually reached HIGH first —
-    // otherwise this test would trivially pass for the wrong reason.
-    expect(delivered!.confidence).toBe('HIGH');
-    expect(delivered!.reasonText).not.toContain("There's not much in your area right now");
+    // Under the old contract this genuinely reached HIGH confidence and was delivered — proving
+    // the ticket gate is what's excluding it now, not some other unrelated gap (plan-worthiness,
+    // taste-signal, radius) that would make this test pass for the wrong reason.
+    expect(delivered).toBeNull();
 
     const messages = await prisma.crewMessage.findMany({ where: { crewId: crew.id }, orderBy: { createdAt: 'asc' } });
-    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
-    expect(announcement).toBeDefined();
-    expect(announcement!.body).not.toContain("There's not much in your area right now");
-    // The real, honest, confident framing this fix restores for a genuinely great match.
-    expect(announcement!.body).toContain('We think this is a great fit for your Crew');
+    expect(messages.some((m) => m.body.includes('Kissho'))).toBe(false);
+    const honestMessage = messages.find((m) => m.body.includes("don't have any"));
+    expect(honestMessage).toBeDefined();
   });
 });

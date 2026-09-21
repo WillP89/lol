@@ -160,6 +160,8 @@ describe('Quality beats proximity — the three mission-specified cases', () => 
       description: 'A real alternative rock gig, touring band.',
       milesAway: 20,
       subcategories: ['alternative'],
+      priceMinMinor: 1600,
+      eventProvider: 'skiddle',
     });
 
     const owner = await setUpMember(`case-b-owner-${suffix}@plot-test.invalid`);

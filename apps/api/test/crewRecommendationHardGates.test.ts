@@ -59,6 +59,14 @@ async function seedPlaceProviderExperience(opts: {
   category?: string;
   provider?: string;
   daysAhead?: number;
+  // P0-URGENT: proactive Plot Found This now hard-requires a real ticket (isTicketedEvent) — see
+  // crewRecommendations.ts's own isProactivelyEligible comment. A genuine PLACE_PROVIDER row
+  // (openstreetmap/fhrs/etc) is never ticketed by construction, which is exactly right for the
+  // Caffè Nero location-gate fixtures this file is actually about — but a fixture standing in as
+  // "the real alternative Caffè Nero should have lost to" needs a real ticket to be deliverable
+  // at all under the new rule, or this test could no longer tell "rejected specifically" apart
+  // from "the whole pipeline came up empty".
+  ticketed?: boolean;
 }) {
   const venue = await prisma.venue.create({ data: { name: opts.name, city: opts.city, latitude: opts.lat, longitude: opts.lng } });
   return prisma.experience.create({
@@ -72,9 +80,9 @@ async function seedPlaceProviderExperience(opts: {
       startsAt: new Date(Date.now() + (opts.daysAhead ?? 5) * 24 * 60 * 60 * 1000),
       qualityScore: 80,
       bookingStatus: 'AVAILABLE',
-      priceMinMinor: null,
-      priceMaxMinor: null,
-      tags: { provider: opts.provider ?? 'openstreetmap' },
+      priceMinMinor: opts.ticketed ? 1500 : null,
+      priceMaxMinor: opts.ticketed ? 3000 : null,
+      tags: { provider: opts.provider ?? (opts.ticketed ? 'skiddle' : 'openstreetmap') },
     },
   });
 }
@@ -152,7 +160,7 @@ describe('Part 27 acceptance test: a Stafford Crew, 25-mile radius, never gets C
     await seedPlaceProviderExperience({ name: 'Caffè Nero', city: 'London', lat: LONDON.lat, lng: LONDON.lng, provider: 'openstreetmap' });
     // A second, genuinely plan-worthy AND in-radius candidate must exist too, so this proves
     // Caffè Nero specifically was rejected — not that the whole pipeline came up empty.
-    await seedPlaceProviderExperience({ name: 'Stone Street Food Market', city: 'Stone', lat: STONE.lat, lng: STONE.lng, provider: 'openstreetmap' });
+    await seedPlaceProviderExperience({ name: 'Stone Street Food Market', city: 'Stone', lat: STONE.lat, lng: STONE.lng, ticketed: true });
 
     // createStaffordCrew's own member-join already fires the real 1->2-member guaranteeFirst
     // trigger (routes/crews.ts) — the exact automatic path a real Crew's first moment runs

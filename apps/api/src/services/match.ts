@@ -391,7 +391,19 @@ export async function scoreExperiencesForCrew(
   // that just doesn't happen to confirm a cuisine on top.
   function lacksRequiredNarrowingEvidence(experience: { category: string; subcategories: unknown; name: string; description: string }): { tooBroad: boolean; pickedInterestId: string | null; territoryLabel: string | null } {
     if (crewInterestPreferences.size === 0) return { tooBroad: false, pickedInterestId: null, territoryLabel: null };
-    const narrowingPicks = [...crewInterestPreferences].filter((id) => TASTE_INTEREST_INDEX.get(id)?.interest.narrows);
+    // Scoped to TERRITORIES_REQUIRING_EXPLICIT_RELATION (currently just `music`) — the exact same
+    // "broad enough to produce genuinely wrong, specific claims" line the taxonomy itself already
+    // draws (see that constant's own comment). `sport` is deliberately NOT in that set: a real,
+    // live-established safety net (crewSportCrossSuggestion.test.ts's own "a SPORT event with zero
+    // literal wording still shows... the safety net holds" case) relies on a narrowing pick like
+    // `mma` never making an otherwise-unrelated SPORT candidate ineligible, only ever affecting the
+    // CLAIM (never named as "MMA" without real evidence — see crewSportCrossSuggestion's own file
+    // header). Both real live failures this whole check exists for — Rock/Alternative → hip-hop,
+    // and Nightlife/House/UK Garage → an Amy Winehouse tribute — are music-territory candidates,
+    // so this scoping loses nothing on the cases that actually motivated it.
+    const narrowingPicks = [...crewInterestPreferences].filter(
+      (id) => TASTE_INTEREST_INDEX.get(id)?.interest.narrows && TERRITORIES_REQUIRING_EXPLICIT_RELATION.has(TASTE_INTEREST_INDEX.get(id)!.territory.id),
+    );
     if (narrowingPicks.length === 0) return { tooBroad: false, pickedInterestId: null, territoryLabel: null };
     if (crewCategoryPreferences.has(experience.category)) return { tooBroad: false, pickedInterestId: null, territoryLabel: null };
     const tags = experienceInterestTags(experience);

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildApp } from '../src/app';
 import { resetDatabase } from './helpers/resetDb';
+import { prisma } from '../src/lib/prisma';
 
 /**
  * Real, live-reported bug — the exact incident that shipped this fix: two fresh Crews in
@@ -60,6 +61,13 @@ async function seedExperience(name: string, category: string, venueName: string,
     },
   });
   expect(res.statusCode).toBe(201);
+  // P0-URGENT: proactive Plot Found This now hard-requires a real ticket (isTicketedEvent) — see
+  // crewRecommendations.ts's own isProactivelyEligible comment. /admin/experiences/manual always
+  // writes tags: {} (UNKNOWN source), so every fixture here needs marking as EVENT_PROVIDER-
+  // sourced post-creation to stay eligible — this file is about density/proximity crowding, not
+  // the ticket gate itself.
+  const experienceId = (res.json() as { experience: { id: string } }).experience.id;
+  await prisma.experience.update({ where: { id: experienceId }, data: { tags: { provider: 'skiddle' } } });
 }
 
 describe('a category-preferred Crew finds real inventory even when a dense, unrelated local cluster would otherwise crowd it out', () => {

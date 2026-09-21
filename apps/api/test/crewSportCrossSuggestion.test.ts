@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildApp } from '../src/app';
 import { resetDatabase } from './helpers/resetDb';
+import { prisma } from '../src/lib/prisma';
 
 /**
  * Real, live-reported ask (same session as the SPORT/boxing/MMA investigation this whole line of
@@ -53,7 +54,12 @@ async function seedExperience(name: string, subcategories: string[]) {
     },
   });
   expect(res.statusCode).toBe(201);
-  return (res.json() as { experience: { id: string } }).experience;
+  // P0-URGENT: proactive Plot Found This now hard-requires a real ticket — see
+  // crewRecommendations.ts's own isProactivelyEligible comment. This file is about honest
+  // cross-suggestion copy, not the ticket gate itself.
+  const experience = (res.json() as { experience: { id: string } }).experience;
+  await prisma.experience.update({ where: { id: experience.id }, data: { tags: { provider: 'skiddle' } } });
+  return experience;
 }
 
 async function createMmaCrew(ownerEmail: string, mateEmail: string): Promise<string> {

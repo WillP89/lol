@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, test } from 'vitest';
 import { buildApp } from '../src/app';
 import { resetDatabase } from './helpers/resetDb';
+import { prisma } from '../src/lib/prisma';
 
 /**
  * "You should really be able to set preferences at the crew level too, so it becomes tailored
@@ -75,7 +76,13 @@ async function seedExperience(name: string, category: string, venueName: string)
     },
   });
   expect(res.statusCode).toBe(201);
-  return (res.json() as { experience: { id: string } }).experience;
+  // P0-URGENT: proactive Plot Found This now hard-requires a real ticket — see
+  // crewRecommendations.ts's own isProactivelyEligible comment. /admin/experiences/manual always
+  // writes tags: {} (UNKNOWN source), so this fixture needs marking as EVENT_PROVIDER-sourced
+  // post-creation; this file is about category-preference tailoring, not the ticket gate itself.
+  const experience = (res.json() as { experience: { id: string } }).experience;
+  await prisma.experience.update({ where: { id: experience.id }, data: { tags: { provider: 'skiddle' } } });
+  return experience;
 }
 
 describe('crew-level category preferences: tailoring a Crew beyond member-derived taste', () => {

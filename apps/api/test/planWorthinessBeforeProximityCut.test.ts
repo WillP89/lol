@@ -32,7 +32,12 @@ async function loginByEmail(email: string): Promise<{ userId: string; cookie: st
   return { userId: user.id, cookie: `${cookie.name}=${cookie.value}` };
 }
 
-async function seedPlaceProviderExperience(opts: { name: string; lat: number; lng: number; description?: string }) {
+// P0-URGENT: proactive Plot Found This now hard-requires a real ticket (isTicketedEvent) — see
+// crewRecommendations.ts's own isProactivelyEligible comment. `ticketed` lets the one genuine
+// candidate this test needs delivered carry a real EVENT_PROVIDER tag + price, while the 55 chain
+// venues stay realistic PLACE_PROVIDER rows (never ticketed) — this file is about the early
+// plan-worthiness gate running before the nearest-50 cut, not the ticket gate itself.
+async function seedPlaceProviderExperience(opts: { name: string; lat: number; lng: number; description?: string; ticketed?: boolean }) {
   const venue = await prisma.venue.create({ data: { name: opts.name, city: CITY.city, latitude: opts.lat, longitude: opts.lng } });
   return prisma.experience.create({
     data: {
@@ -45,9 +50,9 @@ async function seedPlaceProviderExperience(opts: { name: string; lat: number; ln
       startsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
       qualityScore: 80,
       bookingStatus: 'AVAILABLE',
-      priceMinMinor: null,
-      priceMaxMinor: null,
-      tags: { provider: 'openstreetmap' },
+      priceMinMinor: opts.ticketed ? 1500 : null,
+      priceMaxMinor: opts.ticketed ? 3000 : null,
+      tags: { provider: opts.ticketed ? 'skiddle' : 'openstreetmap' },
     },
   });
 }
@@ -84,6 +89,7 @@ describe('isPlanWorthyForCrew runs before, not after, the nearest-50 proximity c
       lat: CITY.lat + 0.12,
       lng: CITY.lng + 0.05,
       description: 'The Old Mill Bistro — a one-off supper club tasting menu event, with enough description to pass quality scoring.',
+      ticketed: true,
     });
 
     const crewRes = await app.inject({

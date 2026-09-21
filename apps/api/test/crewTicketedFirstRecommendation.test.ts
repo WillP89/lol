@@ -110,21 +110,28 @@ describe('a real ticketed event beats a non-ticketed one, always', () => {
   });
 });
 
-describe('no ticketed event available: Plot still sends its best match, honestly prefaced', () => {
-  test('only a non-ticketed (place-provider) candidate exists — Plot sends it, prefaced "There\'s not much in your area right now, so how about this"', async () => {
+describe('P0-URGENT: no ticketed event available — Plot sends NOTHING, never a non-ticketed compromise', () => {
+  /**
+   * SUPERSEDES the old "honest non-ticketed fallback, prefaced 'There's not much in your area
+   * right now'" behaviour this test used to prove — the live founder-tested product still sent
+   * an unticketed, Google-Maps-only "Copper Kettle"-class restaurant, hedged preface or not. New
+   * absolute pilot rule (verbatim): "NO TICKET = NO PROACTIVE RECOMMENDATION... if nothing
+   * ticketed qualifies: SEND NOTHING." The old ticketed-fallback preface/mechanism
+   * (`usedTicketedFallback`, `TICKETED_FALLBACK_PREFACE`) is now structurally unreachable — see
+   * crewRecommendations.ts's own `pickBest`/`isProactivelyEligible` comments.
+   */
+  test('only a non-ticketed (place-provider) candidate exists — Plot sends nothing, and the honest "nothing yet" message names the real preference', async () => {
     await resetDatabase();
     await seedExperience({ name: 'Stone Food Festival', category: 'RESTAURANT', lat: STONE.lat, lng: STONE.lng, provider: 'openstreetmap', priceMinMinor: null });
 
     const crewId = await createStaffordCrew('ticketed-owner2@plot-test.invalid', 'ticketed-mate2@plot-test.invalid', ['RESTAURANT']);
 
     const delivered = await prisma.crewRecommendation.findFirst({ where: { crewId }, include: { experience: true } });
-    expect(delivered).not.toBeNull();
-    expect(delivered!.experience!.name).toBe('Stone Food Festival');
-    expect(delivered!.reasonText).toContain("There's not much in your area right now, so how about this");
+    expect(delivered).toBeNull();
 
     const messages = await prisma.crewMessage.findMany({ where: { crewId }, orderBy: { createdAt: 'asc' } });
-    const announcement = messages.find((m) => m.body.includes(' — /plans/'));
-    expect(announcement).toBeDefined();
-    expect(announcement!.body).toMatch(/^There's not much in your area right now, so how about this: "Stone Food Festival"/);
+    expect(messages.some((m) => m.body.includes('Stone Food Festival'))).toBe(false);
+    const honestMessage = messages.find((m) => m.body.includes("don't have any"));
+    expect(honestMessage).toBeDefined();
   });
 });

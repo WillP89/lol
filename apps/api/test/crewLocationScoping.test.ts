@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildApp } from '../src/app';
 import { resetDatabase } from './helpers/resetDb';
+import { prisma } from '../src/lib/prisma';
 
 /**
  * Real, live-reported bug: "ran the same test with a new crew and it's come back to say can't
@@ -70,7 +71,12 @@ async function seedExperience(name: string, category: string, venueName: string,
     },
   });
   expect(res.statusCode).toBe(201);
-  return (res.json() as { experience: { id: string } }).experience;
+  // P0-URGENT: proactive Plot Found This now hard-requires a real ticket — see
+  // crewRecommendations.ts's own isProactivelyEligible comment. This file is about location
+  // scoping, not the ticket gate itself.
+  const experience = (res.json() as { experience: { id: string } }).experience;
+  await prisma.experience.update({ where: { id: experience.id }, data: { tags: { provider: 'skiddle' } } });
+  return experience;
 }
 
 describe('a Crew\'s own explicit location finds real inventory near it, however deep the table is', () => {
