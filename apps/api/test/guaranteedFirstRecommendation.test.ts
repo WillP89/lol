@@ -71,6 +71,20 @@ async function setUpMemberNoTaste(email: string): Promise<{ userId: string; cook
   return member;
 }
 
+// P0-URGENT: proactive Plot Found This now hard-requires a genuine ticket (isTicketedEvent —
+// EVENT_PROVIDER-sourced, real price — see crewRecommendations.ts's own `isProactivelyEligible`
+// comment for the live-reported "Copper Kettle" bug this closes). `/admin/experiences/manual`
+// always writes `tags: {}` (UNKNOWN sourceKind — see opportunityIntent.ts's own comment), so a
+// manually-curated fixture can never be ticketed however its price is set. This suite is about
+// the guaranteed-first DELIVERY/TASTE-MATCHING path, not the ticket gate itself (that has its own
+// direct coverage — see test/ticketGate.test.ts) — `markTicketed` makes every fixture here a
+// genuine EVENT_PROVIDER row post-creation so these tests keep proving what they've always proven,
+// without being killed by an entirely orthogonal, newer gate.
+async function markTicketed(experienceId: string) {
+  const { prisma } = await import('../src/lib/prisma');
+  await prisma.experience.update({ where: { id: experienceId }, data: { tags: { provider: 'skiddle' } } });
+}
+
 async function seedExperience(name: string, category: string, venueName: string) {
   const startsAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
   const res = await app.inject({
@@ -92,7 +106,9 @@ async function seedExperience(name: string, category: string, venueName: string)
     },
   });
   expect(res.statusCode).toBe(201);
-  return (res.json() as { experience: { id: string } }).experience;
+  const experience = (res.json() as { experience: { id: string } }).experience;
+  await markTicketed(experience.id);
+  return experience;
 }
 
 describe('guaranteed first recommendation: a brand-new Crew never comes up empty when real inventory exists', () => {
@@ -162,6 +178,7 @@ describe('guaranteed first recommendation: a brand-new Crew never comes up empty
         },
       });
       expect(res.statusCode).toBe(201);
+      await markTicketed((res.json() as { experience: { id: string } }).experience.id);
     }
     await seedTwin('Untailored Comedy Night', 'COMEDY');
     await seedTwin('The Crew\'s Actual Preference Gig', 'LIVE_MUSIC');

@@ -317,17 +317,32 @@ export async function scoreExperiencesForCrew(
   // candidate's score far under MIN_RECOMMENDATION_SCORE and strip any reason that would make it
   // read as a genuine taste match (see that loop's own comment) — visible in the debug trail with
   // an honest, specific rejection reason, never silently vanished, but never winning either.
-  function contradictsCrewInterestPreference(experience: { category: string; subcategories: unknown }): { contradicts: boolean; pickedInterestId: string | null; conflictingTag: string | null } {
+  // URGENT LIVE-PRODUCT FIX (five fresh real Crews, tested by hand against the actual deployed
+  // product, three of five failed): a Rock + Alternative Rock Crew's FIRST recommendation was a
+  // hip-hop/rap event, captioned "2/2 of you are into hip hop and rap". Root cause, traced from
+  // this exact function: it only ever checked `experienceInterestTagsFromSubcategories` (STRONG,
+  // provider-subcategory-confirmed evidence) and bailed out entirely — `contradicts: false` — the
+  // moment that set was empty. Real Ticketmaster/Skiddle rows routinely carry NO subcategory
+  // genre data at all, so this check was silently inert for exactly the rows most likely to need
+  // it. Meanwhile `interest_match` (this file, `tags`/`experienceInterestTags` — the WEAK,
+  // name/description keyword scan) has no such requirement and confidently generated "N/M of you
+  // are into hip hop" from that same weak text evidence. The asymmetry was the bug: evidence weak
+  // enough to be excluded from contradiction-checking was simultaneously strong enough to drive a
+  // confident personalisation claim. Fixed by checking weak tags too, whenever the picked
+  // interest itself has no supporting evidence (strong or weak) of its own — never overridden by
+  // genuine strong support for the actual pick, so a real subcategory-confirmed match still wins
+  // outright as before.
+  function contradictsCrewInterestPreference(experience: { category: string; subcategories: unknown; name: string; description: string }): { contradicts: boolean; pickedInterestId: string | null; conflictingTag: string | null } {
     if (crewInterestPreferences.size === 0) return { contradicts: false, pickedInterestId: null, conflictingTag: null };
     const strongTags = experienceInterestTagsFromSubcategories(experience);
-    if (strongTags.length === 0) return { contradicts: false, pickedInterestId: null, conflictingTag: null };
+    const weakTags = experienceInterestTags(experience); // superset: subcategories + name/description keyword hits
     for (const pickedId of crewInterestPreferences) {
       const entry = TASTE_INTEREST_INDEX.get(pickedId);
       if (!entry || !entry.interest.narrows) continue; // only a genuine narrowing pick can ever be contradicted
       const territory = entry.territory;
       if (!territory.categories.includes(experience.category as (typeof territory.categories)[number])) continue;
       const related = new Set(RELATED_INTERESTS[pickedId] ?? []);
-      for (const tag of strongTags) {
+      const isRealContradiction = (tag: string) => {
         // A tag that matches THIS pick, a curated close relation of it, or ANY OTHER narrowing
         // interest the Crew ALSO explicitly picked is never a contradiction — real bug this
         // exact check fixes: a Crew that picked both `electronic` and `uk_garage` (two genuinely
@@ -336,14 +351,80 @@ export async function scoreExperiencesForCrew(
         // purely because it wasn't a literal match or curated relation of THAT ONE pick — even
         // though it was a direct, literal match of the Crew's OTHER pick. A Crew is always
         // allowed to want more than one specific thing in the same territory.
-        if (tag === pickedId || related.has(tag) || crewInterestPreferences.has(tag)) continue;
+        if (tag === pickedId || related.has(tag) || crewInterestPreferences.has(tag)) return false;
         const tagEntry = TASTE_INTEREST_INDEX.get(tag);
-        if (tagEntry?.interest.narrows && tagEntry.territory.id === territory.id) {
-          return { contradicts: true, pickedInterestId: pickedId, conflictingTag: tag };
-        }
-      }
+        return Boolean(tagEntry?.interest.narrows && tagEntry.territory.id === territory.id);
+      };
+      const strongConflict = strongTags.find(isRealContradiction);
+      if (strongConflict) return { contradicts: true, pickedInterestId: pickedId, conflictingTag: strongConflict };
+      // No STRONG contradiction for this pick. If the candidate also carries no STRONG support
+      // for the pick itself (or a sibling) — i.e. a real provider genre tag never actually
+      // confirmed this pick either way — a WEAK (text-only) hit for a DIFFERENT narrowing
+      // interest in the same territory is still real, checkable, positive evidence something
+      // else is going on. This is deliberately the exact same evidence `interest_match` above
+      // already treats as strong enough to generate a confident "you're into X" claim — it must
+      // be treated as strong enough to also block a contradicting claim.
+      const hasStrongSupportForThisPick = strongTags.includes(pickedId) || [...related].some((r) => strongTags.includes(r));
+      if (hasStrongSupportForThisPick) continue;
+      const weakConflict = weakTags.find(isRealContradiction);
+      if (weakConflict) return { contradicts: true, pickedInterestId: pickedId, conflictingTag: weakConflict };
     }
     return { contradicts: false, pickedInterestId: null, conflictingTag: null };
+  }
+
+  // SECOND urgent live-product fix, same test round: a Nightlife + House + UK Garage Crew's
+  // first recommendation was a generic Amy Winehouse tribute night — no genre tag evidence at
+  // all, strong or weak, for ANYTHING (real provider rows for tribute/covers acts routinely carry
+  // none). `contradictsCrewInterestPreference` above correctly found nothing to contradict — but
+  // "found nothing to contradict" and "genuinely matches what this Crew asked for" are not the
+  // same claim, and the candidate still won on the strength of a bare, unconfirmed category-level
+  // admission. THE RULE (live product directive, verbatim): "a candidate that only satisfies the
+  // broad parent should not automatically remain eligible" when the Crew also made a specific,
+  // narrowing pick in that same territory. Deliberately NOT applied when the candidate has an
+  // INDEPENDENT, non-narrowing reason to be in the pool at all (an explicit whole-category pick,
+  // or a different, non-narrowing interest the candidate's own text genuinely supports) — composed
+  // intents are not all equally strict (live directive's own worked example: "FOOD FESTIVALS +
+  // STREET FOOD + ITALIAN means food/street-food event discovery, WITH ITALIAN AS A TASTE SIGNAL",
+  // not a hard requirement every candidate must independently confirm). Only fires when the
+  // narrowing-pick territory is the CANDIDATE'S ONLY reason to be here at all — exactly the
+  // Amy-Winehouse-under-a-broad-Nightlife-admission shape, never a genuine street-food festival
+  // that just doesn't happen to confirm a cuisine on top.
+  function lacksRequiredNarrowingEvidence(experience: { category: string; subcategories: unknown; name: string; description: string }): { tooBroad: boolean; pickedInterestId: string | null; territoryLabel: string | null } {
+    if (crewInterestPreferences.size === 0) return { tooBroad: false, pickedInterestId: null, territoryLabel: null };
+    const narrowingPicks = [...crewInterestPreferences].filter((id) => TASTE_INTEREST_INDEX.get(id)?.interest.narrows);
+    if (narrowingPicks.length === 0) return { tooBroad: false, pickedInterestId: null, territoryLabel: null };
+    if (crewCategoryPreferences.has(experience.category)) return { tooBroad: false, pickedInterestId: null, territoryLabel: null };
+    const tags = experienceInterestTags(experience);
+    const nonNarrowingPicks = [...crewInterestPreferences].filter((id) => !narrowingPicks.includes(id));
+    for (const id of nonNarrowingPicks) {
+      if (tags.includes(id)) return { tooBroad: false, pickedInterestId: null, territoryLabel: null };
+      const territory = TASTE_INTEREST_INDEX.get(id)?.territory;
+      if (territory && !TERRITORIES_REQUIRING_EXPLICIT_RELATION.has(territory.id) && territory.categories.includes(experience.category as (typeof territory.categories)[number])) {
+        return { tooBroad: false, pickedInterestId: null, territoryLabel: null };
+      }
+    }
+    // Two passes, deliberately — same "a Crew is always allowed to want more than one specific
+    // thing in the same territory" principle contradictsCrewInterestPreference's own comment
+    // establishes. Real bug an early single-pass version of this had: a Crew that picked BOTH
+    // `electronic` and `uk_garage` had a genuinely, strongly UK-garage-confirmed candidate marked
+    // "too broad" purely because it happened to check `electronic` first and find no evidence for
+    // THAT ONE pick — never noticing the candidate already satisfied the Crew's OTHER pick. First
+    // pass: does ANY relevant narrowing pick have positive evidence anywhere? If so, this
+    // candidate is fine, full stop — never flagged just for failing to ALSO confirm a different
+    // pick nothing else requires it to confirm.
+    let firstRelevant: { pickedId: string; territoryLabel: string } | null = null;
+    for (const pickedId of narrowingPicks) {
+      const entry = TASTE_INTEREST_INDEX.get(pickedId)!;
+      const territory = entry.territory;
+      if (!territory.categories.includes(experience.category as (typeof territory.categories)[number])) continue;
+      const related = new Set(RELATED_INTERESTS[pickedId] ?? []);
+      if (tags.includes(pickedId) || [...related].some((r) => tags.includes(r))) return { tooBroad: false, pickedInterestId: null, territoryLabel: null };
+      if (!firstRelevant) firstRelevant = { pickedId, territoryLabel: territory.label };
+    }
+    // Second pass reached: no relevant narrowing pick has any positive evidence at all, and no
+    // independent (non-narrowing) admission route exists either — genuinely too broad.
+    if (firstRelevant) return { tooBroad: true, pickedInterestId: firstRelevant.pickedId, territoryLabel: firstRelevant.territoryLabel };
+    return { tooBroad: false, pickedInterestId: null, territoryLabel: null };
   }
   // Comfortably under MIN_RECOMMENDATION_SCORE (55, crewRecommendations.ts) even after every
   // other bonus (distance/availability/quality/ticketed) stacks on top of it — a contradicting
@@ -792,6 +873,20 @@ export async function scoreExperiencesForCrew(
         },
         ...survivingReasons,
       );
+    } else {
+      const broad = lacksRequiredNarrowingEvidence(experience);
+      if (broad.tooBroad) {
+        score = Math.min(score, MAX_SCORE_FOR_CONTRADICTING_CANDIDATE);
+        const survivingReasons = reasons.filter((r) => !TASTE_SIGNAL_CODES_OVERRIDABLE_BY_CONTRADICTION.has(r.code));
+        reasons.length = 0;
+        reasons.push(
+          {
+            code: 'genre_contradiction',
+            label: `You picked ${interestLabel(broad.pickedInterestId!)} — nothing here actually confirms that, only a broader ${broad.territoryLabel} match`,
+          },
+          ...survivingReasons,
+        );
+      }
     }
 
     const matchScore = Math.max(0, Math.min(100, Math.round(score)));

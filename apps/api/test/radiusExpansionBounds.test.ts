@@ -140,11 +140,17 @@ describe('Radius expansion respects realistic Crew travel tolerance, not a blind
 
   test('a 10-mile preferred radius can sensibly stretch to a genuinely strong ~25-mile match', async () => {
     const suffix = Date.now();
+    // Both ticketed (P0-URGENT: proactive Plot Found This hard-requires a real ticket — see
+    // crewRecommendations.ts's own isProactivelyEligible comment) so the comparison this test is
+    // actually about — genre-specificity/significance deciding the winner, not distance alone —
+    // stays meaningful, rather than the nearer one losing for an unrelated reason.
     await seedExperience({
       name: `Nearby Weak Gig ${suffix}`,
       category: 'LIVE_MUSIC',
       description: 'A regular live music night at a local venue.',
       milesAway: 3,
+      priceMinMinor: 1200,
+      eventProvider: 'skiddle',
     });
     await seedExperience({
       name: `Strong Rock Gig ${suffix}`,
@@ -152,6 +158,8 @@ describe('Radius expansion respects realistic Crew travel tolerance, not a blind
       description: 'A real alternative rock gig, touring band.',
       milesAway: 24,
       subcategories: ['alternative'],
+      priceMinMinor: 1600,
+      eventProvider: 'skiddle',
     });
 
     const owner = await setUpMember(`bounds-b-owner-${suffix}@plot-test.invalid`);

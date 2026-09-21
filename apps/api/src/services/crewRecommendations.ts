@@ -563,11 +563,15 @@ function isSignificantOpportunity(option: MatchOption, crewInterestPreferences: 
   return false;
 }
 
+// `usedTicketedFallback` is kept (always `false` now) purely so downstream callers/tests don't
+// need a second return shape — every candidate reaching this function already passed
+// `isProactivelyEligible` (see computePoolsAtRadius's own comment), which requires a real ticket.
+// There is no non-ticketed candidate left to ever fall back to; this is no longer a preference
+// with an escape hatch, it's a closed pool. `pool` is still sorted defensively (never assume the
+// caller already did) rather than trusting every call site to pre-sort.
 function pickBest(pool: MatchOption[]): { best: MatchOption | undefined; usedTicketedFallback: boolean } {
   const sorted = [...pool].sort((a, b) => b.matchScore - a.matchScore);
-  const ticketed = sorted.find((o) => isTicketedEvent(o.experience));
-  if (ticketed) return { best: ticketed, usedTicketedFallback: false };
-  return { best: sorted[0], usedTicketedFallback: sorted.length > 0 };
+  return { best: sorted[0], usedTicketedFallback: false };
 }
 async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: boolean } = {}): Promise<CrewEligibilityResult> {
   const settings = await getOrCreateSettings(crewId);
@@ -684,6 +688,36 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   // `withinRadius` is `boolean | null` — `null` means genuinely unknown (no venue coordinates, or
   // no location anchor could be established), never "near"; a candidate must be POSITIVELY
   // CONFIRMED within THIS tier's radius to count, fail closed, never fail open.
+  // ABSOLUTE PILOT ELIGIBILITY INVARIANT (live product directive, verbatim: "PROACTIVE PLOT FOUND
+  // THIS MUST BE TICKETED... NO TICKET = NO PROACTIVE RECOMMENDATION... FILTER THEM OUT BEFORE
+  // RANKING... do not allow any fallback mechanism to resurrect them"). Real, live-reported
+  // failure this closes: "Copper Kettle" — an ordinary, unticketed restaurant whose only action
+  // path was a Google Maps link — was proactively sent to a Crew. Root cause: `pickBest` (below)
+  // treated a real ticket as a PREFERENCE with a fallback to the best-scoring candidate overall
+  // when nothing ticketed cleared the bar — exactly the "ambiguity" this directive explicitly asks
+  // to remove for the pilot. Applied HERE, at the single point every downstream pool (`inRadius`/
+  // `withTaste`/`eligible`) and every caller of `computePoolsAtRadius` (tier0, the widened-radius
+  // search, `guaranteeFirst`'s own relaxed fallback, `selectExploratoryCandidate`) derives from —
+  // never a second, separately-maintained copy of this rule that could drift. An unticketed
+  // candidate simply never enters any pool past this line; `pickBest` below no longer has an
+  // unticketed candidate to fall back to even in principle. `pools.scored` (used only by
+  // `buildDetails`'s debug trail below) stays the full, unfiltered list so a real candidate like
+  // Copper Kettle is still visible in the explain trail with an honest `UNTICKETED` rejection
+  // reason — filtered out, never silently vanished.
+  //
+  // SAME LINE also excludes a `genre_contradiction`-flagged candidate outright (see match.ts
+  // #contradictsCrewInterestPreference and #lacksRequiredNarrowingEvidence) — the second urgent
+  // fix from the same live test round: score-capping alone (the previous design) still left a
+  // contradicting/too-broad candidate reachable through `guaranteeFirst`'s own relaxed `inRadius`
+  // fallback (used when nothing in radius has ANY taste signal at all — a contradicting candidate
+  // fails `hasTasteSignal` too, so it was never excluded from `inRadius` itself, only outscored
+  // within `eligible`/`withTaste`, which that relaxed fallback deliberately bypasses). Hard-
+  // excluding it here, at the same single point as the ticket gate, closes that bypass structurally
+  // rather than patching each caller individually.
+  function isProactivelyEligible(o: MatchOption): boolean {
+    return isTicketedEvent(o.experience) && !o.reasons.some((r) => r.code === 'genre_contradiction');
+  }
+
   async function computePoolsAtRadius(radiusMetersOverride: number | null) {
     const scoredBeforeFatigue = await scoreExperiencesForCrew(crewId, { radiusMetersOverride });
     // Diversity/fatigue penalty (see CATEGORY_FATIGUE_WINDOW/PENALTY's own comment) — applied
@@ -693,7 +727,8 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
     // the fatigue-adjusted order, not the pre-penalty one.
     const scored = (await applyCategoryFatigue(crewId, scoredBeforeFatigue)).sort((a, b) => b.matchScore - a.matchScore);
     const notExcluded = scored.filter((o) => !excluded.has(o.experience.id));
-    const inRadius = notExcluded.filter((o) => o.withinRadius === true);
+    const proactiveEligiblePool = notExcluded.filter(isProactivelyEligible);
+    const inRadius = proactiveEligiblePool.filter((o) => o.withinRadius === true);
     const withTaste = inRadius.filter(hasTasteSignal);
     const eligible = withTaste.filter((o) => o.matchScore >= MIN_RECOMMENDATION_SCORE);
     return { scored, notExcluded, inRadius, withTaste, eligible };
@@ -723,6 +758,11 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
         const worthiness = derivePlanWorthiness(o.experience);
         const rejectionReasons: string[] = [];
         if (excluded.has(o.experience.id)) rejectionReasons.push('ALREADY_RECOMMENDED_OR_SHARED');
+        // Absolute pilot invariant (see isProactivelyEligible's own comment) — checked here too,
+        // independent of whichever derived pool actually excluded this candidate, so the debug
+        // trail always names the real reason a genuine ticketed alternative should be preferred,
+        // never just a generic "no taste signal"/"below threshold" catch-all.
+        if (!isTicketedEvent(o.experience)) rejectionReasons.push('UNTICKETED');
         if (o.withinRadius !== true) rejectionReasons.push(o.withinRadius === false ? 'OUTSIDE_CREW_RADIUS' : 'DISTANCE_UNKNOWN');
         if (
           significanceContext &&
