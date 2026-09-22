@@ -9,10 +9,10 @@ import { providerRegistry } from '../providers/registry';
 import { buildCanonicalKey } from '../services/entityResolution';
 import { computeQualityScore, MIN_PUBLISHABLE_QUALITY_SCORE } from '../services/qualityScoring';
 import { UK_FALLBACK_CENTER, resolveCityCenter } from '../data/ukPlaces';
-import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, getOrCreateSettings, explainCrewRecommendation, PLOT_SYSTEM_EMAIL, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS } from '../services/crewRecommendations';
+import { runRecommendationSweep, runSweepIfDue, generateRecommendationForCrew, getOrCreateSettings, explainCrewRecommendation, PLOT_SYSTEM_EMAIL, RECOMMENDATION_SWEEP_DUE_INTERVAL_MS, SWEEP_JOB_NAME } from '../services/crewRecommendations';
 import { CANDIDATE_WINDOW_DAYS } from '../services/match';
 import { haversineKm } from '../lib/geo';
-import { isPlanWorthyForCrew } from '../services/opportunityIntent';
+import { isPlanWorthyForCrew, isTicketedEvent } from '../services/opportunityIntent';
 import { runMessageNotificationSweep, runMessageNotificationSweepIfDue, MESSAGE_NOTIFICATION_SWEEP_DUE_INTERVAL_MS } from '../services/messageNotifications';
 
 // Real gap this closes (the "activation harness" — see docs/PILOT_READINESS_AUDIT.md Cycle 12): a
@@ -192,6 +192,163 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const allCategories = [...new Set(providerRegistry.flatMap((a) => a.categories))];
     const categoriesWithNoLiveSource = allCategories.filter((c) => !liveCategories.has(c));
     return reply.send({ providers, registered, categoriesWithNoLiveSource });
+  });
+
+  // Which live adapter id genuinely produces a real, bookable ticket/action URL vs. a Maps
+  // search or a website link — a structural fact about the adapter, not something any single
+  // row's data can tell you. See each adapter's own header comment (docs/providers/ticketing.md,
+  // food-and-places.md) for the sourcing of each of these.
+  const TICKET_CAPABLE_PROVIDER_IDS = new Set(['ticketmaster', 'skiddle', 'eventbrite', 'mock_ticketing', 'manual_curation']);
+  // Adapter ids that never produced this process's own fabricated data — see MOCK_PROVIDER_IDS'
+  // own comment in crewRecommendations.ts for why this exact set (not "every non-live adapter")
+  // is what actually defines "mock" for proactive-eligibility purposes.
+  const MOCK_PROVIDER_IDS = new Set(['mock_ticketing', 'mock_restaurants', 'mock_activities']);
+  type ProvenanceClass = 'REAL_PROVIDER' | 'MANUAL_REAL' | 'MOCK' | 'UNKNOWN';
+  function classifyProvenance(taggedProvider: string | undefined, listingProviderIds: string[]): ProvenanceClass {
+    // Experience.tags.provider (set by whichever adapter's mapToCanonical authored this row's
+    // own canonical fields) is the primary signal — the same field isRealProvenance() reads in
+    // crewRecommendations.ts, so this diagnostic classifies rows the exact same way the real
+    // eligibility gate does, not a parallel guess. A row with no tags.provider at all is either
+    // POST /admin/experiences/manual (always writes `tags: {}` — see opportunityIntent.ts's own
+    // comment on deriveSourceKind) or mockRestaurantProvider/mockActivityProvider (neither sets
+    // tags.provider either — see those two files directly). Both cases fall back to the row's
+    // own ProviderListing.providerId, which every ingestion path sets correctly regardless of
+    // what ends up in tags, to tell those two genuinely different cases apart.
+    if (taggedProvider) {
+      if (MOCK_PROVIDER_IDS.has(taggedProvider)) return 'MOCK';
+      if (taggedProvider === 'manual_curation') return 'MANUAL_REAL';
+      return 'REAL_PROVIDER';
+    }
+    if (listingProviderIds.includes('manual_curation')) return 'MANUAL_REAL';
+    if (listingProviderIds.some((id) => MOCK_PROVIDER_IDS.has(id))) return 'MOCK';
+    if (listingProviderIds.length > 0) return 'REAL_PROVIDER';
+    return 'UNKNOWN';
+  }
+
+  /**
+   * STEP 3 of the live "establish exactly what I'm actually running" directive: one screen that
+   * answers, without exposing any secret, "is Plot operating on real supply right now, in THIS
+   * running process, against THIS database". Everything below is read from this process's own
+   * live state (env vars, a light healthCheck() per adapter — no new outbound calls this codebase
+   * doesn't already make elsewhere, no speculative live-provider fetch) — never guessed, never
+   * cached from a previous deploy.
+   */
+  app.get('/environment-truth', async (_request, reply) => {
+    // Render and Railway both inject their own git-commit env var into every deployed service
+    // automatically — no config needed on our side (same pattern resolvePublicApiUrl() already
+    // uses for RENDER_EXTERNAL_URL/RAILWAY_PUBLIC_DOMAIN, see lib/config.ts). `unknown` (not a
+    // fabricated commit) on any host that doesn't set either — e.g. this sandbox, or a bare VPS.
+    const deployedCommit = process.env.RENDER_GIT_COMMIT ?? process.env.RAILWAY_GIT_COMMIT_SHA ?? 'unknown';
+    const deployedBranch = process.env.RENDER_GIT_BRANCH ?? process.env.RAILWAY_GIT_BRANCH ?? 'unknown';
+    const hostPlatform = process.env.RENDER_GIT_COMMIT ? 'render' : process.env.RAILWAY_GIT_COMMIT_SHA ? 'railway' : 'unknown';
+
+    // Safe-to-display DB identity: host + database name only, credentials stripped. Never the
+    // connection string itself — a malformed DATABASE_URL fails safe to 'unparseable', never a
+    // partial leak of whatever WAS parseable.
+    let databaseIdentifier = 'unparseable';
+    try {
+      const u = new URL(config.DATABASE_URL);
+      databaseIdentifier = `${u.hostname}${u.pathname}`;
+    } catch {
+      // leave as 'unparseable'
+    }
+
+    // Same computation `/health/scheduler` (app.ts) uses, inlined here so this one screen never
+    // requires a second request to see whether the background sweep is actually alive.
+    const schedulerState = await prisma.schedulerState.findUnique({ where: { jobName: SWEEP_JOB_NAME } });
+    const lastRunAt = schedulerState?.lastRunAt ?? null;
+    const nextDueAt = lastRunAt ? new Date(lastRunAt.getTime() + RECOMMENDATION_SWEEP_DUE_INTERVAL_MS) : null;
+    const schedulerGraceMs = 30 * 60 * 1000;
+    const schedulerOverdue = nextDueAt !== null && Date.now() - nextDueAt.getTime() > schedulerGraceMs;
+
+    const registered = await Promise.all(
+      providerRegistry.map(async (adapter) => {
+        const dbRow = await prisma.provider.findUnique({ where: { id: adapter.id } });
+        const health = await adapter.healthCheck().catch((err) => ({ status: 'DOWN' as const, error: err instanceof Error ? err.message : String(err), checkedAt: new Date() }));
+        return {
+          id: adapter.id,
+          displayName: adapter.displayName,
+          categories: adapter.categories,
+          configured: adapter.isLive,
+          reachableNow: health.status !== 'DOWN',
+          reachabilityError: health.status === 'DOWN' ? health.error ?? null : null,
+          lastSuccessfulSyncAt: dbRow && dbRow.status !== 'DOWN' ? dbRow.lastHealthCheckAt?.toISOString() ?? null : null,
+          lastSyncError: dbRow?.status === 'DOWN' ? dbRow.lastError : null,
+          ticketCapable: TICKET_CAPABLE_PROVIDER_IDS.has(adapter.id),
+          provenanceIfUsed: MOCK_PROVIDER_IDS.has(adapter.id) ? 'MOCK' : adapter.id === 'manual_curation' ? 'MANUAL_REAL' : 'REAL_PROVIDER',
+        };
+      }),
+    );
+
+    // Every Experience whose date still falls in the real recommendation window — the same
+    // CANDIDATE_WINDOW_DAYS the live scorer itself uses, so "future opportunities" here means
+    // the same thing it means to a real Crew, not just "anything with startsAt > now". Safety-
+    // capped the same way /experiences-near already is; a real pilot's live table is nowhere
+    // near this size yet.
+    const windowEnd = new Date();
+    windowEnd.setDate(windowEnd.getDate() + CANDIDATE_WINDOW_DAYS);
+    const futureExperiences = await prisma.experience.findMany({
+      where: { startsAt: { gte: new Date(), lte: windowEnd } },
+      select: {
+        tags: true,
+        bookingStatus: true,
+        priceMinMinor: true,
+        qualityScore: true,
+        listings: { select: { providerId: true }, take: 5 },
+      },
+      take: 10000,
+    });
+
+    const provenanceTotals: Record<ProvenanceClass, number> = { REAL_PROVIDER: 0, MANUAL_REAL: 0, MOCK: 0, UNKNOWN: 0 };
+    const perProviderCounts = new Map<string, { future: number; eligible: number }>();
+    for (const exp of futureExperiences) {
+      const taggedProvider = (exp.tags as Record<string, unknown> | null)?.provider;
+      const listingProviderIds = exp.listings.map((l) => l.providerId);
+      const cls = classifyProvenance(typeof taggedProvider === 'string' ? taggedProvider : undefined, listingProviderIds);
+      provenanceTotals[cls] += 1;
+
+      // Best-guess "which registered adapter" for the per-provider breakdown below — the tagged
+      // provider when present, else the first real ProviderListing this row actually has.
+      const attributedProviderId = (typeof taggedProvider === 'string' ? taggedProvider : null) ?? listingProviderIds[0] ?? 'unattributed';
+      const bucket = perProviderCounts.get(attributedProviderId) ?? { future: 0, eligible: 0 };
+      bucket.future += 1;
+      // Structural eligibility only — ticketed + above the real publishable-quality floor + not
+      // MOCK. This is NOT "would be sent to a real Crew" (that also needs a specific Crew's own
+      // taste-contradiction check, which has no meaning outside a real Crew context — see
+      // isProactivelyEligible() in crewRecommendations.ts) — it's "could this row ever qualify
+      // for anyone", the honest ceiling this diagnostic can report without fabricating a Crew.
+      if (isTicketedEvent(exp) && exp.qualityScore >= MIN_PUBLISHABLE_QUALITY_SCORE && cls !== 'MOCK') bucket.eligible += 1;
+      perProviderCounts.set(attributedProviderId, bucket);
+    }
+
+    const providers = registered.map((r) => ({
+      ...r,
+      futureOpportunities: perProviderCounts.get(r.id)?.future ?? 0,
+      structurallyEligibleForProactivePlot: perProviderCounts.get(r.id)?.eligible ?? 0,
+    }));
+
+    return reply.send({
+      environment: config.NODE_ENV,
+      deployedCommit,
+      deployedBranch,
+      hostPlatform,
+      databaseIdentifier,
+      backgroundWorker: {
+        // No separate worker process exists (see docs/DEPLOYMENT.md Step 2.6) — the sweep runs
+        // in-process on the same deployed commit as everything else, woken by this same host's
+        // own 15-minute in-process poll plus (on Render) the external wake-scheduler ping.
+        runsInProcess: true,
+        deployedCommit,
+        lastRunAt: lastRunAt?.toISOString() ?? null,
+        nextDueAt: nextDueAt?.toISOString() ?? null,
+        overdue: schedulerOverdue,
+        neverRun: lastRunAt === null,
+      },
+      providers,
+      inventoryProvenanceTotals: provenanceTotals,
+      recommendationWindowDays: CANDIDATE_WINDOW_DAYS,
+      minPublishableQualityScore: MIN_PUBLISHABLE_QUALITY_SCORE,
+    });
   });
 
   /**

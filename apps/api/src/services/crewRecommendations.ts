@@ -730,10 +730,18 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   // other ticketed source to test against) — a production deployment with zero real ticketed
   // provider configured must now honestly send nothing rather than silently fabricate trust.
   const MOCK_PROVIDER_IDS = new Set(['mock_ticketing', 'mock_restaurants', 'mock_activities']);
+  // A MISSING tags.provider is deliberately treated as real, not mock. Real bug an earlier
+  // version of this check had: `POST /admin/experiences/manual` always writes `tags: {}` (see
+  // opportunityIntent.ts's own comment on `deriveSourceKind` — deliberate, an operator-vetted
+  // entry, never treated as suspicious the way an unreviewed place-provider row is), so requiring
+  // `typeof provider === 'string'` here made every genuine, human-curated real event silently
+  // ineligible for proactive send in production — a real supply source excluded by the very gate
+  // meant only to exclude FABRICATED (mock) data. Only an EXPLICIT, known mock provider id now
+  // disqualifies a candidate; anything else (a real provider id, or no id at all) is trusted.
   function isRealProvenance(o: MatchOption): boolean {
     if (config.NODE_ENV !== 'production') return true;
     const provider = (o.experience.tags as Record<string, unknown> | null)?.provider;
-    return typeof provider === 'string' && !MOCK_PROVIDER_IDS.has(provider);
+    return typeof provider !== 'string' || !MOCK_PROVIDER_IDS.has(provider);
   }
 
   function isProactivelyEligible(o: MatchOption): boolean {
