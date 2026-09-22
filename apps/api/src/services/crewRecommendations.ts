@@ -9,6 +9,7 @@ import { sendSystemMessage } from './chat';
 import { UK_FALLBACK_CENTER } from '../data/ukPlaces';
 import { interestLabel } from '@plot/shared';
 import { derivePlanWorthiness, deriveBookingType, deriveSourceKind, isTicketedEvent } from './opportunityIntent';
+import { config } from '../lib/config';
 import { MIN_RECOMMENDATION_SCORE, EXPLORATION_MIN_SCORE, deriveConfidence, confidenceLeadIn } from './recommendationConfidence';
 import { RecommendationResponseError, type RecommendationResponseAction } from './recommendationLearning';
 import { tryDeriveAndApplyCrewPreferences } from './crewTasteDerivation';
@@ -714,8 +715,29 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
   // within `eligible`/`withTaste`, which that relaxed fallback deliberately bypasses). Hard-
   // excluding it here, at the same single point as the ticket gate, closes that bypass structurally
   // rather than patching each caller individually.
+  // P0-URGENT Rule 7 (live product directive, verbatim): "the consumer acceptance test must
+  // make it impossible for us to accidentally congratulate ourselves because Plot selected
+  // something we inserted specifically for the test... MOCK = INELIGIBLE" for pilot-mode
+  // proactive recommendations. Real gap this closes: `mock_ticketing` is a recognised
+  // EVENT_PROVIDER_ID (see opportunityIntent.ts's own comment — deliberately, so the test suite
+  // exercises the exact ticketed-tiering logic a live key would) — but `providerRegistry.ts`'s
+  // own fallback (`liveTicketedProviders.length > 0 ? liveTicketedProviders : [mockTicketingProvider]`)
+  // means a real PRODUCTION deployment with no Ticketmaster/Skiddle/PredictHQ key configured at
+  // all would silently run on fabricated "Fred again.."/"Bicep"-style mock inventory as its only
+  // ticketed source — and, before this, that fabricated inventory could win a real proactive
+  // send. Scoped to `NODE_ENV === 'production'` only (never dev/test, where the entire suite —
+  // golden-path.test.ts's own `ensureInventory`/`syncAllProviders` included — legitimately has no
+  // other ticketed source to test against) — a production deployment with zero real ticketed
+  // provider configured must now honestly send nothing rather than silently fabricate trust.
+  const MOCK_PROVIDER_IDS = new Set(['mock_ticketing', 'mock_restaurants', 'mock_activities']);
+  function isRealProvenance(o: MatchOption): boolean {
+    if (config.NODE_ENV !== 'production') return true;
+    const provider = (o.experience.tags as Record<string, unknown> | null)?.provider;
+    return typeof provider === 'string' && !MOCK_PROVIDER_IDS.has(provider);
+  }
+
   function isProactivelyEligible(o: MatchOption): boolean {
-    return isTicketedEvent(o.experience) && !o.reasons.some((r) => r.code === 'genre_contradiction');
+    return isTicketedEvent(o.experience) && !o.reasons.some((r) => r.code === 'genre_contradiction') && isRealProvenance(o);
   }
 
   async function computePoolsAtRadius(radiusMetersOverride: number | null) {
@@ -763,6 +785,7 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
         // trail always names the real reason a genuine ticketed alternative should be preferred,
         // never just a generic "no taste signal"/"below threshold" catch-all.
         if (!isTicketedEvent(o.experience)) rejectionReasons.push('UNTICKETED');
+        if (!isRealProvenance(o)) rejectionReasons.push('MOCK_OR_TEST_PROVENANCE');
         if (o.withinRadius !== true) rejectionReasons.push(o.withinRadius === false ? 'OUTSIDE_CREW_RADIUS' : 'DISTANCE_UNKNOWN');
         if (
           significanceContext &&
@@ -788,7 +811,13 @@ async function evaluateCrewEligibility(crewId: string, opts: { guaranteeFirst?: 
           distanceMiles: o.distanceMiles !== null ? Math.round(o.distanceMiles * 10) / 10 : null,
           startsAt: o.experience.startsAt.toISOString(),
           priceMinMinor: o.experience.priceMinMinor,
+          // Rule 15 forensics: the raw provider id (never inferred) plus the two booleans that
+          // actually gate proactive delivery, so an operator can see WHY without re-deriving them
+          // by hand from sourceKind/bookingType.
+          provider: (o.experience.tags as Record<string, unknown> | null)?.provider ?? null,
           sourceKind: deriveSourceKind(o.experience),
+          isTicketed: isTicketedEvent(o.experience),
+          isRealProvenance: isRealProvenance(o),
           planWorthiness: worthiness.level,
           planWorthinessReasons: worthiness.reasons,
           bookingType: deriveBookingType(o.experience),

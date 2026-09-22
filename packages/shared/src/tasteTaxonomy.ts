@@ -156,10 +156,35 @@ export const TASTE_TAXONOMY: TasteTerritory[] = [
       // that finer distinction is handled by the existing `crew_interest_preference` scoring
       // bonus (a literal league match already outranks a bare football one), never by exclusion.
       tn('football', 'Football', 'footy'),
-      t('premier_league', 'Premier League'),
-      t('championship_football', 'Championship football', 'championship'),
-      t('league_one_two', 'League One & Two', 'league one', 'league two'),
-      t('non_league', 'Non-league football', 'non-league'),
+      // P0-URGENT taxonomy fix (live product directive, verbatim): "Championship currently
+      // behaves as broad enrichment rather than a narrowing constraint. Football + Championship
+      // should strongly mean Championship football." These four are genuine, mutually exclusive
+      // English league TIERS — the same shape as a music genre or a cuisine, not a format/context
+      // pick like `watching_big_matches` or `local_football` below. Promoted from `t()` to `tn()`
+      // so a Crew that explicitly picks Championship (alongside Football) gets real contradiction
+      // protection against a confirmed Premier League/League One/Non-league match the same way a
+      // Rock Crew gets protection against a confirmed hip-hop one — see
+      // match.ts#contradictsCrewInterestPreference. Deliberately NOT related to each other via
+      // RELATED_INTERESTS: a Crew that specifically said Championship is saying they do NOT mean
+      // Premier League, not that the two are close siblings. `sport` staying outside
+      // TERRITORIES_REQUIRING_EXPLICIT_RELATION is untouched by this — a genre-blank SPORT
+      // candidate still surfaces via the existing safety net (crewSportCrossSuggestion.test.ts);
+      // this only sharpens what counts as a genuine, positive CONTRADICTION once evidence exists.
+      // Deliberately no synonym anywhere in this block contains the bare word "football" (beyond
+      // `premier_league`/`league_one_two`, which never did). Real regression this avoids: matching
+      // here is substring-based both ways (see `TasteInterest.synonyms`'s own doc comment), so a
+      // synonym like "Championship football" would let a provider's plain, generic `football`
+      // subcategory tag (zero real tier evidence) spuriously match a SPECIFIC tier via
+      // `synonym.includes(inputText)` — fabricating tier-specific evidence from a generic tag,
+      // exactly the fake-specificity the live directive's Rule 10 forbids, and (once these became
+      // `narrows: true`) enough to make a genuinely plain football fixture register as
+      // "contradicting" its own Crew's bare `football` pick. "Championship"/"Non-league" alone are
+      // already unambiguous UK football-tier terms and still match any real text that also happens
+      // to say "championship football" (that text still contains the substring "championship").
+      tn('premier_league', 'Premier League'),
+      tn('championship_football', 'Championship'),
+      tn('league_one_two', 'League One & Two', 'league one', 'league two'),
+      tn('non_league', 'Non-league'),
       t('womens_football', "Women's football"),
       t('international_football', 'International football', 'england matches', 'internationals'),
       t('champions_league', 'Champions League & Europe', 'europa league', 'champions league'),
